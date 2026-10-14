@@ -4,7 +4,9 @@ const { fromCents } = require('../utils/money');
 
 async function getAccountForUser(userId) {
   const { rows } = await pool.query(
-    `SELECT a.id, a.account_number, a.balance_cents, a.currency, u.full_name
+    `SELECT a.id, a.account_number, a.balance_cents, a.currency, u.full_name,
+            u.mpin_hash IS NOT NULL AS has_mpin,
+            GREATEST(0, CEIL(EXTRACT(EPOCH FROM (u.mpin_expires_at - now()))))::int AS mpin_seconds_left
      FROM accounts a
      JOIN users u ON u.id = a.user_id
      WHERE a.user_id = $1`,
@@ -24,6 +26,10 @@ async function getBalance(userId) {
     currency: account.currency,
     balance: fromCents(account.balance_cents),
     balanceCents: account.balance_cents,
+    // false for accounts created before random MPINs: the UI asks them to set one up.
+    hasMpin: account.has_mpin,
+    // Seconds until the MPIN expires (0 = expired; get a new one with the password).
+    mpinExpiresInSeconds: account.mpin_seconds_left ?? 0,
   };
 }
 

@@ -5,7 +5,8 @@
 
 ## Where it is
 
-`src/services/transferService.js`, in `transfer()`.
+`src/services/transferService.js`: `transfer()` calls `loadParties()` → `findSenderAccount()`.
+The MPIN and OTP checks run before this and don't prevent the bug.
 
 ## What goes wrong
 
@@ -17,7 +18,7 @@ The transfer does this inside a database transaction:
 4. `UPDATE accounts SET balance_cents = $1` using the **value computed in JavaScript**
 5. `UPDATE accounts SET balance_cents = balance_cents + $1` for the receiver
 
-When several requests arrive at the same moment (a user double-clicking "Send"):
+When several requests arrive at the same moment (a user double-clicking the MPIN "Confirm" button):
 
 | Time | Request A | Request B |
 |------|-----------|-----------|

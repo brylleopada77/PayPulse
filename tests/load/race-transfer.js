@@ -52,7 +52,7 @@ function createUser(name) {
   if (reg.status !== 201) throw new Error(`register failed: ${reg.status} ${reg.body}`);
   const login = http.post(`${BASE_URL}/api/auth/login`, JSON.stringify({ email, password }), json);
   if (login.status !== 200) throw new Error(`login failed: ${login.status} ${login.body}`);
-  return { accountNumber: reg.json('account.accountNumber'), token: login.json('token') };
+  return { accountNumber: reg.json('account.accountNumber'), token: login.json('token'), mpin: reg.json('mpin') };
 }
 
 function fund(accountNumber, amountCents) {
@@ -85,7 +85,7 @@ export function setup() {
 export default function ({ sender, receiver }) {
   const res = http.post(
     `${BASE_URL}/api/transfers`,
-    JSON.stringify({ toAccountNumber: receiver.accountNumber, amount: TRANSFER_AMOUNT }),
+    JSON.stringify({ toAccountNumber: receiver.accountNumber, amount: TRANSFER_AMOUNT, mpin: sender.mpin }),
     auth(sender.token),
   );
 

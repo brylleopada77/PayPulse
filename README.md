@@ -104,9 +104,12 @@ All bodies are JSON. Amounts are decimal numbers or strings with up to 2 decimal
 | GET | `/health` | – | – |
 | POST | `/api/auth/register` | – | `{ email, password, fullName }` |
 | POST | `/api/auth/login` | – | `{ email, password }` → `{ token }` |
+| POST | `/api/auth/password/forgot` | – | `{ email }` → `{ message, resetId, expiresInSeconds, demoCode }` |
+| POST | `/api/auth/password/reset` | – | `{ resetId, code, newPassword }` → `{ message }` |
 | GET | `/api/accounts/me` | Bearer | – → balance |
 | GET | `/api/accounts/me/transactions` | Bearer | – → ledger history |
-| POST | `/api/transfers` | Bearer | `{ toAccountNumber, amount, description? }` |
+| POST | `/api/accounts/me/mpin/reset` | Bearer | `{ password }` → `{ mpin }` ("Forgot MPIN") |
+| POST | `/api/transfers` | Bearer + MPIN | `{ toAccountNumber, amount, description?, mpin, otpChallengeId?, otp? }` (see below) |
 | POST | `/api/webhooks/payments` | HMAC signature | `{ paymentId, accountNumber, amount, status }` |
 | POST | `/api/payments/mock-checkout` | Bearer | `{ amount, outcome?: "approve" \| "decline" }` (used by the UI) |
 
@@ -122,6 +125,61 @@ curl -X POST localhost:3000/api/auth/login -H "Content-Type: application/json" \
 # Check balance (paste the token from login)
 curl localhost:3000/api/accounts/me -H "Authorization: Bearer <token>"
 ```
+
+### Forgot password
+
+1. `POST /api/auth/password/forgot` with `{ email }` returns a `resetId` and a 6-digit code
+   (`demoCode`; this is a **mock** email, and a real system would email the code instead).
+2. `POST /api/auth/password/reset` with `{ resetId, code, newPassword }` sets the new password.
+
+The code is valid for 10 minutes, allows 3 wrong tries and can be used once. The answers are
+identical whether or not the email has an account, so the endpoint can't be used to find out who
+is registered. Changing the password **signs out all existing sessions**: tokens issued before
+the change get `401` with "Your password was changed. Please log in again."
+
+| Status | `error.code` | Meaning |
+|--------|--------------|---------|
+| 400 | `INVALID_PASSWORD` | New password shorter than 8 characters |
+| 403 | `INVALID_RESET_CODE` | Wrong, used or unknown code (message says how many tries are left) |
+| 410 | `RESET_CODE_EXPIRED` | Older than 10 minutes; request a new code |
+| 429 | `RESET_ATTEMPTS_EXCEEDED` | 3 wrong codes; request a new code |
+
+### Transfer security: MPIN and OTP
+
+**MPIN.** Every transfer needs the sender's 6-digit `mpin`. Each user gets their **own random
+MPIN** at sign-up: `POST /api/auth/register` returns it once as `mpin`, and only a bcrypt hash
+is stored. An MPIN **expires 5 minutes after it is issued** (`mpinExpiresInSeconds: 300`;
+`GET /api/accounts/me` reports the seconds left); after that, get a new one with the password.
+Five wrong MPINs in a row lock transfers for 5 minutes.
+
+**Forgot MPIN.** `POST /api/accounts/me/mpin/reset` with `{ password }` (Bearer auth) checks the
+account password, replaces the MPIN with a new random one, clears any lock, and returns
+`{ mpin, mpinExpiresInSeconds }`.
+
+**OTP above ₱1,000.** For amounts **greater than ₱1,000.00** the transfer takes two calls:
+
+1. Send the transfer with `mpin` → **202** `{ otpRequired: true, challengeId, expiresInSeconds: 30, demoCode }`.
+   No money moves yet.
+2. Send the **same** transfer again with `mpin`, `otpChallengeId` and `otp` → **201**, transfer done.
+
+The code is valid for 30 seconds, allows 3 wrong tries, can be used once, and only works for
+the recipient and amount it was issued for. This is a **mock** 2FA: a real system would text the
+code to the user instead of returning `demoCode`.
+
+| Status | `error.code` | Meaning |
+|--------|--------------|---------|
+| 400 | `MPIN_REQUIRED` | No `mpin` sent |
+| 403 | `INVALID_MPIN` | Wrong MPIN (message: `Invalid MPIN`) |
+| 410 | `MPIN_EXPIRED` | MPIN is older than 5 minutes; get a new one with the password |
+| 403 | `MPIN_NOT_SET` | Account was created before random MPINs; use Forgot MPIN |
+| 423 | `MPIN_LOCKED` | Too many wrong MPINs; wait 5 minutes or use Forgot MPIN |
+| 403 | `INVALID_PASSWORD` | Forgot MPIN: wrong account password |
+| 403 | `INVALID_OTP` | Wrong code (message says how many tries are left) |
+| 403 | `OTP_MISMATCH` | Code was issued for a different recipient or amount |
+| 403 | `INVALID_OTP_CHALLENGE` | Unknown challenge, or it belongs to another user |
+| 409 | `OTP_ALREADY_USED` | Code was already used |
+| 410 | `OTP_EXPIRED` | More than 30 seconds passed; start again |
+| 429 | `OTP_ATTEMPTS_EXCEEDED` | 3 wrong codes; start again |
 
 ### Payment webhook
 
@@ -149,11 +207,15 @@ uses the same API as the tests:
   result. It calls `/api/payments/mock-checkout`, which signs a provider callback and runs it
   through the real webhook handler.
 - **Send**: transfer to another account number (find it on the wallet card, with a Copy button).
+  Then enter your MPIN in the PIN pad. It is shown once right after sign-up; **Forgot MPIN?**
+  gives a new one after you re-enter your password. Above ₱1,000 an OTP screen follows, with a
+  30-second countdown, a **Resend code** button, and a mock SMS banner that shows the code.
 - **Recent activity**: the wallet's ledger entries; refreshes every 10 seconds.
 
-The Send button is deliberately **not** disabled while a request is in flight, so a fast
-double-click can reproduce the race-condition bug from the browser. Elements carry
-`data-testid` attributes for UI automation.
+The MPIN **Confirm** button is deliberately **not** disabled while a request is in flight, so a
+fast double-click can reproduce the race-condition bug from the browser (for amounts up to
+₱1,000; above that the single-use OTP blocks duplicates). Elements carry `data-testid`
+attributes for UI automation.
 
 ### Error format
 

@@ -30,6 +30,7 @@
         <label>Password
           <input name="password" type="password" autocomplete="current-password" required data-testid="login-password">
         </label>
+        <button type="button" class="btn link forgot-link" id="forgot-password" data-testid="forgot-password">Forgot password?</button>
         <p class="form-error" role="alert"></p>
         <button type="submit" class="btn primary" data-testid="login-submit">Log in</button>
       </form>
@@ -49,6 +50,43 @@
       </form>
     </section>
   </main>
+
+  <!-- ============ Forgot password ============ -->
+  <dialog id="password-reset-dialog" class="sheet" data-testid="password-reset-dialog">
+    <!-- Step 1: ask for the email -->
+    <form id="pw-request-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2>Reset your password</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary">Enter the email you signed up with and we'll send you a 6-digit code.</p>
+      <label>Email
+        <input name="email" type="email" autocomplete="email" required data-testid="pw-reset-email">
+      </label>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="pw-request-submit">Send code</button>
+    </form>
+
+    <!-- Step 2: code + new password -->
+    <form id="pw-reset-form" class="form" novalidate hidden>
+      <header class="sheet-head">
+        <h2>Reset your password</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary" id="pw-reset-sent"></p>
+      <div class="code-input" id="pw-code-input" data-length="6" aria-label="6-digit code" data-testid="pw-code-input"></div>
+      <p class="countdown" id="pw-code-timer" aria-live="polite" data-testid="pw-code-timer"></p>
+      <label>New password <span class="hint">at least 8 characters</span>
+        <input name="newPassword" type="password" autocomplete="new-password" minlength="8" required data-testid="pw-new-password">
+      </label>
+      <label>Confirm new password
+        <input name="confirmPassword" type="password" autocomplete="new-password" required data-testid="pw-confirm-password">
+      </label>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" id="pw-reset-submit" data-testid="pw-reset-submit">Change password</button>
+      <button type="button" class="btn link" id="pw-resend" data-testid="pw-resend">Send a new code</button>
+    </form>
+  </dialog>
 
   <!-- ============ Wallet ============ -->
   <div id="app-view" hidden>
@@ -110,11 +148,80 @@
         <input name="description" maxlength="140" placeholder="Lunch, rent, ..." data-testid="send-note">
       </label>
       <p class="form-error" role="alert"></p>
-      <!-- Intentionally NOT disabled while the request is in flight (see QA_NOTES.md):
-           double-clicking sends duplicate transfers and exposes the backend race condition. -->
-      <button type="submit" class="btn primary" data-testid="send-submit">Send now</button>
+      <p class="hint">Transfers above ₱1,000 also need a one-time code (OTP).</p>
+      <button type="submit" class="btn primary" data-testid="send-submit">Continue</button>
     </form>
   </dialog>
+
+  <!-- ============ MPIN ============ -->
+  <dialog id="mpin-dialog" class="sheet" data-testid="mpin-dialog">
+    <form id="mpin-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2>Enter your MPIN</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary" id="mpin-summary" data-testid="mpin-summary"></p>
+      <div class="code-input" id="mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="mpin-input"></div>
+      <p class="countdown" id="mpin-pad-timer" data-testid="mpin-pad-timer"></p>
+      <button type="button" class="btn link" id="forgot-mpin" data-testid="forgot-mpin">Forgot MPIN?</button>
+      <p class="form-error" role="alert"></p>
+      <!-- Intentionally NOT disabled while the request is in flight (see QA_NOTES.md):
+           double-clicking sends duplicate transfers and exposes the backend race condition. -->
+      <button type="submit" class="btn primary" data-testid="mpin-submit">Confirm</button>
+    </form>
+  </dialog>
+
+  <!-- ============ Your MPIN (shown once) ============ -->
+  <dialog id="mpin-reveal-dialog" class="sheet" data-testid="mpin-reveal-dialog">
+    <div class="form">
+      <header class="sheet-head">
+        <h2>Your MPIN</h2>
+      </header>
+      <p class="summary">Use this 6-digit MPIN to confirm every transfer.</p>
+      <p class="mpin-reveal" id="mpin-reveal" data-testid="mpin-reveal"></p>
+      <p class="countdown" id="mpin-reveal-timer" aria-live="polite" data-testid="mpin-reveal-timer"></p>
+      <p class="warning">It will <strong>not</strong> be shown again and works for <strong>5 minutes</strong>. After that, get a new one with your password. PayPulse will never ask you for your MPIN.</p>
+      <button type="button" class="btn primary" id="mpin-saved" data-testid="mpin-saved">I've saved my MPIN</button>
+    </div>
+  </dialog>
+
+  <!-- ============ Forgot MPIN ============ -->
+  <dialog id="mpin-reset-dialog" class="sheet" data-testid="mpin-reset-dialog">
+    <form id="mpin-reset-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2 id="mpin-reset-title">Forgot MPIN</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary" id="mpin-reset-text">Enter your account password and we'll give you a new random MPIN.</p>
+      <label>Password
+        <input name="password" type="password" autocomplete="current-password" required data-testid="mpin-reset-password">
+      </label>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="mpin-reset-submit">Get a new MPIN</button>
+    </form>
+  </dialog>
+
+  <!-- ============ OTP (mock 2FA) ============ -->
+  <dialog id="otp-dialog" class="sheet" data-testid="otp-dialog">
+    <form id="otp-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2>Verify it's you</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary">Enter the 6-digit code sent to your mobile number</p>
+      <div class="code-input" id="otp-input" data-length="6" aria-label="6-digit code" data-testid="otp-input"></div>
+      <p class="countdown" id="otp-timer" aria-live="polite" data-testid="otp-timer"></p>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" id="otp-submit" data-testid="otp-submit">Verify &amp; send</button>
+      <button type="button" class="btn link" id="otp-resend" data-testid="otp-resend" disabled>Resend code</button>
+    </form>
+  </dialog>
+
+  <!-- Mock SMS: stands in for the text message a real provider would send. -->
+  <div id="sms" class="sms" role="status" data-testid="mock-sms" popover="manual">
+    <div class="sms-head"><span class="sms-app" id="sms-app">💬 Messages</span><span>now</span></div>
+    <p id="sms-text"></p>
+  </div>
 
   <!-- ============ Add money (mock checkout) ============ -->
   <dialog id="topup-dialog" class="sheet" data-testid="topup-dialog">
@@ -146,7 +253,7 @@
     </form>
   </dialog>
 
-  <div id="toast" class="toast" role="status" aria-live="polite" data-testid="toast" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" data-testid="toast" popover="manual"></div>
 
   <script src="app.js"></script>
 </body>

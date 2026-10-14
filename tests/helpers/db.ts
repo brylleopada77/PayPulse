@@ -117,3 +117,29 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
     return report;
   });
 }
+
+/** Test hook: make an OTP challenge expire now instead of waiting 30 seconds. */
+export async function expireOtpChallenge(challengeId: string): Promise<void> {
+  await withClient((client) =>
+    client.query("UPDATE otp_challenges SET expires_at = now() - interval '1 second' WHERE id = $1", [challengeId]),
+  );
+}
+
+/** Test hook: simulate an account created before MPINs existed (no MPIN set). */
+export async function clearMpin(email: string): Promise<void> {
+  await withClient((client) => client.query('UPDATE users SET mpin_hash = NULL WHERE email = $1', [email]));
+}
+
+/** Test hook: make a user's MPIN expire now instead of waiting 5 minutes. */
+export async function expireMpin(email: string): Promise<void> {
+  await withClient((client) =>
+    client.query("UPDATE users SET mpin_expires_at = now() - interval '1 second' WHERE email = $1", [email]),
+  );
+}
+
+/** Test hook: make a password-reset code expire now instead of waiting 10 minutes. */
+export async function expirePasswordReset(resetId: string): Promise<void> {
+  await withClient((client) =>
+    client.query("UPDATE password_resets SET expires_at = now() - interval '1 second' WHERE id = $1", [resetId]),
+  );
+}

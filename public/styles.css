@@ -55,6 +55,19 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
 }
 .form input:focus, .form select:focus { outline: 2px solid var(--brand); outline-offset: 1px; border-color: transparent; }
+.password-field { position: relative; display: grid; }
+.form .password-field input { padding-right: 48px; }
+.password-toggle {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  width: 36px; height: 36px; display: grid; place-items: center;
+  border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.password-toggle:hover { color: var(--text); background: var(--bg); }
+.password-toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.password-toggle svg {
+  width: 20px; height: 20px; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
 .hint { color: var(--muted); font-weight: 400; font-size: 0.8rem; }
 .form-error { color: var(--danger); font-size: 0.875rem; margin: 0; min-height: 1.2em; }
 
@@ -140,9 +153,41 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 }
 .form label.inline { font-weight: 400; color: var(--muted); }
 
+/* ---------- MPIN / OTP ---------- */
+.summary { margin: 0; color: var(--muted); text-align: center; }
+.summary strong { color: var(--text); }
+.mpin-reveal {
+  margin: 4px 0; text-align: center; font-size: 2.4rem; font-weight: 700; letter-spacing: 0.35em;
+  padding: 14px 0 14px 0.35em; border-radius: 14px; background: #f0eeff; color: var(--brand-dark);
+  font-variant-numeric: tabular-nums; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.warning { margin: 0; padding: 10px 12px; border-radius: 10px; background: #fff4d6; color: #6b4600; font-size: 0.88rem; }
+.code-input { display: flex; justify-content: center; gap: 8px; }
+.form .code-input input {
+  width: 46px; height: 54px; padding: 0; text-align: center;
+  font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.countdown { margin: 0; text-align: center; font-weight: 600; color: var(--brand); font-variant-numeric: tabular-nums; }
+.countdown.expired { color: var(--danger); }
+.countdown.warn { color: #b26a00; }
+.btn.link { background: transparent; color: var(--brand); padding: 4px; }
+.btn.link.forgot-link { justify-self: end; margin-top: -8px; font-size: 0.875rem; }
+.btn.link:disabled { color: var(--muted); cursor: not-allowed; opacity: 0.7; }
+.btn.primary:disabled { background: #b9b4f5; cursor: not-allowed; }
+
+.sms {
+  position: fixed; inset: auto; margin: 0; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20;
+  width: min(380px, calc(100vw - 32px)); padding: 12px 14px; border-radius: 16px;
+  background: rgba(250, 250, 252, 0.97); color: var(--text);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22); border: 1px solid var(--border);
+}
+.sms-head { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted); }
+.sms-app { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.sms p { margin: 6px 0 0; font-size: 0.92rem; }
+
 /* ---------- Toast ---------- */
 .toast {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  position: fixed; inset: auto; margin: 0; border: 0; left: 50%; bottom: 24px; transform: translateX(-50%);
   background: var(--text); color: #fff; padding: 12px 18px; border-radius: 12px;
   box-shadow: var(--shadow); max-width: calc(100vw - 32px); font-weight: 500; z-index: 10;
 }

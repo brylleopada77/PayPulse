@@ -9,6 +9,8 @@ export interface TestUser {
   fullName: string;
   accountNumber: string;
   token: string;
+  /** The random MPIN returned once at registration. */
+  mpin: string;
 }
 
 export function uniqueEmail(prefix = 'qa'): string {
@@ -28,13 +30,13 @@ export async function createUser(request: APIRequestContext, name = 'QA User'): 
     data: { email, password, fullName: name },
   });
   expect(register.status(), await register.text()).toBe(201);
-  const { account } = await register.json();
+  const { account, mpin } = await register.json();
 
   const login = await request.post('/api/auth/login', { data: { email, password } });
   expect(login.status(), await login.text()).toBe(200);
   const { token } = await login.json();
 
-  return { email, password, fullName: name, accountNumber: account.accountNumber, token };
+  return { email, password, fullName: name, accountNumber: account.accountNumber, token, mpin };
 }
 
 /** Send a correctly signed payment webhook. Returns the raw response. */
@@ -70,10 +72,24 @@ export async function getBalanceCents(request: APIRequestContext, user: TestUser
   return (await response.json()).balanceCents;
 }
 
-export function transfer(
-  request: APIRequestContext,
-  from: TestUser,
-  data: { toAccountNumber: unknown; amount: unknown; description?: string },
-) {
-  return request.post('/api/transfers', { data, headers: authHeader(from.token) });
+export interface TransferData {
+  toAccountNumber: unknown;
+  amount: unknown;
+  description?: string;
+  mpin?: unknown;
+  otpChallengeId?: unknown;
+  otp?: unknown;
+}
+
+/** POST /api/transfers. Sends the sender's own MPIN unless the test passes its own `mpin`. */
+export function transfer(request: APIRequestContext, from: TestUser, data: TransferData) {
+  return request.post('/api/transfers', {
+    data: { mpin: from.mpin, ...data },
+    headers: authHeader(from.token),
+  });
+}
+
+/** A well-formed MPIN that is guaranteed to be wrong for this user. */
+export function wrongMpinFor(user: TestUser): string {
+  return user.mpin === '000000' ? '111111' : '000000';
 }

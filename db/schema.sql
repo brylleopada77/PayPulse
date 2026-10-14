@@ -69,3 +69,44 @@ CREATE TABLE IF NOT EXISTS payments (
 INSERT INTO accounts (account_number, is_system)
 VALUES ('SYS-EXTERNAL-FUNDING', true)
 ON CONFLICT (account_number) DO NOTHING;
+
+-- ---------- Transfer security: MPIN + OTP ----------
+
+-- MPIN: a random 6-digit PIN given at sign-up (bcrypt hash). NULL = never set (older accounts).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mpin_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mpin_failed_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mpin_locked_until TIMESTAMPTZ;
+-- An MPIN is only valid for a few minutes after it is issued; then the user gets a new one.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mpin_expires_at TIMESTAMPTZ;
+
+-- One-time codes for large transfers. Each code is bound to one recipient + amount.
+CREATE TABLE IF NOT EXISTS otp_challenges (
+  id              UUID        PRIMARY KEY,
+  user_id         INTEGER     NOT NULL REFERENCES users (id),
+  code_hash       TEXT        NOT NULL,
+  to_account      TEXT        NOT NULL,
+  amount_cents    BIGINT      NOT NULL CHECK (amount_cents > 0),
+  attempts        INTEGER     NOT NULL DEFAULT 0,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  used_at         TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_otp_challenges_user ON otp_challenges (user_id);
+
+-- ---------- Forgot password ----------
+
+-- Tokens issued before this moment are rejected, so a password change signs out old sessions.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
+
+-- One-time codes for resetting a password. user_id is NULL when the email was unknown:
+-- the request is still stored so unknown and known emails behave the same (no account probing).
+CREATE TABLE IF NOT EXISTS password_resets (
+  id          UUID        PRIMARY KEY,
+  user_id     INTEGER     REFERENCES users (id),
+  code_hash   TEXT        NOT NULL,
+  attempts    INTEGER     NOT NULL DEFAULT 0,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
