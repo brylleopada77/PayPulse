@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayPulse Wallet</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%235b4cf0'/><path d='M6 17h5l3-7 4 13 3-6h5' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- ============ Sign in / Sign up ============ -->
+  <main id="auth-view" class="auth" hidden>
+    <section class="auth-card">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <span class="brand-name">PayPulse</span>
+      </div>
+      <p class="tagline">Send and receive money in seconds.</p>
+      <p class="demo-note">Demo app for QA practice: balances are play money. Don't reuse a real password.</p>
+
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="login" role="tab" data-testid="tab-login">Log in</button>
+        <button type="button" class="tab" data-tab="register" role="tab" data-testid="tab-register">Create account</button>
+      </div>
+
+      <form id="login-form" class="form" data-testid="login-form" novalidate>
+        <label>Email
+          <input name="email" type="email" autocomplete="email" required data-testid="login-email">
+        </label>
+        <label>Password
+          <input name="password" type="password" autocomplete="current-password" required data-testid="login-password">
+        </label>
+        <p class="form-error" role="alert"></p>
+        <button type="submit" class="btn primary" data-testid="login-submit">Log in</button>
+      </form>
+
+      <form id="register-form" class="form" data-testid="register-form" novalidate hidden>
+        <label>Full name
+          <input name="fullName" autocomplete="name" required data-testid="register-name">
+        </label>
+        <label>Email
+          <input name="email" type="email" autocomplete="email" required data-testid="register-email">
+        </label>
+        <label>Password <span class="hint">at least 8 characters</span>
+          <input name="password" type="password" autocomplete="new-password" minlength="8" required data-testid="register-password">
+        </label>
+        <p class="form-error" role="alert"></p>
+        <button type="submit" class="btn primary" data-testid="register-submit">Create account</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- ============ Wallet ============ -->
+  <div id="app-view" hidden>
+    <header class="topbar">
+      <div class="brand small">
+        <span class="logo" aria-hidden="true"></span>
+        <span class="brand-name">PayPulse</span>
+      </div>
+      <div class="user">
+        <span id="user-name" data-testid="user-name"></span>
+        <button type="button" id="logout-btn" class="btn ghost" data-testid="logout">Log out</button>
+      </div>
+    </header>
+
+    <main class="wallet">
+      <section class="balance-card" aria-label="Wallet balance">
+        <p class="label">Available balance</p>
+        <p class="balance"><span id="balance" data-testid="balance">—</span></p>
+        <div class="account-row">
+          <span>Account no.</span>
+          <code id="account-number" data-testid="account-number">—</code>
+          <button type="button" id="copy-btn" class="chip" data-testid="copy-account">Copy</button>
+        </div>
+        <div class="actions">
+          <button type="button" class="action" data-open="send-dialog" data-testid="open-send">
+            <span class="icon" aria-hidden="true">↗</span>Send
+          </button>
+          <button type="button" class="action" data-open="topup-dialog" data-testid="open-topup">
+            <span class="icon" aria-hidden="true">＋</span>Add money
+          </button>
+          <button type="button" class="action" id="refresh-btn" data-testid="refresh">
+            <span class="icon" aria-hidden="true">⟳</span>Refresh
+          </button>
+        </div>
+      </section>
+
+      <section class="activity">
+        <h2>Recent activity</h2>
+        <ul id="tx-list" class="tx-list" data-testid="tx-list"></ul>
+        <p id="tx-empty" class="empty" hidden>No transactions yet. Add money to get started.</p>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ Send money ============ -->
+  <dialog id="send-dialog" class="sheet" data-testid="send-dialog">
+    <form id="send-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2>Send money</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <label>Recipient account number
+        <input name="toAccountNumber" placeholder="PP1000000002" autocomplete="off" required data-testid="send-to">
+      </label>
+      <label>Amount (₱)
+        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="send-amount">
+      </label>
+      <label>Note <span class="hint">optional</span>
+        <input name="description" maxlength="140" placeholder="Lunch, rent, ..." data-testid="send-note">
+      </label>
+      <p class="form-error" role="alert"></p>
+      <!-- Intentionally NOT disabled while the request is in flight (see QA_NOTES.md):
+           double-clicking sends duplicate transfers and exposes the backend race condition. -->
+      <button type="submit" class="btn primary" data-testid="send-submit">Send now</button>
+    </form>
+  </dialog>
+
+  <!-- ============ Add money (mock checkout) ============ -->
+  <dialog id="topup-dialog" class="sheet" data-testid="topup-dialog">
+    <form id="topup-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2>Add money</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <div class="quick-amounts">
+        <button type="button" class="chip" data-amount="100">₱100</button>
+        <button type="button" class="chip" data-amount="500">₱500</button>
+        <button type="button" class="chip" data-amount="1000">₱1,000</button>
+      </div>
+      <label>Amount (₱)
+        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="topup-amount">
+      </label>
+      <div class="mock-card">
+        <span class="test-badge">TEST MODE</span>
+        <p>Mock card •••• 4242</p>
+        <label class="inline">Simulated result
+          <select name="outcome" data-testid="topup-outcome">
+            <option value="approve">Approve payment</option>
+            <option value="decline">Decline payment</option>
+          </select>
+        </label>
+      </div>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="topup-submit">Pay</button>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" data-testid="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

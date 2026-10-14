@@ -10,6 +10,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy application code
 COPY src ./src
+COPY public ./public
 COPY db ./db
 COPY scripts ./scripts
 

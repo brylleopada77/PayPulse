@@ -1,0 +1,29 @@
+# Render Blueprint: deploys the PayPulse web app + a PostgreSQL database.
+# Render dashboard -> New -> Blueprint -> pick this repository.
+services:
+  - type: web
+    name: paypulse
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    # db:init is idempotent, so it is safe to create/upgrade tables on every start.
+    startCommand: npm run db:init && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: paypulse-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: WEBHOOK_SECRET
+        generateValue: true
+
+databases:
+  - name: paypulse-db
+    plan: free
+    databaseName: paypulse
+    user: paypulse
+    postgresMajorVersion: "17"

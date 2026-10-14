@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const { pool } = require('./db/pool');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
@@ -6,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const accountRoutes = require('./routes/accounts');
 const transferRoutes = require('./routes/transfers');
 const webhookRoutes = require('./routes/webhooks');
+const paymentRoutes = require('./routes/payments');
 
 const app = express();
 
@@ -18,6 +20,9 @@ app.use(
     },
   }),
 );
+
+// Web UI (plain HTML/CSS/JS, no build step)
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 app.get('/health', async (req, res) => {
   try {
@@ -32,6 +37,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/transfers', transferRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/payments', paymentRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
