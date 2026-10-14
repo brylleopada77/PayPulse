@@ -1,4 +1,4 @@
-name: PayPulse Tests
+﻿name: PayPulse Tests
 
 on:
   pull_request:
@@ -26,10 +26,10 @@ jobs:
 
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -78,7 +78,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: paypulse-test-reports
           path: |
