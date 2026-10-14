@@ -1,0 +1,39 @@
+/**
+ * Command-line ledger check. Exits with code 1 if the money doesn't add up.
+ * Usage: npm run db:check
+ */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { checkLedgerIntegrity, DATABASE_URL } from './db';
+
+const cents = (value: number) => (value / 100).toFixed(2);
+
+async function main() {
+  console.log(`Checking ledger integrity on ${DATABASE_URL.replace(/:[^:@/]+@/, ':****@')}\n`);
+  const report = await checkLedgerIntegrity();
+
+  mkdirSync('reports', { recursive: true });
+  writeFileSync('reports/db-integrity.json', JSON.stringify(report, null, 2));
+
+  const line = (pass: boolean, text: string) => console.log(`${pass ? 'PASS' : 'FAIL'}  ${text}`);
+
+  line(report.totalBalanceCents === 0, `Sum of all balances is 0 (actual: ${cents(report.totalBalanceCents)})`);
+  line(
+    report.userBalanceCents === report.totalDepositsCents,
+    `User wallets (${cents(report.userBalanceCents)}) equal total top-ups (${cents(report.totalDepositsCents)})`,
+  );
+  line(report.unbalancedTransactions.length === 0, `Unbalanced transactions: ${report.unbalancedTransactions.length}`);
+  line(report.mismatchedAccounts.length === 0, `Accounts where cached balance != ledger: ${report.mismatchedAccounts.length}`);
+  line(report.negativeAccounts.length === 0, `Negative user balances: ${report.negativeAccounts.length}`);
+
+  for (const m of report.mismatchedAccounts.slice(0, 10)) {
+    console.log(`      ${m.accountNumber}: cached ${cents(m.cachedBalanceCents)}, ledger ${cents(m.ledgerBalanceCents)}`);
+  }
+
+  console.log(`\n${report.ok ? 'Ledger is balanced.' : 'LEDGER IS NOT BALANCED.'} Full report: reports/db-integrity.json`);
+  process.exit(report.ok ? 0 : 1);
+}
+
+main().catch((err) => {
+  console.error('db-check failed:', err.message);
+  process.exit(2);
+});
