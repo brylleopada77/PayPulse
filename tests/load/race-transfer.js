@@ -1,9 +1,10 @@
 /**
  * k6 concurrency test: 10 virtual users send the same transfer at the same moment.
  *
- * Sender starts with 100.00 and each transfer is 30.00, so at most 3 may succeed and the
- * total money of sender + receiver must stay 100.00. The thresholds fail the run when the
- * race-condition bug lets money be created.
+ * Sender starts with 100.00 and each transfer is 30.00, so at most 3 may succeed and the sender
+ * must never go below 0. Balances are computed from the immutable ledger, so money can't be
+ * created; the race-condition bug shows up as extra transfers that overdraw the sender. The
+ * thresholds fail the run when that happens (money_created_cents stays as a safety net).
  *
  * Run with Docker:  docker compose run --rm k6
  * Run locally:      k6 run -e BASE_URL=http://localhost:3000 tests/load/race-transfer.js
@@ -22,6 +23,7 @@ const TRANSFER_AMOUNT = 30;
 const successfulTransfers = new Counter('successful_transfers');
 const moneyCreatedCents = new Counter('money_created_cents');
 const overspentTransfers = new Counter('overspent_transfers');
+const overdrawnCents = new Counter('overdrawn_cents');
 
 export const options = {
   scenarios: {
@@ -37,6 +39,8 @@ export const options = {
     money_created_cents: ['count==0'],
     // No more transfers may succeed than the balance allows.
     overspent_transfers: ['count==0'],
+    // The sender's wallet must never go below zero.
+    overdrawn_cents: ['count==0'],
     // Every request must get a clean answer (201 or 422), never a 5xx.
     checks: ['rate==1'],
   },
@@ -106,4 +110,5 @@ export function teardown({ sender, receiver }) {
 
   moneyCreatedCents.add(Math.max(0, total - STARTING_BALANCE_CENTS));
   overspentTransfers.add(Math.max(0, receivedTransfers - maxAllowed));
+  overdrawnCents.add(Math.max(0, -senderBalance));
 }

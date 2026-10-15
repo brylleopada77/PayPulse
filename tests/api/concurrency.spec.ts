@@ -14,7 +14,7 @@ const PARALLEL_REQUESTS = 10;
 
 test.describe('Concurrency', () => {
   test('10 simultaneous transfers cannot spend more than the balance', async ({ request }) => {
-    test.fail(RACE_BUG_EXPECTED, 'Known bug: concurrent transfers can create money (QA_NOTES.md)');
+    test.fail(RACE_BUG_EXPECTED, 'Known bug: concurrent transfers can overdraw the wallet (QA_NOTES.md)');
 
     const sender = await createFundedUser(request, STARTING_BALANCE, 'Double Clicker');
     const receiver = await createUser(request, 'Lucky Receiver');
@@ -40,11 +40,14 @@ test.describe('Concurrency', () => {
         `Total: ${(senderBalance + receiverBalance) / 100} (should be ${STARTING_BALANCE})`,
     );
 
+    // Balances are computed from the immutable ledger, so money is never created or destroyed:
+    // the bug shows up as MORE transfers succeeding than the balance allows -> an overdraft.
     const maxPossible = Math.floor(STARTING_BALANCE / TRANSFER_AMOUNT);
     expect.soft(succeeded, 'more transfers succeeded than the balance allows').toBeLessThanOrEqual(maxPossible);
+    expect.soft(senderBalance, 'the sender wallet was overdrawn (balance below zero)').toBeGreaterThanOrEqual(0);
+    expect.soft(report.negativeAccounts, 'overdrawn wallets in the ledger').toEqual([]);
     expect.soft(succeeded + rejected, 'every request should be a 201, 422 or 429').toBe(PARALLEL_REQUESTS);
     expect.soft(senderBalance + receiverBalance, 'money was created or destroyed').toBe(STARTING_BALANCE * 100);
     expect.soft(senderBalance).toBe(STARTING_BALANCE * 100 - succeeded * TRANSFER_AMOUNT * 100);
-    expect.soft(report.mismatchedAccounts, 'cached balances disagree with the ledger').toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const accountService = require('../services/accountService');
 const mpinService = require('../services/mpinService');
 const receiptService = require('../services/receiptService');
+const complianceService = require('../services/complianceService');
 
 const router = express.Router();
 
@@ -21,6 +22,11 @@ router.get('/me/transactions', async (req, res) => {
 // GET /api/accounts/me/transactions/:id/receipt  -> receipt details (own transactions only)
 router.get('/me/transactions/:id/receipt', async (req, res) => {
   res.json(await receiptService.getReceipt(req.user.id, req.params.id));
+});
+
+// GET /api/accounts/me/compliance  -> AML status (CLEAR / UNDER_REVIEW), rules and my alerts
+router.get('/me/compliance', async (req, res) => {
+  res.json(await complianceService.getStatus(req.user.id));
 });
 
 // PUT /api/accounts/me/mobile  { mobileNumber }  -> { mobileNumber }  (add or change)

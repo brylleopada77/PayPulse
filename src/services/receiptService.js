@@ -1,5 +1,6 @@
 const { pool } = require('../db/pool');
 const { findBank } = require('./banks');
+const { nextCutoff } = require('./pesonetService');
 const { notFound } = require('../utils/errors');
 const { fromCents } = require('../utils/money');
 const { maskAccount, shortName } = require('../utils/privacy');
@@ -80,18 +81,33 @@ async function getReceipt(userId, transactionId) {
   }
 
   if (type === 'BANK_TRANSFER') {
-    const { rows } = await pool.query('SELECT * FROM bank_transfers WHERE transaction_id = $1', [id]);
+    const { rows } = await pool.query(
+      `SELECT bt.*, pm.msg_id, pm.uetr
+       FROM bank_transfers bt LEFT JOIN payment_messages pm ON pm.bank_transfer_id = bt.id
+       WHERE bt.transaction_id = $1`,
+      [id],
+    );
     const bt = rows[0];
+    const queued = bt.status === 'QUEUED';
     return {
       ...receipt,
-      title: 'Transfer Successful',
+      title: queued ? 'Transfer Submitted' : 'Transfer Successful',
+      status: queued ? 'PENDING_SETTLEMENT' : 'SUCCESSFUL',
       amount: fromCents(bt.amount_cents),
       fee: fromCents(bt.fee_cents),
-      total: fromCents(bt.amount_cents + bt.fee_cents),
+      total: fromCents(Number(bt.amount_cents) + Number(bt.fee_cents)),
       sender: party(mine),
       recipient: { name: bt.account_name, account: maskAccount(bt.account_number) },
       bankName: findBank(bt.bank_code)?.name ?? bt.bank_code,
       bankReference: bt.reference,
+      rail: bt.rail,
+      settlement: {
+        status: bt.status,
+        settledAt: bt.settled_at,
+        batchId: bt.batch_id,
+        expectedAt: queued ? nextCutoff() : null,
+      },
+      iso20022: bt.msg_id ? { messageType: 'pacs.008.001.08', msgId: bt.msg_id, uetr: bt.uetr } : null,
     };
   }
 

@@ -24,14 +24,15 @@ async function main() {
       `(${cents(report.totalDepositsCents)} - ${cents(report.bankOutflowCents)} + ${cents(report.qaAdjustmentCents)} = ${cents(expectedUsers)})`,
   );
   line(report.unbalancedTransactions.length === 0, `Unbalanced transactions: ${report.unbalancedTransactions.length}`);
-  line(report.mismatchedAccounts.length === 0, `Accounts where cached balance != ledger: ${report.mismatchedAccounts.length}`);
-  line(report.negativeAccounts.length === 0, `Negative user balances: ${report.negativeAccounts.length}`);
-
-  for (const m of report.mismatchedAccounts.slice(0, 10)) {
-    console.log(`      ${m.accountNumber}: cached ${cents(m.cachedBalanceCents)}, ledger ${cents(m.ledgerBalanceCents)}`);
+  line(
+    report.negativeAccounts.length === 0,
+    `Overdrawn customer wallets (balance < 0): ${report.negativeAccounts.length}`,
+  );
+  if (report.negativeAccounts.length > 0) {
+    console.log(`      e.g. ${report.negativeAccounts.slice(0, 5).join(', ')}`);
   }
 
-  console.log(`\n${report.ok ? 'Ledger is balanced.' : 'LEDGER IS NOT BALANCED.'} Full report: reports/db-integrity.json`);
+  console.log(`\n${report.ok ? 'Ledger is consistent.' : 'LEDGER CHECK FAILED.'} Full report: reports/db-integrity.json`);
   process.exit(report.ok ? 0 : 1);
 }
 

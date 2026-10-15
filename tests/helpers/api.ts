@@ -115,6 +115,9 @@ export interface BankTransferData {
   accountNumber: unknown;
   accountName: unknown;
   amount: unknown;
+  /** 'INSTAPAY' (default) or 'PESONET' */
+  rail?: unknown;
+  description?: string;
   mpin?: unknown;
   otpChallengeId?: unknown;
   otp?: unknown;

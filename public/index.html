@@ -113,6 +113,7 @@
           Available balance
           <button type="button" id="balance-toggle" class="balance-toggle" data-testid="balance-toggle"></button>
           <span class="frozen-badge" id="frozen-badge" data-testid="frozen-badge" hidden>❄ Frozen</span>
+          <span class="frozen-badge aml-badge" id="aml-badge" data-testid="aml-badge" hidden>⚠ Under review</span>
         </p>
         <p class="balance"><span id="balance" data-testid="balance">—</span></p>
         <div class="account-row">
@@ -201,6 +202,12 @@
       </label>
       <label><span id="bank-account-label">Account number</span>
         <input name="accountNumber" autocomplete="off" required data-testid="bank-account">
+      </label>
+      <label>Transfer speed
+        <select name="rail" data-testid="bank-rail">
+          <option value="INSTAPAY">InstaPay: instant (up to ₱50,000)</option>
+          <option value="PESONET">PESONet: batch, settles at the next cut-off</option>
+        </select>
       </label>
       <label>Account name <span class="hint">as registered with the bank</span>
         <input name="accountName" autocomplete="off" maxlength="100" required data-testid="bank-account-name">
@@ -304,6 +311,7 @@
       </div>
       <dl class="review receipt-rows" id="receipt-rows" data-testid="receipt-rows"></dl>
       <p class="receipt-note">PayPulse demo receipt. Amounts are play money.</p>
+      <button type="button" class="btn link" id="receipt-iso" data-testid="receipt-iso" hidden>View ISO 20022 message (pacs.008)</button>
       <div class="receipt-actions">
         <button type="button" class="btn secondary" id="receipt-download" data-testid="receipt-download">Download / Save Receipt</button>
         <button type="button" class="btn primary" id="receipt-done" data-testid="receipt-done">Done</button>
@@ -479,6 +487,10 @@
       <input type="checkbox" id="qa-freeze" data-testid="qa-freeze">
       <span><strong>Freeze account</strong><small>Sending money is blocked (423 ACCOUNT_FROZEN)</small></span>
     </label>
+    <div class="qa-actions">
+      <button type="button" class="btn secondary" id="qa-pesonet" data-testid="qa-pesonet">Run PESONet cut-off now</button>
+      <button type="button" class="btn secondary" id="qa-clear-aml" data-testid="qa-clear-aml">Clear compliance hold</button>
+    </div>
     <button type="button" class="btn secondary" id="qa-reset" data-testid="qa-reset">Reset account state</button>
     <p class="qa-status" id="qa-status" data-testid="qa-status" aria-live="polite"></p>
   </aside>

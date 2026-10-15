@@ -39,6 +39,7 @@
     if (!res.ok) {
       const err = new Error(data.error?.message || `Request failed (${res.status})`);
       err.code = data.error?.code;
+      err.details = data.error?.details;
       err.status = res.status;
       throw err;
     }
@@ -313,6 +314,7 @@
     renderBalance();
     $('#account-number').textContent = account.accountNumber;
     $('#frozen-badge').hidden = !account.frozen;
+    $('#aml-badge').hidden = account.amlStatus !== 'UNDER_REVIEW';
     renderTransactions(history.transactions);
     if (qaEnabled) refreshQaState().catch(() => {});
   }
@@ -352,8 +354,9 @@
       const meta = document.createElement('div');
       meta.className = 'tx-date';
       const bt = tx.bankTransfer;
+      const pending = bt?.status === 'QUEUED' ? ' · PESONet: pending cut-off' : '';
       meta.textContent = bt
-        ? `${bt.accountName} ${bt.accountNumber} · ${money(bt.amount)} + ${money(bt.fee)} fee · ${formatDate(tx.createdAt)}`
+        ? `${bt.accountName} ${bt.accountNumber} · ${money(bt.amount)} + ${money(bt.fee)} fee${pending} · ${formatDate(tx.createdAt)}`
         : `${tx.description} · ${formatDate(tx.createdAt)}`;
       info.append(titleEl, meta);
 
@@ -566,17 +569,28 @@
 
   let bankInfo = null; // { feeCents, banks: [{ code, name, accountType }] }
 
+  const CUTOFF_TIME = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
+
+  /** Bank list, fee and the next PESONet cut-off (fetched each time Bank Transfer opens). */
   async function loadBanks() {
-    if (bankInfo) return;
+    const firstLoad = !bankInfo;
     try {
       bankInfo = await api('/api/transfers/banks');
     } catch {
-      bankInfo = { feeCents: 1500, banks: [] };
+      bankInfo ??= { feeCents: 1500, banks: [], pesonetNextCutoffAt: null };
     }
-    $('#bank-form').elements.bankCode.replaceChildren(
-      ...bankInfo.banks.map((b) => Object.assign(document.createElement('option'), { value: b.code, textContent: b.name })),
-    );
+    if (firstLoad) {
+      bankForm.elements.bankCode.replaceChildren(
+        ...bankInfo.banks.map((b) => Object.assign(document.createElement('option'), { value: b.code, textContent: b.name })),
+      );
+    }
+    if (bankInfo.pesonetNextCutoffAt) {
+      bankForm.elements.rail.querySelector('option[value="PESONET"]').textContent =
+        `PESONet: batch, next cut-off ${CUTOFF_TIME.format(new Date(bankInfo.pesonetNextCutoffAt))}`;
+    }
   }
+
+  const RAIL_NAMES = { INSTAPAY: 'InstaPay (instant)', PESONET: 'PESONet (batch)' };
 
   const selectedBank = () => bankInfo?.banks.find((b) => b.code === bankForm.elements.bankCode.value);
 
@@ -642,7 +656,7 @@
 
   bankForm.addEventListener('submit', (event) => {
     event.preventDefault();
-    const { accountNumber, accountName, amount } = formData(bankForm);
+    const { accountNumber, accountName, amount, rail } = formData(bankForm);
     const bank = selectedBank();
     setFormError(bankForm);
 
@@ -657,10 +671,11 @@
     showReview({
       method: 'bank',
       endpoint: '/api/transfers/bank',
-      body: { bankCode: bank.code, accountNumber: account, accountName: accountName.trim(), amount: amount.trim() },
+      body: { bankCode: bank.code, accountNumber: account, accountName: accountName.trim(), amount: amount.trim(), rail },
       summary: `${bank.name} ••••${account.slice(-4)}`,
       rows: [
         ['Send via', 'Bank Transfer'],
+        ['Transfer speed', RAIL_NAMES[rail]],
         ['Bank', bank.name],
         [bank.accountType === 'MOBILE' ? 'Mobile number' : 'Account no.', account],
         ['Account name', accountName.trim()],
@@ -769,15 +784,22 @@
       } else if (err.status === 400 || err.status === 404 || err.status === 422) {
         backToSendForm(err.message);
       } else {
-        // e.g. 423 frozen, 429 too many transfers, 500 server error: start the retry with an empty pad.
+        // e.g. 403 compliance hold, 423 frozen, 429 too many transfers, 500 server error:
+        // start the retry with an empty pad.
         mpinInput.clear();
-        setFormError(
-          mpinForm,
-          err.status >= 500 ? 'Something went wrong on our side. No money was sent. Please try again.' : err.message,
-        );
+        setFormError(mpinForm, describeError(err));
       }
     }
   });
+
+  /** A user-facing message for a failed transfer, with the compliance reason when it was held. */
+  function describeError(err) {
+    if (err.status >= 500) return 'Something went wrong on our side. No money was sent. Please try again.';
+    if (err.code === 'TRANSACTION_HELD_FOR_REVIEW' && err.details?.reason) {
+      return `${err.message}: ${err.details.reason} No money was sent.`;
+    }
+    return err.message;
+  }
 
   function startOtp(challenge) {
     pending.challengeId = challenge.challengeId;
@@ -856,7 +878,7 @@
         backToSendForm(err.message);
       } else {
         otpDialog.close();
-        toast(err.message, 'error');
+        toast(describeError(err), 'error');
       }
     }
   });
@@ -1169,11 +1191,13 @@
     const left = mpinSecondsLeft();
     const mpinStatus = !hasMpin ? 'Not set up' : left > 0 ? `Valid for ${formatCountdown(left)}` : 'Expired';
     fillRows($('#profile-security'), [
+      ['Compliance status', lastAccount?.amlStatus === 'UNDER_REVIEW' ? 'Under review: sending is on hold' : 'Clear'],
       ['MPIN', mpinStatus],
       ['MPIN lifetime', '5 minutes after you get it'],
       ['Wrong MPIN', '5 in a row locks transfers for 5 min'],
       ['One-time code (OTP)', 'For transfers above ₱1,000'],
       ['Bank transfer fee', `${money(15)} per transfer`],
+      ['AML review', 'Transfers above ₱500,000 or more than 5 a minute are held'],
     ]);
   }
 
@@ -1456,6 +1480,26 @@
     });
   }
 
+  $('#qa-pesonet').addEventListener('click', async () => {
+    try {
+      const { batch } = await api('/api/qa/pesonet/run-cutoff', { method: 'POST' });
+      qaStatus(batch ? `PESONet batch ${batch.batchId}: ${batch.itemCount} settled (${money(batch.total)})` : 'No PESONet transfers waiting');
+      await loadWallet();
+    } catch (err) {
+      qaStatus(err.message);
+    }
+  });
+
+  $('#qa-clear-aml').addEventListener('click', async () => {
+    try {
+      const status = await api('/api/qa/compliance/clear', { method: 'POST' });
+      qaStatus(`Compliance status: ${status.amlStatus}`);
+      await loadWallet();
+    } catch (err) {
+      qaStatus(err.message);
+    }
+  });
+
   $('#qa-reset').addEventListener('click', async () => {
     if (!window.confirm('Reset your account? Balance becomes ₱1,000.00, recent history is cleared, limits restart and all QA switches turn off.')) return;
     try {
@@ -1502,9 +1546,19 @@
       ['Recipient Name', r.recipient.name],
       ['Recipient Account', r.recipient.account],
       ['Bank Name', r.bankName],
+      ...(r.rail ? [['Transfer speed', RAIL_NAMES[r.rail] ?? r.rail]] : []),
+      ...(r.settlement ? [['Settlement', settlementText(r.settlement)]] : []),
       ...(r.note ? [['Note', r.note]] : []),
       ...(r.bankReference ? [['Bank Reference', r.bankReference]] : []),
+      ...(r.iso20022 ? [['ISO 20022 MsgId', r.iso20022.msgId]] : []),
     ];
+  }
+
+  function settlementText(s) {
+    if (s.status === 'QUEUED') {
+      return `Pending: PESONet batch at ${s.expectedAt ? CUTOFF_TIME.format(new Date(s.expectedAt)) : 'the next cut-off'}`;
+    }
+    return s.batchId ? `Settled (batch ${s.batchId})` : 'Settled';
   }
 
   /** Big number at the top: what left your wallet (incl. fee), or what arrived. */
@@ -1524,6 +1578,7 @@
           Object.assign(document.createElement('dd'), { textContent: value, className: isTotal ? 'total' : '' }),
         ]),
       );
+      $('#receipt-iso').hidden = !(r.iso20022 && r.direction === 'SENT');
       if (!receiptDialog.open) receiptDialog.showModal();
     } catch (err) {
       toast(err.message, 'error');
@@ -1531,6 +1586,24 @@
   }
 
   $('#receipt-done').addEventListener('click', () => receiptDialog.close());
+
+  // Open the outbound ISO 20022 pacs.008 XML in a new tab (for QA / ops inspection).
+  $('#receipt-iso').addEventListener('click', async () => {
+    if (!currentReceipt) return;
+    const tab = window.open('', '_blank');
+    try {
+      const res = await fetch(`/api/transfers/bank/${currentReceipt.transactionId}/iso20022?format=xml`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const xml = await res.text();
+      const url = URL.createObjectURL(new Blob([xml], { type: 'text/plain;charset=utf-8' }));
+      if (tab) tab.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      tab?.close();
+      toast('Could not load the ISO 20022 message.', 'error');
+    }
+  });
 
   $('#receipt-download').addEventListener('click', async () => {
     if (!currentReceipt) return;

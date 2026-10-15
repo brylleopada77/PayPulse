@@ -203,6 +203,9 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   background: #e3f2ff; color: #0b5cad;
 }
 
+.aml-badge { background: #fff4d6; color: #8a5a00; }
+.frozen-badge + .aml-badge { margin-left: 0; }
+
 /* ---------- QR ---------- */
 .qr-box { justify-self: center; width: 232px; height: 232px; padding: 8px; border-radius: 16px; border: 1px solid var(--border); background: #fff; }
 .qr-box svg { width: 100%; height: 100%; display: block; }
@@ -247,6 +250,8 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .switch small { color: #a9abc0; font-size: 0.78rem; }
 .qa-panel .btn.secondary { background: rgba(255, 255, 255, 0.1); color: #fff; }
 .qa-panel .btn.secondary:hover { background: rgba(255, 255, 255, 0.18); }
+.qa-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.qa-actions .btn { padding: 10px 8px; font-size: 0.82rem; }
 .qa-status { margin: 0; min-height: 1.2em; font-size: 0.8rem; color: #8fe3c4; }
 
 .net-indicator {

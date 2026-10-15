@@ -5,78 +5,67 @@
 
 ## Where it is
 
-`src/services/transferService.js`: `transfer()` calls `loadParties()` → `findSenderAccount()`.
-The MPIN and OTP checks run before this and don't prevent the bug.
-Bank transfers (`bankTransfer()` → `loadSender()`) read the balance the same way, so they have
-the same bug: rapid duplicate bank transfers can spend more than the balance (amount + fee).
+`src/services/transferService.js`: `transfer()` and `bankTransfer()` call `findSenderAccount()`,
+which reads the sender's balance from the view `account_balances` (an aggregation of the ledger)
+**without any lock**, then checks `balance >= amount` in JavaScript before posting the journal.
+The MPIN, OTP, AML and limit checks all run before this and don't prevent the bug.
 
 ## What goes wrong
 
-The transfer does this inside a database transaction:
-
-1. `SELECT balance_cents FROM accounts WHERE user_id = $1` (a plain read, **no row lock**)
-2. Checks `balance >= amount` in JavaScript
-3. Writes the ledger entries
-4. `UPDATE accounts SET balance_cents = $1` using the **value computed in JavaScript**
-5. `UPDATE accounts SET balance_cents = balance_cents + $1` for the receiver
-
-When several requests arrive at the same moment (a user double-clicking the MPIN "Confirm" button):
+Balances are computed from the immutable ledger, so the system can't *create* money any more.
+But two transfers that run at the same moment both read the balance **before either has posted**:
 
 | Time | Request A | Request B |
 |------|-----------|-----------|
 | t1 | reads balance = 100 | reads balance = 100 |
 | t2 | 100 ≥ 30 ✔ | 100 ≥ 30 ✔ |
-| t3 | sets sender = **70** | waits for A's row lock |
-| t4 | receiver += 30, commit | sets sender = **70** (overwrites A!) |
-| t5 | | receiver += 30, commit |
+| t3 | posts DEBIT 30 / CREDIT 30, commit | posts DEBIT 30 / CREDIT 30, commit |
+| ... | (8 more requests do the same) | |
 
-Result: the sender paid 30 once but the receiver got 60. **Money was created.**
-This is a classic *lost update*.
+Result: 7 to 10 of 10 transfers of ₱30 succeed from a ₱100 wallet. Every journal balances and the
+total money is unchanged, but the sender is **overdrawn** (e.g. **-₱110** or **-₱200**). This is a
+classic *check-then-act* race: the check and the write are not atomic.
 
-## Same root cause: the transfer limits can be bypassed
+(Before the General Ledger restructure, balances were a stored column updated from a value computed
+in JavaScript, so the same race *created* money through a lost update. Moving to computed balances
+turned it into an overdraft, which is what real ledgers without locking suffer from.)
 
-The daily ₱50,000 limit and the anti-spam rule (3 transfers / 10 seconds) in
-`src/services/limitsService.js` also read the account's history **without a lock**. Sequential
-requests are limited correctly, but a burst of simultaneous requests all read "0 transfers so far"
-and all pass. In `concurrency.spec.ts` you'll typically see 7 to 10 of the 10 parallel requests
-succeed (201) even though only 3 are allowed in 10 seconds, plus the money created by the race.
+## Same root cause: limits and AML velocity can be bypassed
 
-Locking the sender's account row (Option 1 below) fixes all three problems at once, as long as the
-limit checks run inside the same transaction, after the lock.
+The daily ₱50,000 limit, the anti-spam rule (3 transfers / 10 seconds) and the AML velocity rule
+(5 transfers / minute) also read the account's history **without a lock**. Sequential requests are
+limited correctly, but a burst of simultaneous requests all read "0 transfers so far" and all pass.
 
 ## How the tests catch it
 
 | Test | What it sees |
 |------|--------------|
-| `tests/api/concurrency.spec.ts` | More than 3 of 10 transfers succeed; sender + receiver > 100 |
-| `tests/load/race-transfer.js` (k6) | `money_created_cents` and `overspent_transfers` thresholds fail |
-| `npm run db:check` | Sum of all balances ≠ 0, cached balances ≠ ledger history |
-| `npm run db:assert-ledger` | "Total money in system ≠ user balances + fees" with the exact amount created |
+| `tests/api/concurrency.spec.ts` | More than 3 of 10 transfers succeed; the sender's balance is below 0 |
+| `tests/load/race-transfer.js` (k6) | `overspent_transfers` and `overdrawn_cents` thresholds fail |
+| `npm run db:check` | "Overdrawn customer wallets (balance < 0)" |
+| `npm run db:assert-ledger` | "No customer wallet is overdrawn" fails, listing the accounts |
+| `npm run eod:reconcile` | Exception `OD-1` in the end-of-day audit log, with every overdrawn wallet |
 
-Tip: the QA Sandbox **Reset account state** rebuilds an account's balance from its ledger history,
-so it also repairs a cached balance that the race bug broke (for that one account).
+All the money checks (trial balance, sum of balances = 0, customer liability = sum of wallets) keep
+passing: that is exactly why an overdraft check is needed.
 
-Note: the ledger itself still has balanced debits and credits for every transaction.
-That's why the DB check also compares each account's **cached balance** with its
-**ledger history**: that comparison is what exposes the lost update.
+Tip: the QA Sandbox **Reset account state** posts a `QA_ADJUSTMENT` journal that brings one
+account back to ₱1,000, so an overdrawn test wallet can be reused.
 
 ## How to fix it
 
 Any one of these works. The first is the simplest:
 
-**Option 1: lock the sender row** so concurrent transfers wait their turn:
-```js
-'SELECT id, account_number, balance_cents FROM accounts WHERE user_id = $1 FOR UPDATE'
-```
-
-**Option 2: atomic conditional update**: let the database do the check and the write together:
+**Option 1: lock the sender's account row** at the start of the transfer's database transaction,
+so concurrent transfers for the same wallet wait their turn, then read the balance:
 ```sql
-UPDATE accounts
-SET balance_cents = balance_cents - $1
-WHERE id = $2 AND balance_cents >= $1
-RETURNING balance_cents;
--- 0 rows updated  ->  insufficient funds
+SELECT id FROM accounts WHERE user_id = $1 FOR UPDATE;
+SELECT balance_cents FROM account_balances WHERE account_id = $1;
 ```
+Run the limit and AML checks inside the same transaction, after the lock, to close those gaps too.
+
+**Option 2: per-wallet advisory lock**: `SELECT pg_advisory_xact_lock(<account id>)` at the
+start of the transaction (same effect, no row lock needed).
 
 **Option 3:** run the transaction at `SERIALIZABLE` isolation and retry on error `40001`.
 
@@ -84,4 +73,5 @@ RETURNING balance_cents;
 
 1. Set `RACE_BUG_EXPECTED: "false"` in `.github/workflows/test.yml`.
 2. Run locally with `RACE_BUG_EXPECTED=false npx playwright test`. The concurrency test should now pass.
-3. `docker compose run --rm k6` should pass its thresholds.
+3. `docker compose run --rm k6`, `npm run db:check`, `npm run db:assert-ledger` and
+   `npm run eod:reconcile` should pass (on a fresh database).

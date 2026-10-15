@@ -36,7 +36,11 @@ function validatePayload({ paymentId, accountNumber, status }) {
   }
 }
 
-/** Credit the wallet: DEBIT the funding account, CREDIT the user's wallet. */
+/**
+ * Credit the wallet: DEBIT cash at bank (GL 1010, the money arrived in PayPulse's bank account),
+ * CREDIT the customer's wallet (GL 2010, PayPulse now owes the customer that money).
+ * No balance is edited: both balances follow from these two ledger entries.
+ */
 async function creditWallet(client, walletId, amountCents, paymentId) {
   const funding = await client.query(
     'SELECT id FROM accounts WHERE account_number = $1',
@@ -52,15 +56,6 @@ async function creditWallet(client, walletId, amountCents, paymentId) {
       { accountId: walletId, direction: 'CREDIT', amountCents },
     ],
   });
-
-  await client.query('UPDATE accounts SET balance_cents = balance_cents - $1 WHERE id = $2', [
-    amountCents,
-    fundingId,
-  ]);
-  await client.query('UPDATE accounts SET balance_cents = balance_cents + $1 WHERE id = $2', [
-    amountCents,
-    walletId,
-  ]);
   return transactionId;
 }
 

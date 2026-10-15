@@ -65,6 +65,11 @@ jobs:
         continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
         run: node tests/assert-system-ledger.js
 
+      - name: End-of-day reconciliation (trial balance + GL controls)
+        id: eod
+        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
+        run: node scripts/reconcile-eod.js
+
       - name: Note known bug results
         if: always()
         run: |
@@ -74,6 +79,7 @@ jobs:
             echo "- k6 concurrency test: \`${{ steps.k6.outcome }}\`"
             echo "- Database ledger check: \`${{ steps.dbcheck.outcome }}\`"
             echo "- System ledger assertion: \`${{ steps.systemledger.outcome }}\`"
+            echo "- EOD reconciliation: \`${{ steps.eod.outcome }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save container logs

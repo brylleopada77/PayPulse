@@ -98,18 +98,20 @@ npm run db:assert-ledger       # standalone: money in system = user balances + c
 
 `tests/assert-system-ledger.js` is a plain Node.js script (no test runner). It works out the
 total money in the system from the ledger history (top-ups − bank payouts + QA adjustments) and
-asserts it equals `sum(user balances) + sum(collected fees)`; it also checks that every transaction
-balances, all balances sum to 0, and cached balances match the ledger. Exit code 0 = consistent,
-1 = not, 2 = could not run. Add `--json` for machine-readable output.
+asserts it equals `sum(user balances) + sum(collected fees) + PESONet pending`; it also checks that
+every transaction balances, all balances sum to 0, the trial balance debits equal its credits, and
+no wallet is overdrawn. Exit code 0 = consistent, 1 = not, 2 = could not run. Add `--json` for
+machine-readable output. For the full end-of-day audit see `npm run eod:reconcile` (section 6).
 
 Because of the intentional bug, expect these results:
 
 | Command | Result while the bug exists |
 |---------|-----------------------------|
 | `npx playwright test` | All pass. The concurrency test is marked as an *expected failure* |
-| `docker compose run --rm k6` | Thresholds **fail** (money was created) |
-| `npm run db:check` | **FAIL** after the concurrency tests have run |
-| `npm run db:assert-ledger` | **FAIL** after the concurrency tests have run (shows the money created) |
+| `docker compose run --rm k6` | Thresholds **fail** (too many transfers succeeded; the sender was overdrawn) |
+| `npm run db:check` | **FAIL** after the concurrency tests have run (overdrawn wallets) |
+| `npm run db:assert-ledger` | **FAIL** after the concurrency tests have run (lists the overdrawn wallets; the money totals still match) |
+| `npm run eod:reconcile` | **EXCEPTIONS** after the concurrency tests have run (`OD-1` overdrafts; all GL controls reconcile) |
 
 ## 5. API reference
 
@@ -336,13 +338,95 @@ attributes for UI automation.
 
 The MPIN, OTP, password reset and bank transfer codes are listed in their own sections above.
 
-## 6. How the ledger works
+## 6. Core banking architecture
 
-- Every money movement is a `transactions` row with `ledger_entries` where **debits = credits**.
-- A wallet's balance = its credits − its debits. `accounts.balance_cents` caches that value.
-- Top-ups move money **from** the system account `SYS-EXTERNAL-FUNDING` **to** the wallet,
-  so the sum of **all** account balances is always exactly **0**.
-- Money is stored as integer cents. No floating point.
+### Double-entry General Ledger
+
+- Every money movement is a `transactions` row (the journal) with `ledger_entries` where
+  **debits = credits**.
+- **Balances are never stored.** A balance is computed by SQL aggregation of the ledger
+  (view `account_balances`: credits − debits). There is no balance column anyone could edit.
+- `ledger_entries` is **immutable**: a trigger refuses `UPDATE`, `DELETE` and `TRUNCATE`;
+  `transactions` can't be deleted or rewritten either. Mistakes are fixed with a new, reversing
+  journal. (Automated tests may move `created_at` in their own session with
+  `SET paypulse.allow_time_travel = 'on'`; the app never does.)
+- Every account maps to a GL account (`gl_accounts`, `accounts.gl_code`); view `gl_trial_balance`
+  gives debits, credits and the balance per GL account:
+
+| GL | Account | Category | System account | Used for |
+|----|---------|----------|----------------|----------|
+| 1010 | Cash at Bank - Settlement Account | Asset | `SYS-EXTERNAL-FUNDING` | top-ups arrive here |
+| 1020 | Bank Clearing - Settled Outbound Payments | Asset | `SYS-BANK-SETTLEMENT` | InstaPay payouts, settled PESONet batches |
+| 2010 | Customer Wallet Liabilities | Liability | every customer wallet | what PayPulse owes its customers |
+| 2020 | PESONet Clearing - Pending Outbound | Liability | `SYS-PESONET-CLEARING` | PESONet transfers waiting for the cut-off |
+| 3900 | Sandbox Adjustments (non-production) | Equity | `SYS-QA-ADJUSTMENT` | QA sandbox resets |
+| 4010 | Fee Revenue - Bank Transfers | Revenue | `SYS-FEE-INCOME` | ₱15 bank transfer fees |
+
+| Event | Debit | Credit |
+|-------|-------|--------|
+| Top-up | 1010 Cash at Bank | 2010 customer wallet |
+| Express Send | 2010 sender | 2010 receiver |
+| Bank Transfer, InstaPay | 2010 sender (amount + fee) | 1020 amount, 4010 fee |
+| Bank Transfer, PESONet | 2010 sender (amount + fee) | 2020 amount, 4010 fee |
+| PESONet batch cut-off | 2020 batch total | 1020 batch total |
+
+Money is stored as integer cents. No floating point.
+
+### Payment switch: ISO 20022 and InstaPay / PESONet
+
+Every Bank Transfer chooses a rail (`rail` = `INSTAPAY` default, or `PESONET`):
+
+- **InstaPay**: real time, up to ₱50,000 per transfer, settled immediately.
+- **PESONet**: batch. The money waits in GL 2020 until the next **mock cut-off** (every
+  `PESONET_CUTOFF_MINUTES`, default 2, on the clock), then the batch worker settles every queued
+  transfer in one journal (`PESONET_SETTLEMENT`) and records a `pesonet_batches` row.
+
+The **payment switch** (`src/services/paymentSwitch.js`) turns each outbound transfer into an
+**ISO 20022 `pacs.008.001.08`** (FI-to-FI Customer Credit Transfer) message, built in
+`src/services/iso20022.js`, and stores it in `payment_messages` as JSON and XML: group header
+(`MsgId`, `SttlmInf/ClrSys` = rail), payment ids (`InstrId` = bank reference, `EndToEndId` = REF
+number, `UETR`), interbank amount in PHP, `ChrgBr DEBT` with the ₱15 charge, debtor / creditor with
+accounts and BICs (PayPulse `PAYPPHM2XXX`, BDO `BNORPHMMXXX`, ...), and remittance information.
+
+| API | |
+|-----|---|
+| `GET /api/transfers/bank/:transactionId/iso20022?format=json\|xml` | The pacs.008 of one of your bank transfers |
+| `GET /api/transfers/pesonet` | Your PESONet transfers (`QUEUED` / `SETTLED`) and the next cut-off |
+| `POST /api/qa/pesonet/run-cutoff` | QA sandbox: settle your queued PESONet transfers now |
+
+The batch worker runs inside the API server (`PESONET_WORKER=false` to disable) or on its own:
+`npm run pesonet:worker` (`-- --once` for a single cut-off). It takes a PostgreSQL advisory lock
+and `SKIP LOCKED`s rows, so several workers can't settle the same transfer twice.
+
+### AML / compliance monitoring
+
+`middleware/amlMonitor.js` screens every outgoing transfer (Express Send and Bank Transfer,
+including the OTP step) **before** the transfer limits:
+
+| Rule | Trigger |
+|------|---------|
+| `LARGE_TRANSFER` | a single transfer **above ₱500,000** |
+| `VELOCITY` | more than **5 transfers within 1 minute** (the 6th is held) |
+| `ACCOUNT_UNDER_REVIEW` | any transfer while the account is under review |
+
+A firing rule opens a `compliance_alerts` row, sets `users.aml_status = 'UNDER_REVIEW'`, and the
+transfer is **not executed**. Response: **`403`** `{ "error": { "code": "TRANSACTION_HELD_FOR_REVIEW",
+"message": "Transaction Held for Compliance Review", "details": { "rule", "reason", "alertId", ... } } }`.
+`GET /api/accounts/me/compliance` shows the status and alerts; `POST /api/qa/compliance/clear`
+(QA sandbox) plays the compliance officer and releases the hold. Note: with the ₱50,000 daily limit,
+amounts between ₱50,000 and ₱500,000 are rejected by the limit (`400`), above ₱500,000 by AML (`403`).
+
+### End-of-day reconciliation
+
+`npm run eod:reconcile` (`scripts/reconcile-eod.js`, add `--date YYYY-MM-DD` for a past day,
+`--json` for machine output) reads **one consistent snapshot** and reconciles the trial balance as of
+the end of the Manila business day: debits = credits, **total customer liability (GL 2010) = sum of
+customer wallets**, Assets = Liabilities + Equity + Revenue, GL 1010 = successful top-ups,
+GL 1020 = settled bank transfers, GL 2020 = PESONet transfers still queued, GL 4010 = fees,
+every bank transfer has a matching pacs.008, and no wallet is overdrawn. It writes an **audit log**
+(`reports/eod/eod-<date>-<time>.log` and `.json`) listing every mismatch, records the run in
+`eod_reconciliations`, and exits `0` balanced / `1` exceptions / `2` error, so it can run from cron
+or CI unattended.
 
 ## 7. Project structure
 
@@ -352,13 +436,18 @@ PayPulse/
 │   ├── app.js / server.js     Express app and entry point
 │   ├── config.js              Environment variables
 │   ├── db/pool.js             PostgreSQL pool + transaction helper
-│   ├── middleware/            Auth (JWT) and error handling
+│   ├── middleware/            Auth (JWT), AML monitor, limits, account guards, error handling
 │   ├── routes/                HTTP endpoints
-│   ├── services/              Business logic (auth, accounts, transfers, payments, ledger)
-│   └── utils/                 Errors and money helpers
+│   ├── services/              Business logic: ledger, transfers, payment switch + ISO 20022,
+│   │                          PESONet, compliance (AML), limits, receipts, QR Ph, QA sandbox
+│   ├── workers/               PESONet batch worker (cut-offs)
+│   └── utils/                 Errors, money, mobile, QR Ph, privacy helpers
 ├── public/                    Web wallet UI (index.html, styles.css, app.js)
-├── db/schema.sql              Database tables
-├── scripts/init-db.js         Creates tables (non-Docker setup)
+├── db/schema.sql              Database schema: GL accounts, immutable ledger, views, payments, AML
+├── scripts/
+│   ├── init-db.js             Creates / upgrades tables
+│   ├── reconcile-eod.js       End-of-day reconciliation + audit log
+│   └── pesonet-worker.js      Standalone PESONet batch worker
 ├── tests/
 │   ├── api/                   Playwright API tests
 │   ├── load/                  k6 concurrency test

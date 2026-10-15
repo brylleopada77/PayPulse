@@ -3,7 +3,9 @@ const { pool, withTransaction } = require('../db/pool');
 const { recordTransaction } = require('./ledgerService');
 const mpinService = require('./mpinService');
 const otpService = require('./otpService');
-const { BANK_TRANSFER_FEE_CENTS, BANK_ACCOUNT_PATTERN, findBank } = require('./banks');
+const paymentSwitch = require('./paymentSwitch');
+const { nextCutoff } = require('./pesonetService');
+const { BANK_TRANSFER_FEE_CENTS, BANK_ACCOUNT_PATTERN, RAILS, findBank } = require('./banks');
 const { badRequest, notFound, unprocessable } = require('../utils/errors');
 const { toCents, fromCents } = require('../utils/money');
 const { normalizeMobile, requireMobile } = require('../utils/mobile');
@@ -12,14 +14,26 @@ const { referenceFor } = require('./receiptService');
 
 // Transfers ABOVE this amount (₱1,000.00) need a one-time code on top of the MPIN.
 const OTP_THRESHOLD_CENTS = 100_000;
-const SETTLEMENT_ACCOUNT = 'SYS-BANK-SETTLEMENT';
-const FEE_ACCOUNT = 'SYS-FEE-INCOME';
+const SETTLEMENT_ACCOUNT = 'SYS-BANK-SETTLEMENT'; // GL 1020 Bank Clearing - Settled Outbound Payments
+const PESONET_CLEARING_ACCOUNT = 'SYS-PESONET-CLEARING'; // GL 2020 PESONet Clearing - Pending Outbound
+const FEE_ACCOUNT = 'SYS-FEE-INCOME'; // GL 4010 Fee Revenue - Bank Transfers
+
+const peso = (cents) => `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 // ---------- Lookups ----------
 
+/**
+ * The sender's wallet with its balance COMPUTED from the ledger (view account_balances).
+ *
+ * NOTE (intentional QA bug, see QA_NOTES.md): this is a plain read with no lock. Two transfers
+ * that run at the same moment both see the same balance, both pass the balance check, and both
+ * post their ledger entries, so the wallet can be overdrawn below zero.
+ */
 async function findSenderAccount(db, userId) {
   const { rows } = await db.query(
-    'SELECT id, account_number, balance_cents FROM accounts WHERE user_id = $1',
+    `SELECT ab.account_id AS id, ab.account_number, ab.balance_cents, u.full_name
+     FROM account_balances ab JOIN users u ON u.id = ab.user_id
+     WHERE ab.user_id = $1`,
     [userId],
   );
   if (!rows[0]) {
@@ -57,10 +71,7 @@ async function systemAccountId(db, accountNumber) {
   return rows[0].id;
 }
 
-/**
- * Load the sender's wallet and check it can cover `totalCents`.
- * NOTE: a plain read without a row lock: this is the intentional race condition (QA_NOTES.md).
- */
+/** Load the sender's wallet and check its (computed) balance covers `totalCents`. */
 async function loadSender(db, userId, totalCents, insufficientMessage) {
   const sender = await findSenderAccount(db, userId);
   if (sender.balance_cents < totalCents) {
@@ -114,13 +125,13 @@ function parseRecipient({ toAccountNumber, toMobileNumber }) {
 
 /**
  * Express Send: move money to another PayPulse wallet (by account number or mobile number).
- * No fee. Writes a balanced pair of ledger entries and updates both cached balances.
+ * No fee. Posts one balanced journal: DEBIT sender wallet, CREDIT receiver wallet (both GL 2010).
+ * Balances are never edited: they follow from these ledger entries.
  */
 async function transfer(userId, input) {
   const recipient = parseRecipient(input);
   const amountCents = toCents(input.amount);
 
-  // NOTE: the sender is read without a row lock: this is the intentional race condition (QA_NOTES.md).
   const checkParties = async (db) => {
     const sender = await findSenderAccount(db, userId);
     const receiver = await findReceiver(db, recipient);
@@ -147,13 +158,6 @@ async function transfer(userId, input) {
         ],
       });
 
-      const senderNewBalance = sender.balance_cents - amountCents;
-      await client.query('UPDATE accounts SET balance_cents = $1 WHERE id = $2', [senderNewBalance, sender.id]);
-      await client.query('UPDATE accounts SET balance_cents = balance_cents + $1 WHERE id = $2', [
-        amountCents,
-        receiver.id,
-      ]);
-
       return {
         method: 'EXPRESS',
         transactionId,
@@ -167,7 +171,7 @@ async function transfer(userId, input) {
         feeCents: 0,
         totalDeducted: fromCents(amountCents),
         totalDeductedCents: amountCents,
-        balanceAfter: fromCents(senderNewBalance),
+        balanceAfter: fromCents(sender.balance_cents - amountCents),
       };
     },
   });
@@ -175,10 +179,15 @@ async function transfer(userId, input) {
 
 // ---------- Bank Transfer (to an outside bank / e-wallet, ₱15 fee) ----------
 
-function parseBankDestination({ bankCode, accountNumber, accountName }) {
+function parseBankDestination({ bankCode, accountNumber, accountName, rail = 'INSTAPAY' }) {
   const bank = findBank(typeof bankCode === 'string' ? bankCode.trim().toUpperCase() : bankCode);
   if (!bank) {
     throw badRequest('INVALID_BANK', 'Choose one of: GCash, Maya, BDO, BPI, Metrobank');
+  }
+
+  const railInfo = RAILS[typeof rail === 'string' ? rail.trim().toUpperCase() : rail];
+  if (!railInfo) {
+    throw badRequest('INVALID_RAIL', 'rail must be "INSTAPAY" or "PESONET"');
   }
 
   let account;
@@ -198,28 +207,40 @@ function parseBankDestination({ bankCode, accountNumber, accountName }) {
   if (name.length < 2 || name.length > 100) {
     throw badRequest('INVALID_ACCOUNT_NAME', "Enter the account holder's name");
   }
-  return { bank, account, name };
+  return { bank, account, name, rail: railInfo };
 }
 
 /**
- * Bank Transfer: send money out of PayPulse. The user pays amount + ₱15 fee.
- * Ledger: DEBIT user (amount + fee), CREDIT bank settlement (amount), CREDIT fee income (fee).
+ * Bank Transfer: send money out of PayPulse through InstaPay (instant) or PESONet (batch).
+ * The user pays amount + ₱15 fee. One balanced journal:
+ *   DEBIT  customer wallet (GL 2010)                    amount + fee
+ *   CREDIT bank clearing  (GL 1020, InstaPay)  or
+ *          PESONet clearing (GL 2020, until the cut-off) amount
+ *   CREDIT fee revenue (GL 4010)                        fee
+ * The payment switch then records the outbound ISO 20022 pacs.008 message.
  */
 async function bankTransfer(userId, input) {
-  const { bank, account, name } = parseBankDestination(input);
+  const { bank, account, name, rail } = parseBankDestination(input);
   const amountCents = toCents(input.amount);
+  if (rail.maxCents !== null && amountCents > rail.maxCents) {
+    throw badRequest(
+      'INSTAPAY_LIMIT_EXCEEDED',
+      `InstaPay transfers are limited to ${peso(rail.maxCents)} each. Use PESONet for larger amounts.`,
+    );
+  }
   const feeCents = BANK_TRANSFER_FEE_CENTS;
   const totalCents = amountCents + feeCents;
-  const peso = (cents) => `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
   const insufficient =
     `Insufficient balance: this transfer needs ${peso(totalCents)} ` +
     `(${peso(amountCents)} + ${peso(feeCents)} fee)`;
 
-  return runSecured(userId, { ...input, destinationKey: `BANK:${bank.code}:${account}`, amountCents }, {
+  const destinationKey = `BANK:${rail.code}:${bank.code}:${account}`;
+  return runSecured(userId, { ...input, destinationKey, amountCents }, {
     preflight: (db) => loadSender(db, userId, totalCents, insufficient),
     execute: async (client) => {
       const sender = await loadSender(client, userId, totalCents, insufficient);
-      const settlementId = await systemAccountId(client, SETTLEMENT_ACCOUNT);
+      const isPesonet = rail.code === 'PESONET';
+      const outboundId = await systemAccountId(client, isPesonet ? PESONET_CLEARING_ACCOUNT : SETTLEMENT_ACCOUNT);
       const feeAccountId = await systemAccountId(client, FEE_ACCOUNT);
 
       const transactionId = await recordTransaction(client, {
@@ -227,46 +248,55 @@ async function bankTransfer(userId, input) {
         description: `Bank Transfer to ${bank.name}`,
         entries: [
           { accountId: sender.id, direction: 'DEBIT', amountCents: totalCents },
-          { accountId: settlementId, direction: 'CREDIT', amountCents },
+          { accountId: outboundId, direction: 'CREDIT', amountCents },
           { accountId: feeAccountId, direction: 'CREDIT', amountCents: feeCents },
         ],
       });
-
-      const senderNewBalance = sender.balance_cents - totalCents;
-      await client.query('UPDATE accounts SET balance_cents = $1 WHERE id = $2', [senderNewBalance, sender.id]);
-      await client.query('UPDATE accounts SET balance_cents = balance_cents + $1 WHERE id = $2', [
-        amountCents,
-        settlementId,
-      ]);
-      await client.query('UPDATE accounts SET balance_cents = balance_cents + $1 WHERE id = $2', [
-        feeCents,
-        feeAccountId,
-      ]);
+      const reference = await referenceFor(client, transactionId);
 
       const bankReference = `BT-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
-      await client.query(
+      const inserted = await client.query(
         `INSERT INTO bank_transfers
-           (reference, transaction_id, user_id, bank_code, account_number, account_name, amount_cents, fee_cents)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [bankReference, transactionId, userId, bank.code, account, name, amountCents, feeCents],
+           (reference, transaction_id, user_id, bank_code, account_number, account_name, amount_cents, fee_cents,
+            rail, status, settled_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $10 = 'SETTLED' THEN now() END)
+         RETURNING id`,
+        [bankReference, transactionId, userId, bank.code, account, name, amountCents, feeCents,
+          rail.code, isPesonet ? 'QUEUED' : 'SETTLED'],
       );
+
+      const message = await paymentSwitch.submitOutbound(client, {
+        bankTransferId: inserted.rows[0].id,
+        rail: rail.code,
+        reference,
+        bankReference,
+        amountCents,
+        feeCents,
+        debtor: { name: sender.full_name, account: sender.account_number },
+        creditor: { name, account, bic: bank.bic },
+        remittance: input.description || `PayPulse ${reference}`,
+      });
 
       return {
         method: 'BANK',
         transactionId,
-        reference: await referenceFor(client, transactionId),
+        reference,
         bankReference,
         from: sender.account_number,
         bank: { code: bank.code, name: bank.name },
         accountNumber: maskAccount(account),
         accountName: name,
+        rail: rail.code,
+        status: message.status,
+        expectedSettlementAt: isPesonet ? nextCutoff() : new Date(),
+        iso20022: { messageType: 'pacs.008.001.08', msgId: message.msgId, uetr: message.uetr },
         amount: fromCents(amountCents),
         amountCents,
         fee: fromCents(feeCents),
         feeCents,
         totalDeducted: fromCents(totalCents),
         totalDeductedCents: totalCents,
-        balanceAfter: fromCents(senderNewBalance),
+        balanceAfter: fromCents(sender.balance_cents - totalCents),
       };
     },
   });

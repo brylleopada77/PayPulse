@@ -8,12 +8,14 @@ const { formatReference } = require('./receiptService');
 
 async function getAccountForUser(userId) {
   const { rows } = await pool.query(
-    `SELECT a.id, a.account_number, a.balance_cents, a.currency, u.full_name, u.mobile_number,
-            u.email, u.created_at AS member_since, u.frozen, u.history_cleared_at,
+    `SELECT a.id, a.account_number, ab.balance_cents, a.currency, u.full_name, u.mobile_number,
+            u.email, u.created_at AS member_since, u.frozen, u.aml_status, u.history_cleared_at,
             u.mpin_hash IS NOT NULL AS has_mpin,
             GREATEST(0, CEIL(EXTRACT(EPOCH FROM (u.mpin_expires_at - now()))))::int AS mpin_seconds_left
      FROM accounts a
      JOIN users u ON u.id = a.user_id
+     -- the balance is computed from the ledger, never stored
+     JOIN account_balances ab ON ab.account_id = a.id
      WHERE a.user_id = $1`,
     [userId],
   );
@@ -32,11 +34,13 @@ async function getBalance(userId) {
     memberSince: account.member_since,
     // A frozen account cannot send money (423 ACCOUNT_FROZEN).
     frozen: account.frozen,
+    // UNDER_REVIEW: an AML rule fired; outgoing transfers are held (403) until compliance clears it.
+    amlStatus: account.aml_status,
     // Others can Express Send to this number. null until the user adds one.
     mobileNumber: account.mobile_number,
     currency: account.currency,
-    balance: fromCents(account.balance_cents),
-    balanceCents: account.balance_cents,
+    balance: fromCents(Number(account.balance_cents)),
+    balanceCents: Number(account.balance_cents),
     // false for accounts created before random MPINs: the UI asks them to set one up.
     hasMpin: account.has_mpin,
     // Seconds until the MPIN expires (0 = expired; get a new one with the password).
@@ -67,7 +71,7 @@ async function getTransactions(userId, limit = 50) {
   const { rows } = await pool.query(
     `SELECT t.id, t.type, t.description, t.created_at, le.direction, le.amount_cents,
             bt.reference, bt.bank_code, bt.account_number AS bank_account, bt.account_name,
-            bt.amount_cents AS bank_amount_cents, bt.fee_cents
+            bt.amount_cents AS bank_amount_cents, bt.fee_cents, bt.rail, bt.status AS bank_status
      FROM ledger_entries le
      JOIN transactions t ON t.id = le.transaction_id
      LEFT JOIN bank_transfers bt ON bt.transaction_id = t.id
@@ -96,6 +100,8 @@ async function getTransactions(userId, limit = 50) {
         accountName: row.account_name,
         amount: fromCents(row.bank_amount_cents),
         fee: fromCents(row.fee_cents),
+        rail: row.rail,
+        status: row.bank_status,
       },
     }),
   }));

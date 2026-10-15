@@ -11,7 +11,9 @@
     "db:check": "tsx tests/helpers/db-check.ts",
     "test:api": "playwright test",
     "test:report": "playwright show-report",
-    "db:assert-ledger": "node tests/assert-system-ledger.js"
+    "db:assert-ledger": "node tests/assert-system-ledger.js",
+    "eod:reconcile": "node scripts/reconcile-eod.js",
+    "pesonet:worker": "node scripts/pesonet-worker.js"
   },
   "engines": {
     "node": ">=20"

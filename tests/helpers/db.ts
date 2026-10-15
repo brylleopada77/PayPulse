@@ -14,21 +14,24 @@ export interface AccountMismatch {
 
 export interface IntegrityReport {
   ok: boolean;
-  /** Sum of every account balance, including the system funding account. Must be 0. */
+  /** Sum of every account balance (customers + system accounts). Always 0 in double entry. */
   totalBalanceCents: number;
-  /** Money held in user wallets. Must equal top-ups minus money sent out to banks (incl. fees). */
+  /** Money held in customer wallets (GL 2010). Must equal top-ups - bank transfers + QA adjustments. */
   userBalanceCents: number;
   /** Total of all successful top-ups that ever entered the system. */
   totalDepositsCents: number;
-  /** Money that left user wallets through bank transfers: amounts sent out plus fees. */
+  /** Money that left customer wallets through bank transfers: amounts sent out plus fees. */
   bankOutflowCents: number;
-  /** Net money QA sandbox resets added to (or removed from) user wallets. */
+  /** Net money QA sandbox resets added to (or removed from) customer wallets. */
   qaAdjustmentCents: number;
   /** Transactions whose debits do not equal their credits. */
   unbalancedTransactions: number[];
-  /** Accounts whose cached balance disagrees with their ledger history. */
+  /**
+   * Kept for compatibility with older tests. Balances are now COMPUTED from the ledger (view
+   * account_balances), so an account can no longer disagree with its own history: always [].
+   */
   mismatchedAccounts: AccountMismatch[];
-  /** User wallets below zero. */
+  /** Customer wallets below zero (an overdraft: the race-condition bug shows up here). */
   negativeAccounts: string[];
 }
 
@@ -53,26 +56,20 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       SELECT
         COALESCE(SUM(balance_cents), 0)                                  AS total,
         COALESCE(SUM(balance_cents) FILTER (WHERE NOT is_system), 0)     AS users
-      FROM accounts`);
+      FROM account_balances`);
 
-    const deposits = await client.query(`
-      SELECT COALESCE(SUM(le.amount_cents), 0) AS total
+    const flows = await client.query(`
+      SELECT
+        COALESCE(SUM(le.amount_cents) FILTER (WHERE t.type = 'DEPOSIT' AND le.direction = 'CREDIT' AND NOT a.is_system), 0)
+          AS deposits,
+        COALESCE(SUM(le.amount_cents) FILTER (WHERE t.type = 'BANK_TRANSFER' AND le.direction = 'DEBIT' AND NOT a.is_system), 0)
+          AS bank_outflow,
+        COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents ELSE -le.amount_cents END)
+                 FILTER (WHERE t.type = 'QA_ADJUSTMENT' AND NOT a.is_system), 0)
+          AS qa_adjustments
       FROM ledger_entries le
       JOIN transactions t ON t.id = le.transaction_id
-      WHERE t.type = 'DEPOSIT' AND le.direction = 'CREDIT'`);
-
-    const outflow = await client.query(`
-      SELECT COALESCE(SUM(le.amount_cents), 0) AS total
-      FROM ledger_entries le
-      JOIN accounts a ON a.id = le.account_id
-      WHERE le.direction = 'CREDIT' AND a.account_number IN ('SYS-BANK-SETTLEMENT', 'SYS-FEE-INCOME')`);
-
-    const qaAdjustments = await client.query(`
-      SELECT COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents ELSE -le.amount_cents END), 0) AS total
-      FROM ledger_entries le
-      JOIN transactions t ON t.id = le.transaction_id
-      JOIN accounts a ON a.id = le.account_id
-      WHERE t.type = 'QA_ADJUSTMENT' AND NOT a.is_system`);
+      JOIN accounts a ON a.id = le.account_id`);
 
     const unbalanced = await client.query(`
       SELECT transaction_id
@@ -82,43 +79,23 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
           <> SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE 0 END)
       ORDER BY transaction_id`);
 
-    const filter = accountNumbers?.length ? 'AND a.account_number = ANY($1)' : '';
+    const filter = accountNumbers?.length ? 'AND account_number = ANY($1)' : '';
     const params = accountNumbers?.length ? [accountNumbers] : [];
-
-    const mismatched = await client.query(
-      `SELECT a.account_number,
-              a.balance_cents AS cached,
-              COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents
-                                ELSE -le.amount_cents END), 0) AS ledger
-       FROM accounts a
-       LEFT JOIN ledger_entries le ON le.account_id = a.id
-       WHERE true ${filter}
-       GROUP BY a.id
-       HAVING a.balance_cents <> COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents
-                                                   ELSE -le.amount_cents END), 0)
-       ORDER BY a.account_number`,
-      params,
-    );
-
     const negative = await client.query(
-      `SELECT a.account_number FROM accounts a
-       WHERE NOT a.is_system AND a.balance_cents < 0 ${filter}`,
+      `SELECT account_number FROM account_balances WHERE NOT is_system AND balance_cents < 0 ${filter}`,
       params,
     );
 
     const report: IntegrityReport = {
       ok: false,
-      totalBalanceCents: totals.rows[0].total,
-      userBalanceCents: totals.rows[0].users,
-      totalDepositsCents: deposits.rows[0].total,
-      bankOutflowCents: outflow.rows[0].total,
-      qaAdjustmentCents: qaAdjustments.rows[0].total,
+      // SUM() returns NUMERIC, which pg gives back as a string: convert explicitly.
+      totalBalanceCents: Number(totals.rows[0].total),
+      userBalanceCents: Number(totals.rows[0].users),
+      totalDepositsCents: Number(flows.rows[0].deposits),
+      bankOutflowCents: Number(flows.rows[0].bank_outflow),
+      qaAdjustmentCents: Number(flows.rows[0].qa_adjustments),
       unbalancedTransactions: unbalanced.rows.map((r) => r.transaction_id),
-      mismatchedAccounts: mismatched.rows.map((r) => ({
-        accountNumber: r.account_number,
-        cachedBalanceCents: r.cached,
-        ledgerBalanceCents: r.ledger,
-      })),
+      mismatchedAccounts: [],
       negativeAccounts: negative.rows.map((r) => r.account_number),
     };
 
@@ -128,12 +105,7 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       : report.totalBalanceCents === 0 &&
         report.userBalanceCents === report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents;
 
-    report.ok =
-      totalsOk &&
-      report.unbalancedTransactions.length === 0 &&
-      report.mismatchedAccounts.length === 0 &&
-      report.negativeAccounts.length === 0;
-
+    report.ok = totalsOk && report.unbalancedTransactions.length === 0 && report.negativeAccounts.length === 0;
     return report;
   });
 }
@@ -141,17 +113,50 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
 /**
  * Test hook: move an account's outgoing transactions back in time (instead of waiting),
  * e.g. 11 seconds to get past the anti-spam window, or 1 day to make them "yesterday".
+ * Transactions are immutable; the schema allows only this created_at change, and only in a
+ * session that sets paypulse.allow_time_travel (tests only, never the app).
  */
 export async function ageOutgoingTransactions(accountNumber: string, interval: string): Promise<void> {
-  await withClient((client) =>
-    client.query(
+  await withClient(async (client) => {
+    await client.query("SELECT set_config('paypulse.allow_time_travel', 'on', false)");
+    await client.query(
       `UPDATE transactions SET created_at = created_at - $2::interval
        WHERE id IN (SELECT le.transaction_id FROM ledger_entries le
                     JOIN accounts a ON a.id = le.account_id
                     WHERE a.account_number = $1 AND le.direction = 'DEBIT')`,
       [accountNumber, interval],
-    ),
-  );
+    );
+  });
+}
+
+/** Balance of an account straight from the ledger view (no stored balances exist). */
+export async function ledgerBalanceCents(accountNumber: string): Promise<number> {
+  return withClient(async (client) => {
+    const { rows } = await client.query('SELECT balance_cents FROM account_balances WHERE account_number = $1', [
+      accountNumber,
+    ]);
+    return Number(rows[0].balance_cents);
+  });
+}
+
+/** Run a statement and return the database error message, or null if it was allowed. */
+export async function tryStatement(sql: string, params: unknown[] = []): Promise<string | null> {
+  return withClient(async (client) => {
+    try {
+      await client.query(sql, params);
+      return null;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  });
+}
+
+/** The GL account an account is mapped to. */
+export async function glCodeOf(accountNumber: string): Promise<string> {
+  return withClient(async (client) => {
+    const { rows } = await client.query('SELECT gl_code FROM accounts WHERE account_number = $1', [accountNumber]);
+    return rows[0].gl_code;
+  });
 }
 
 /** Test hook: make an OTP challenge expire now instead of waiting 30 seconds. */
