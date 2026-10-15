@@ -17,6 +17,11 @@ router.get('/me/transactions', async (req, res) => {
   res.json({ transactions: await accountService.getTransactions(req.user.id) });
 });
 
+// PUT /api/accounts/me/mobile  { mobileNumber }  -> { mobileNumber }  (add or change)
+router.put('/me/mobile', async (req, res) => {
+  res.json(await accountService.setMobileNumber(req.user.id, (req.body || {}).mobileNumber));
+});
+
 // POST /api/accounts/me/mpin/reset  { password }  -> { mpin, mpinExpiresInSeconds }
 // ("Forgot MPIN" or an expired MPIN)
 router.post('/me/mpin/reset', async (req, res) => {

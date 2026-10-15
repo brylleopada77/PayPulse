@@ -7,6 +7,8 @@
 
 `src/services/transferService.js`: `transfer()` calls `loadParties()` → `findSenderAccount()`.
 The MPIN and OTP checks run before this and don't prevent the bug.
+Bank transfers (`bankTransfer()` → `loadSender()`) read the balance the same way, so they have
+the same bug: rapid duplicate bank transfers can spend more than the balance (amount + fee).
 
 ## What goes wrong
 

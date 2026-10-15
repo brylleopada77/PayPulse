@@ -6,7 +6,7 @@
 
 /**
  * @param client  a pg client that is already inside a transaction
- * @param type    'TRANSFER' | 'DEPOSIT'
+ * @param type    'TRANSFER' | 'DEPOSIT' | 'BANK_TRANSFER'
  * @param entries [{ accountId, direction: 'DEBIT' | 'CREDIT', amountCents }]
  * @returns the new transaction id
  */

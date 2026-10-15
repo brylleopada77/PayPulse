@@ -103,7 +103,18 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   background: linear-gradient(135deg, var(--brand) 0%, #7a4cf0 55%, var(--accent) 140%);
   color: #fff; border-radius: 22px; padding: 24px; box-shadow: 0 16px 40px rgba(91, 76, 240, 0.35);
 }
-.balance-card .label { margin: 0; opacity: 0.85; font-size: 0.9rem; }
+.balance-card .label { margin: 0; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; }
+.balance-toggle {
+  width: 30px; height: 30px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: rgba(255, 255, 255, 0.85); cursor: pointer;
+}
+.balance-toggle:hover { background: rgba(255, 255, 255, 0.18); color: #fff; }
+.balance-toggle:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.balance-toggle svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.balance.masked { letter-spacing: 0.08em; }
 .balance { font-size: 2.6rem; font-weight: 700; margin: 6px 0 14px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .account-row { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; opacity: 0.95; flex-wrap: wrap; }
 .account-row code { background: rgba(255, 255, 255, 0.18); padding: 3px 8px; border-radius: 6px; }
@@ -152,6 +163,39 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   background: #fff4d6; color: #8a5a00; padding: 2px 8px; border-radius: 6px;
 }
 .form label.inline { font-weight: 400; color: var(--muted); }
+
+/* ---------- Send: method choice, fee, review ---------- */
+.sheet-head .back {
+  border: 0; background: var(--bg); width: 32px; height: 32px; border-radius: 50%;
+  font-size: 1.4rem; line-height: 1; cursor: pointer; color: var(--text); margin-right: 8px;
+}
+.sheet-head .back + h2 { margin-right: auto; }
+.send-option {
+  display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 12px;
+  width: 100%; padding: 14px; text-align: left; font: inherit; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; cursor: pointer;
+}
+.send-option:hover, .send-option:focus-visible { border-color: var(--brand); box-shadow: 0 0 0 3px #e7e4ff; outline: none; }
+.opt-icon { width: 44px; height: 44px; border-radius: 12px; background: #f0eeff; display: grid; place-items: center; font-size: 1.3rem; }
+.opt-text { display: grid; gap: 2px; }
+.opt-text span { color: var(--muted); font-size: 0.85rem; }
+.opt-fee { font-size: 0.8rem; font-weight: 700; padding: 4px 8px; border-radius: 999px; background: #fff4d6; color: #8a5a00; white-space: nowrap; }
+.opt-fee.free { background: #e1f7ef; color: var(--success); }
+
+.fee-preview {
+  margin: 0; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: 10px; background: var(--bg); font-size: 0.88rem; color: var(--muted);
+}
+.fee-preview strong { color: var(--text); }
+
+.review { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; }
+.review dt { color: var(--muted); }
+.review dd { margin: 0; text-align: right; font-weight: 600; overflow-wrap: anywhere; }
+.review-total {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding-top: 12px; border-top: 1px dashed var(--border); font-weight: 600;
+}
+.review-total strong { font-size: 1.4rem; color: var(--brand-dark); font-variant-numeric: tabular-nums; }
 
 /* ---------- MPIN / OTP ---------- */
 .summary { margin: 0; color: var(--muted); text-align: center; }

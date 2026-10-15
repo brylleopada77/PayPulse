@@ -110,3 +110,35 @@ CREATE TABLE IF NOT EXISTS password_resets (
   used_at     TIMESTAMPTZ,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------- Express Send by mobile number + Bank transfers ----------
+
+-- Optional mobile number (format 09XXXXXXXXX) so others can send money to it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_mobile_number ON users (mobile_number)
+  WHERE mobile_number IS NOT NULL;
+
+-- Allow the BANK_TRANSFER transaction type (re-created so this file stays re-runnable).
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
+ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
+  CHECK (type IN ('TRANSFER', 'DEPOSIT', 'BANK_TRANSFER'));
+
+-- Money that leaves PayPulse to an outside bank / e-wallet, and the fees PayPulse earns.
+-- A bank transfer is: DEBIT user (amount + fee), CREDIT settlement (amount), CREDIT fees (fee).
+INSERT INTO accounts (account_number, is_system)
+VALUES ('SYS-BANK-SETTLEMENT', true), ('SYS-FEE-INCOME', true)
+ON CONFLICT (account_number) DO NOTHING;
+
+-- Details of each outgoing bank transfer (the ledger holds the money; this holds the "where").
+CREATE TABLE IF NOT EXISTS bank_transfers (
+  id              SERIAL PRIMARY KEY,
+  reference       TEXT        NOT NULL UNIQUE,
+  transaction_id  INTEGER     NOT NULL UNIQUE REFERENCES transactions (id),
+  user_id         INTEGER     NOT NULL REFERENCES users (id),
+  bank_code       TEXT        NOT NULL,
+  account_number  TEXT        NOT NULL,
+  account_name    TEXT        NOT NULL,
+  amount_cents    BIGINT      NOT NULL CHECK (amount_cents > 0),
+  fee_cents       BIGINT      NOT NULL CHECK (fee_cents >= 0),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);

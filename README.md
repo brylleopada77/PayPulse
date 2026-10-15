@@ -60,6 +60,14 @@ npm run db:init               # create tables
 npm run dev                   # start API on http://localhost:3000 (auto-restarts on changes)
 ```
 
+### Windows: one-click start with a public link (optional)
+
+`start-paypulse.cmd` starts a local PostgreSQL (expected in `%LOCALAPPDATA%\PayPulse-Postgres`),
+the app, and a temporary Cloudflare quick tunnel (`%LOCALAPPDATA%\cloudflared\cloudflared.exe`),
+all in the background, then prints and copies the public `https://….trycloudflare.com` link.
+`stop-paypulse.cmd` stops all three. The link changes on every start and stops working when the
+PC sleeps or shuts down. Logs go to `logs\`.
+
 ### Deploy online (Render, free)
 
 `render.yaml` is a Render Blueprint that creates the web app and a PostgreSQL database.
@@ -109,7 +117,10 @@ All bodies are JSON. Amounts are decimal numbers or strings with up to 2 decimal
 | GET | `/api/accounts/me` | Bearer | – → balance |
 | GET | `/api/accounts/me/transactions` | Bearer | – → ledger history |
 | POST | `/api/accounts/me/mpin/reset` | Bearer | `{ password }` → `{ mpin }` ("Forgot MPIN") |
-| POST | `/api/transfers` | Bearer + MPIN | `{ toAccountNumber, amount, description?, mpin, otpChallengeId?, otp? }` (see below) |
+| PUT | `/api/accounts/me/mobile` | Bearer | `{ mobileNumber }` → `{ mobileNumber }` (add or change) |
+| POST | `/api/transfers` | Bearer + MPIN | Express Send: `{ toAccountNumber \| toMobileNumber, amount, description?, mpin, otpChallengeId?, otp? }` |
+| GET | `/api/transfers/banks` | Bearer | – → `{ feeCents, banks }` |
+| POST | `/api/transfers/bank` | Bearer + MPIN | Bank Transfer: `{ bankCode, accountNumber, accountName, amount, mpin, otpChallengeId?, otp? }` |
 | POST | `/api/webhooks/payments` | HMAC signature | `{ paymentId, accountNumber, amount, status }` |
 | POST | `/api/payments/mock-checkout` | Bearer | `{ amount, outcome?: "approve" \| "decline" }` (used by the UI) |
 
@@ -143,6 +154,27 @@ the change get `401` with "Your password was changed. Please log in again."
 | 403 | `INVALID_RESET_CODE` | Wrong, used or unknown code (message says how many tries are left) |
 | 410 | `RESET_CODE_EXPIRED` | Older than 10 minutes; request a new code |
 | 429 | `RESET_ATTEMPTS_EXCEEDED` | 3 wrong codes; request a new code |
+
+### Sending money: Express Send and Bank Transfer
+
+| | Express Send | Bank Transfer |
+|---|---|---|
+| To | Another PayPulse wallet, by account number (`PP…`) or mobile number (`09…`) | GCash, Maya (recipient's mobile number) or BDO, BPI, Metrobank (10 to 16 digit account number) |
+| Fee | ₱0 | **₱15** per transfer |
+| Deducted | amount | **amount + ₱15** |
+| History | "Transfer to PP…" | **"Bank Transfer to [Bank Name]"**, with account, fee and reference (`BT-…`) |
+
+Mobile numbers are optional: add one at sign-up (`mobileNumber`) or later with
+`PUT /api/accounts/me/mobile`. Formats like `+63 917 123 4567` are stored as `09171234567`.
+
+A bank transfer is one balanced ledger transaction (type `BANK_TRANSFER`): **DEBIT** the user
+(amount + fee), **CREDIT** `SYS-BANK-SETTLEMENT` (amount, money sent out) and **CREDIT**
+`SYS-FEE-INCOME` (fee). The ledger check therefore expects
+`user wallets = top-ups − (settlement + fee credits)`. Nothing is really sent to a bank: this is a mock.
+
+Both kinds of transfer use the same MPIN and OTP rules below. For Bank Transfer the OTP is bound to
+the bank and account number. Extra error codes: `INVALID_BANK`, `INVALID_BANK_ACCOUNT`,
+`INVALID_ACCOUNT_NAME`, `INVALID_MOBILE_NUMBER` (400) and `MOBILE_TAKEN` (409).
 
 ### Transfer security: MPIN and OTP
 

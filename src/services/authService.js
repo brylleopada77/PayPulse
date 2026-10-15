@@ -4,6 +4,7 @@ const config = require('../config');
 const mpinService = require('./mpinService');
 const { withTransaction, pool } = require('../db/pool');
 const { badRequest, conflict, unauthorized } = require('../utils/errors');
+const { requireMobile } = require('../utils/mobile');
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -24,9 +25,13 @@ function validateRegistration({ email, password, fullName }) {
   }
 }
 
-/** Create a user together with their wallet account and a random 6-digit MPIN. */
-async function register({ email, password, fullName }) {
+/**
+ * Create a user together with their wallet account and a random 6-digit MPIN.
+ * mobileNumber is optional; with it, others can Express Send to this user by mobile number.
+ */
+async function register({ email, password, fullName, mobileNumber }) {
   validateRegistration({ email, password, fullName });
+  const mobile = mobileNumber === undefined || mobileNumber === null || mobileNumber === '' ? null : requireMobile(mobileNumber);
   const normalizedEmail = email.trim().toLowerCase();
   const passwordHash = await bcrypt.hash(password, 10);
   const { mpin, mpinHash, expiresInSeconds } = await mpinService.newMpin();
@@ -34,10 +39,10 @@ async function register({ email, password, fullName }) {
   try {
     return await withTransaction(async (client) => {
       const userResult = await client.query(
-        `INSERT INTO users (email, password_hash, full_name, mpin_hash, mpin_expires_at)
-         VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5))
-         RETURNING id, email, full_name`,
-        [normalizedEmail, passwordHash, fullName.trim(), mpinHash, expiresInSeconds],
+        `INSERT INTO users (email, password_hash, full_name, mpin_hash, mpin_expires_at, mobile_number)
+         VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6)
+         RETURNING id, email, full_name, mobile_number`,
+        [normalizedEmail, passwordHash, fullName.trim(), mpinHash, expiresInSeconds, mobile],
       );
       const user = userResult.rows[0];
 
@@ -48,7 +53,7 @@ async function register({ email, password, fullName }) {
       const account = accountResult.rows[0];
 
       return {
-        user: { id: user.id, email: user.email, fullName: user.full_name },
+        user: { id: user.id, email: user.email, fullName: user.full_name, mobileNumber: user.mobile_number },
         account: { accountNumber: account.account_number, currency: account.currency },
         // Shown to the user once. Only its hash is stored. It expires after a few minutes.
         mpin,
@@ -56,6 +61,9 @@ async function register({ email, password, fullName }) {
       };
     });
   } catch (err) {
+    if (err.code === '23505' && err.constraint === 'idx_users_mobile_number') {
+      throw conflict('MOBILE_TAKEN', 'This mobile number is already used by another PayPulse account');
+    }
     if (err.code === '23505') {
       // unique_violation on users.email
       throw conflict('EMAIL_TAKEN', 'An account with this email already exists');

@@ -42,6 +42,9 @@
         <label>Email
           <input name="email" type="email" autocomplete="email" required data-testid="register-email">
         </label>
+        <label>Mobile number <span class="hint">optional, lets others send to you by number</span>
+          <input name="mobileNumber" type="tel" inputmode="tel" placeholder="09171234567" autocomplete="tel" data-testid="register-mobile">
+        </label>
         <label>Password <span class="hint">at least 8 characters</span>
           <input name="password" type="password" autocomplete="new-password" minlength="8" required data-testid="register-password">
         </label>
@@ -103,12 +106,20 @@
 
     <main class="wallet">
       <section class="balance-card" aria-label="Wallet balance">
-        <p class="label">Available balance</p>
+        <p class="label">
+          Available balance
+          <button type="button" id="balance-toggle" class="balance-toggle" data-testid="balance-toggle"></button>
+        </p>
         <p class="balance"><span id="balance" data-testid="balance">—</span></p>
         <div class="account-row">
           <span>Account no.</span>
           <code id="account-number" data-testid="account-number">—</code>
           <button type="button" id="copy-btn" class="chip" data-testid="copy-account">Copy</button>
+        </div>
+        <div class="account-row">
+          <span>Mobile no.</span>
+          <code id="mobile-number" data-testid="mobile-number">—</code>
+          <button type="button" id="mobile-btn" class="chip" data-testid="mobile-edit">Add</button>
         </div>
         <div class="actions">
           <button type="button" class="action" data-open="send-dialog" data-testid="open-send">
@@ -133,13 +144,34 @@
 
   <!-- ============ Send money ============ -->
   <dialog id="send-dialog" class="sheet" data-testid="send-dialog">
-    <form id="send-form" class="form" novalidate>
+    <!-- Step 1: choose how to send -->
+    <div id="send-choose" class="form" data-step="choose">
       <header class="sheet-head">
         <h2>Send money</h2>
         <button type="button" class="close" data-close aria-label="Close">×</button>
       </header>
-      <label>Recipient account number
-        <input name="toAccountNumber" placeholder="PP1000000002" autocomplete="off" required data-testid="send-to">
+      <button type="button" class="send-option" data-method="express" data-testid="method-express">
+        <span class="opt-icon" aria-hidden="true">⚡</span>
+        <span class="opt-text"><strong>Express Send</strong><span>PayPulse account or mobile number</span></span>
+        <span class="opt-fee free">₱0 fee</span>
+      </button>
+      <button type="button" class="send-option" data-method="bank" data-testid="method-bank">
+        <span class="opt-icon" aria-hidden="true">🏦</span>
+        <span class="opt-text"><strong>Bank Transfer</strong><span>GCash, Maya, BDO, BPI, Metrobank</span></span>
+        <span class="opt-fee">₱15 fee</span>
+      </button>
+      <p class="hint center">Transfers above ₱1,000 also need a one-time code (OTP).</p>
+    </div>
+
+    <!-- Step 2a: Express Send -->
+    <form id="send-form" class="form" data-step="express" novalidate hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-back aria-label="Back">‹</button>
+        <h2>Express Send</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <label>Recipient <span class="hint">PayPulse account no. or mobile number</span>
+        <input name="recipient" placeholder="PP1000000002 or 09171234567" autocomplete="off" required data-testid="send-to">
       </label>
       <label>Amount (₱)
         <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="send-amount">
@@ -147,9 +179,67 @@
       <label>Note <span class="hint">optional</span>
         <input name="description" maxlength="140" placeholder="Lunch, rent, ..." data-testid="send-note">
       </label>
+      <p class="fee-preview"><span>Fee</span><strong>₱0.00 (free)</strong></p>
       <p class="form-error" role="alert"></p>
-      <p class="hint">Transfers above ₱1,000 also need a one-time code (OTP).</p>
-      <button type="submit" class="btn primary" data-testid="send-submit">Continue</button>
+      <button type="submit" class="btn primary" data-testid="send-submit">Review</button>
+    </form>
+
+    <!-- Step 2b: Bank Transfer -->
+    <form id="bank-form" class="form" data-step="bank" novalidate hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-back aria-label="Back">‹</button>
+        <h2>Bank Transfer</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <label>Bank or e-wallet
+        <select name="bankCode" required data-testid="bank-select"></select>
+      </label>
+      <label><span id="bank-account-label">Account number</span>
+        <input name="accountNumber" autocomplete="off" required data-testid="bank-account">
+      </label>
+      <label>Account name <span class="hint">as registered with the bank</span>
+        <input name="accountName" autocomplete="off" maxlength="100" required data-testid="bank-account-name">
+      </label>
+      <label>Amount (₱)
+        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="bank-amount">
+      </label>
+      <p class="fee-preview" data-testid="bank-fee-preview">
+        <span>Transfer fee <strong id="bank-fee">₱15.00</strong></span>
+        <span>Total deducted <strong id="bank-total">₱0.00</strong></span>
+      </p>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="bank-submit">Review</button>
+    </form>
+
+    <!-- Step 3: Review -->
+    <div id="send-review" class="form" data-step="review" hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" id="review-back" aria-label="Back">‹</button>
+        <h2>Review transfer</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <dl class="review" id="review-list" data-testid="review-list"></dl>
+      <div class="review-total">
+        <span>Total deducted</span>
+        <strong id="review-total" data-testid="review-total"></strong>
+      </div>
+      <button type="button" class="btn primary" id="review-confirm" data-testid="review-confirm">Confirm &amp; enter MPIN</button>
+    </div>
+  </dialog>
+
+  <!-- ============ Mobile number ============ -->
+  <dialog id="mobile-dialog" class="sheet" data-testid="mobile-dialog">
+    <form id="mobile-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2>Your mobile number</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary">Other PayPulse users can Express Send to you with this number.</p>
+      <label>Mobile number
+        <input name="mobileNumber" type="tel" inputmode="tel" placeholder="09171234567" autocomplete="tel" required data-testid="mobile-input">
+      </label>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="mobile-save">Save</button>
     </form>
   </dialog>
 

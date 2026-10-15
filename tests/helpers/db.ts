@@ -16,10 +16,12 @@ export interface IntegrityReport {
   ok: boolean;
   /** Sum of every account balance, including the system funding account. Must be 0. */
   totalBalanceCents: number;
-  /** Money held in user wallets. Must equal total successful top-ups. */
+  /** Money held in user wallets. Must equal top-ups minus money sent out to banks (incl. fees). */
   userBalanceCents: number;
   /** Total of all successful top-ups that ever entered the system. */
   totalDepositsCents: number;
+  /** Money that left user wallets through bank transfers: amounts sent out plus fees. */
+  bankOutflowCents: number;
   /** Transactions whose debits do not equal their credits. */
   unbalancedTransactions: number[];
   /** Accounts whose cached balance disagrees with their ledger history. */
@@ -56,6 +58,12 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       FROM ledger_entries le
       JOIN transactions t ON t.id = le.transaction_id
       WHERE t.type = 'DEPOSIT' AND le.direction = 'CREDIT'`);
+
+    const outflow = await client.query(`
+      SELECT COALESCE(SUM(le.amount_cents), 0) AS total
+      FROM ledger_entries le
+      JOIN accounts a ON a.id = le.account_id
+      WHERE le.direction = 'CREDIT' AND a.account_number IN ('SYS-BANK-SETTLEMENT', 'SYS-FEE-INCOME')`);
 
     const unbalanced = await client.query(`
       SELECT transaction_id
@@ -94,6 +102,7 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       totalBalanceCents: totals.rows[0].total,
       userBalanceCents: totals.rows[0].users,
       totalDepositsCents: deposits.rows[0].total,
+      bankOutflowCents: outflow.rows[0].total,
       unbalancedTransactions: unbalanced.rows.map((r) => r.transaction_id),
       mismatchedAccounts: mismatched.rows.map((r) => ({
         accountNumber: r.account_number,
@@ -106,7 +115,8 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
     // The global totals only make sense when checking the whole database.
     const totalsOk = accountNumbers?.length
       ? true
-      : report.totalBalanceCents === 0 && report.userBalanceCents === report.totalDepositsCents;
+      : report.totalBalanceCents === 0 &&
+        report.userBalanceCents === report.totalDepositsCents - report.bankOutflowCents;
 
     report.ok =
       totalsOk &&

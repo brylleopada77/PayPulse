@@ -152,3 +152,6 @@ vite.config.ts.timestamp-*
 playwright-report/
 test-results/
 reports/
+
+# Public link written by start-paypulse.ps1
+paypulse-link.txt

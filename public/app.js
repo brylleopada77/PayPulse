@@ -72,6 +72,7 @@
 
   function describe(tx) {
     if (tx.type === 'DEPOSIT') return { title: 'Added money', icon: '+' };
+    if (tx.type === 'BANK_TRANSFER') return { title: tx.description, icon: '🏦' };
     if (tx.direction === 'DEBIT') return { title: 'Money sent', icon: '↗' };
     return { title: 'Money received', icon: '↙' };
   }
@@ -220,6 +221,37 @@
   }
   addPasswordToggles();
 
+  // ---------- Hide / show balance ----------
+
+  const HIDE_BALANCE_KEY = 'paypulse.hideBalance';
+  let currentBalance = null;
+  let balanceHidden = false;
+  try { balanceHidden = localStorage.getItem(HIDE_BALANCE_KEY) === '1'; } catch { /* storage unavailable */ }
+
+  function renderBalance() {
+    const el = $('#balance');
+    if (currentBalance === null) {
+      el.textContent = '—';
+    } else {
+      el.textContent = balanceHidden ? '₱ ••••••' : money(currentBalance);
+    }
+    el.classList.toggle('masked', balanceHidden);
+
+    const button = $('#balance-toggle');
+    button.innerHTML = balanceHidden ? EYE_ICON : EYE_OFF_ICON;
+    const label = balanceHidden ? 'Show balance' : 'Hide balance';
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-pressed', String(balanceHidden));
+    button.title = label;
+  }
+
+  $('#balance-toggle').addEventListener('click', () => {
+    balanceHidden = !balanceHidden;
+    try { localStorage.setItem(HIDE_BALANCE_KEY, balanceHidden ? '1' : '0'); } catch { /* not remembered */ }
+    renderBalance();
+  });
+  renderBalance();
+
   // ---------- Views ----------
 
   function showAuth() {
@@ -245,8 +277,11 @@
     hasMpin = account.hasMpin;
     setMpinExpiry(account.mpinExpiresInSeconds);
     $('#user-name').textContent = account.accountHolder;
-    $('#balance').textContent = money(account.balance);
+    currentBalance = account.balance;
+    renderBalance();
     $('#account-number').textContent = account.accountNumber;
+    $('#mobile-number').textContent = account.mobileNumber || 'Not set';
+    $('#mobile-btn').textContent = account.mobileNumber ? 'Change' : 'Add';
     renderTransactions(history.transactions);
   }
 
@@ -273,7 +308,10 @@
       titleEl.textContent = title;
       const meta = document.createElement('div');
       meta.className = 'tx-date';
-      meta.textContent = `${tx.description} · ${formatDate(tx.createdAt)}`;
+      const bt = tx.bankTransfer;
+      meta.textContent = bt
+        ? `${bt.accountName} ${bt.accountNumber} · ${money(bt.amount)} + ${money(bt.fee)} fee · ${formatDate(tx.createdAt)}`
+        : `${tx.description} · ${formatDate(tx.createdAt)}`;
       info.append(titleEl, meta);
 
       const amountEl = document.createElement('span');
@@ -339,12 +377,12 @@
   $('#register-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
-    const { fullName, email, password } = formData(form);
+    const { fullName, email, password, mobileNumber } = formData(form);
     setFormError(form);
     try {
       const { mpin, mpinExpiresInSeconds } = await api('/api/auth/register', {
         method: 'POST',
-        body: { fullName, email, password },
+        body: { fullName, email, password, mobileNumber: mobileNumber.trim() || undefined },
       });
       await login(email, password);
       form.reset();
@@ -361,6 +399,7 @@
 
   document.querySelectorAll('[data-open]').forEach((btn) => {
     btn.addEventListener('click', () => {
+      if (btn.dataset.open === 'send-dialog') return openSendDialog();
       const dialog = document.getElementById(btn.dataset.open);
       const form = dialog.querySelector('form');
       form.reset();
@@ -414,6 +453,35 @@
     }
   });
 
+  // ---------- Mobile number ----------
+
+  const mobileDialog = $('#mobile-dialog');
+  const mobileForm = $('#mobile-form');
+
+  $('#mobile-btn').addEventListener('click', () => {
+    mobileForm.reset();
+    setFormError(mobileForm);
+    const current = $('#mobile-number').textContent;
+    if (/^09d{9}$/.test(current)) mobileForm.elements.mobileNumber.value = current;
+    mobileDialog.showModal();
+  });
+
+  mobileForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setFormError(mobileForm);
+    try {
+      const { mobileNumber } = await api('/api/accounts/me/mobile', {
+        method: 'PUT',
+        body: { mobileNumber: mobileForm.elements.mobileNumber.value.trim() },
+      });
+      mobileDialog.close();
+      toast(`Mobile number saved: ${mobileNumber}`, 'success');
+      await loadWallet();
+    } catch (err) {
+      setFormError(mobileForm, err.message);
+    }
+  });
+
   // ---------- Send money: details -> MPIN -> (OTP above ₱1,000) ----------
 
   const sendDialog = $('#send-dialog');
@@ -425,27 +493,173 @@
   const mpinInput = createCodeInput($('#mpin-input'));
   const otpInput = createCodeInput($('#otp-input'));
 
-  // The transfer being confirmed: { toAccountNumber, amount, description, mpin, challengeId }
+  const bankForm = $('#bank-form');
+
+  /**
+   * The transfer being confirmed:
+   * { method: 'express' | 'bank', endpoint, body, summary, mpin?, challengeId? }
+   * `body` is what the API needs (without mpin / OTP), `summary` is shown on the MPIN pad.
+   */
   let pending = null;
   let otpTimer = null;
 
   const AMOUNT_PATTERN = /^\d+(\.\d{1,2})?$/;
+  const validAmount = (value) => AMOUNT_PATTERN.test(value) && Number(value) > 0;
+
+  // ----- Step navigation inside the Send dialog -----
+
+  function showSendStep(step) {
+    sendDialog.querySelectorAll('[data-step]').forEach((el) => { el.hidden = el.dataset.step !== step; });
+  }
+
+  function openSendDialog() {
+    pending = null;
+    for (const form of [sendForm, bankForm]) {
+      form.reset();
+      setFormError(form);
+    }
+    showSendStep('choose');
+    sendDialog.showModal();
+  }
+
+  sendDialog.querySelectorAll('[data-method]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.method === 'bank') {
+        await loadBanks();
+        updateBankForm();
+      }
+      showSendStep(btn.dataset.method);
+      sendDialog.querySelector(`[data-step="${btn.dataset.method}"] input, [data-step="${btn.dataset.method}"] select`)?.focus();
+    });
+  });
+  sendDialog.querySelectorAll('[data-back]').forEach((btn) => btn.addEventListener('click', () => showSendStep('choose')));
+  $('#review-back').addEventListener('click', () => showSendStep(pending?.method || 'choose'));
+
+  // ----- Bank list + fee (from GET /api/transfers/banks) -----
+
+  let bankInfo = null; // { feeCents, banks: [{ code, name, accountType }] }
+
+  async function loadBanks() {
+    if (bankInfo) return;
+    try {
+      bankInfo = await api('/api/transfers/banks');
+    } catch {
+      bankInfo = { feeCents: 1500, banks: [] };
+    }
+    $('#bank-form').elements.bankCode.replaceChildren(
+      ...bankInfo.banks.map((b) => Object.assign(document.createElement('option'), { value: b.code, textContent: b.name })),
+    );
+  }
+
+  const selectedBank = () => bankInfo?.banks.find((b) => b.code === bankForm.elements.bankCode.value);
+
+  function updateBankForm() {
+    const bank = selectedBank();
+    const input = bankForm.elements.accountNumber;
+    if (bank?.accountType === 'MOBILE') {
+      $('#bank-account-label').textContent = `${bank.name} mobile number`;
+      input.placeholder = '09171234567';
+      input.inputMode = 'tel';
+    } else {
+      $('#bank-account-label').textContent = `${bank?.name ?? 'Bank'} account number`;
+      input.placeholder = '10 to 16 digits';
+      input.inputMode = 'numeric';
+    }
+    const fee = (bankInfo?.feeCents ?? 1500) / 100;
+    const amount = bankForm.elements.amount.value.trim();
+    $('#bank-fee').textContent = money(fee);
+    $('#bank-total').textContent = validAmount(amount) ? money(Number(amount) + fee) : money(fee);
+  }
+  bankForm.elements.bankCode.addEventListener('change', updateBankForm);
+  bankForm.elements.amount.addEventListener('input', updateBankForm);
+
+  // ----- Step 2 -> Review -----
+
+  /** "PP1000000002" -> account; "0917 123 4567" / "+639171234567" -> mobile; else null. */
+  function parseRecipient(text) {
+    const value = text.trim().toUpperCase();
+    if (/^PP\d+$/.test(value)) return { toAccountNumber: value, label: value };
+    let digits = value.replace(/[\s-]/g, '');
+    if (digits.startsWith('+63')) digits = `0${digits.slice(3)}`;
+    else if (/^63\d{10}$/.test(digits)) digits = `0${digits.slice(2)}`;
+    if (/^09\d{9}$/.test(digits)) return { toMobileNumber: digits, label: digits };
+    return null;
+  }
 
   sendForm.addEventListener('submit', (event) => {
     event.preventDefault();
-    const { toAccountNumber, amount, description } = formData(sendForm);
+    const { recipient, amount, description } = formData(sendForm);
     setFormError(sendForm);
 
-    if (!toAccountNumber.trim()) return setFormError(sendForm, 'Enter the recipient account number.');
-    if (!AMOUNT_PATTERN.test(amount.trim()) || Number(amount) <= 0) {
-      return setFormError(sendForm, 'Enter a valid amount, e.g. 250 or 99.50.');
-    }
+    const to = parseRecipient(recipient);
+    if (!to) return setFormError(sendForm, 'Enter a PayPulse account number (PP...) or a mobile number (09...).');
+    if (!validAmount(amount.trim())) return setFormError(sendForm, 'Enter a valid amount, e.g. 250 or 99.50.');
 
-    pending = {
-      toAccountNumber: toAccountNumber.trim(),
-      amount: amount.trim(),
-      description: description.trim() || undefined,
-    };
+    const { label, ...recipientFields } = to;
+    const note = description.trim() || undefined;
+    showReview({
+      method: 'express',
+      endpoint: '/api/transfers',
+      body: { ...recipientFields, amount: amount.trim(), description: note },
+      summary: label,
+      rows: [
+        ['Send via', 'Express Send (PayPulse)'],
+        [to.toMobileNumber ? 'Mobile number' : 'Account no.', label],
+        ...(note ? [['Note', note]] : []),
+        ['Amount', money(amount)],
+        ['Transfer fee', `${money(0)} (free)`],
+      ],
+      totalCents: Math.round(Number(amount) * 100),
+    });
+  });
+
+  bankForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const { accountNumber, accountName, amount } = formData(bankForm);
+    const bank = selectedBank();
+    setFormError(bankForm);
+
+    if (!bank) return setFormError(bankForm, 'Choose a bank or e-wallet.');
+    if (!accountNumber.trim()) return setFormError(bankForm, `Enter the ${$('#bank-account-label').textContent.toLowerCase()}.`);
+    if (accountName.trim().length < 2) return setFormError(bankForm, "Enter the account holder's name.");
+    if (!validAmount(amount.trim())) return setFormError(bankForm, 'Enter a valid amount, e.g. 250 or 99.50.');
+
+    const feeCents = bankInfo.feeCents;
+    const amountCents = Math.round(Number(amount) * 100);
+    const account = accountNumber.replace(/[\s-]/g, '');
+    showReview({
+      method: 'bank',
+      endpoint: '/api/transfers/bank',
+      body: { bankCode: bank.code, accountNumber: account, accountName: accountName.trim(), amount: amount.trim() },
+      summary: `${bank.name} ••••${account.slice(-4)}`,
+      rows: [
+        ['Send via', 'Bank Transfer'],
+        ['Bank', bank.name],
+        [bank.accountType === 'MOBILE' ? 'Mobile number' : 'Account no.', account],
+        ['Account name', accountName.trim()],
+        ['Amount', money(amount)],
+        ['Transfer fee', money(feeCents / 100)],
+      ],
+      totalCents: amountCents + feeCents,
+    });
+  });
+
+  function showReview(transfer) {
+    pending = transfer;
+    $('#review-list').replaceChildren(
+      ...transfer.rows.flatMap(([term, value]) => [
+        Object.assign(document.createElement('dt'), { textContent: term }),
+        Object.assign(document.createElement('dd'), { textContent: value }),
+      ]),
+    );
+    $('#review-total').textContent = money(transfer.totalCents / 100);
+    showSendStep('review');
+  }
+
+  // ----- Review -> MPIN -----
+
+  $('#review-confirm').addEventListener('click', () => {
+    if (!pending) return;
     sendDialog.close();
     // No MPIN yet, or it expired: get one first, then continue to the PIN pad (see #mpin-saved).
     if (!hasMpin) return openMpinReset('setup');
@@ -454,11 +668,13 @@
   });
 
   function openMpinPad() {
+    const strong = (text) => Object.assign(document.createElement('strong'), { textContent: text });
     $('#mpin-summary').replaceChildren(
       'You are sending ',
-      Object.assign(document.createElement('strong'), { textContent: money(pending.amount) }),
+      strong(money(pending.body.amount)),
       ' to ',
-      Object.assign(document.createElement('strong'), { textContent: pending.toAccountNumber }),
+      strong(pending.summary),
+      ...(pending.method === 'bank' ? [` (total ${money(pending.totalCents / 100)} incl. fee)`] : []),
     );
     setFormError(mpinForm);
     mpinDialog.showModal();
@@ -467,8 +683,7 @@
   }
 
   function transferBody(extra = {}) {
-    const { toAccountNumber, amount, description, mpin } = pending;
-    return { toAccountNumber, amount, description, mpin, ...extra };
+    return { ...pending.body, mpin: pending.mpin, ...extra };
   }
 
   async function completeTransfer(result) {
@@ -477,17 +692,27 @@
     otpDialog.close();
     hidePopover($('#sms'));
     pending = null;
-    toast(`Sent ${money(result.amount)} to ${result.to}`, 'success');
+    if (result.method === 'BANK') {
+      toast(
+        `Sent ${money(result.amount)} to ${result.bank.name} ${result.accountNumber} ` +
+          `(${money(result.totalDeducted)} incl. ${money(result.fee)} fee) · Ref ${result.reference}`,
+        'success',
+      );
+    } else {
+      toast(`Sent ${money(result.amount)} to ${result.receiverName} (${result.to})`, 'success');
+    }
     await loadWallet();
   }
 
-  /** Errors about the transfer itself (receiver, funds, amount) belong on the Send form. */
+  /** Errors about the transfer itself (receiver, funds, amount) go back to its form. */
   function backToSendForm(message) {
     stopOtpTimer();
     mpinDialog.close();
     otpDialog.close();
+    const method = pending?.method || 'express';
     sendDialog.showModal();
-    setFormError(sendForm, message);
+    showSendStep(method);
+    setFormError(method === 'bank' ? bankForm : sendForm, message);
   }
 
   mpinForm.addEventListener('submit', async (event) => {
@@ -499,7 +724,7 @@
 
     // The Confirm button is intentionally left enabled while this request runs (QA exercise).
     try {
-      const result = await api('/api/transfers', { method: 'POST', body: transferBody({ mpin }) });
+      const result = await api(pending.endpoint, { method: 'POST', body: transferBody({ mpin }) });
       if (result.otpRequired) {
         pending.mpin = mpin;
         mpinDialog.close();
@@ -582,7 +807,7 @@
     if (!/^\d{6}$/.test(otp)) return setFormError(otpForm, 'Enter all 6 digits of the code.');
 
     try {
-      const result = await api('/api/transfers', {
+      const result = await api(pending.endpoint, {
         method: 'POST',
         body: transferBody({ otpChallengeId: pending.challengeId, otp }),
       });
@@ -616,7 +841,7 @@
     if (!pending) return;
     $('#otp-resend').disabled = true;
     try {
-      const result = await api('/api/transfers', { method: 'POST', body: transferBody() });
+      const result = await api(pending.endpoint, { method: 'POST', body: transferBody() });
       if (result.otpRequired) {
         startOtp(result);
         toast('A new code has been sent');

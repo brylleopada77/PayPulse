@@ -73,7 +73,8 @@ export async function getBalanceCents(request: APIRequestContext, user: TestUser
 }
 
 export interface TransferData {
-  toAccountNumber: unknown;
+  toAccountNumber?: unknown;
+  toMobileNumber?: unknown;
   amount: unknown;
   description?: string;
   mpin?: unknown;
@@ -92,4 +93,37 @@ export function transfer(request: APIRequestContext, from: TestUser, data: Trans
 /** A well-formed MPIN that is guaranteed to be wrong for this user. */
 export function wrongMpinFor(user: TestUser): string {
   return user.mpin === '000000' ? '111111' : '000000';
+}
+
+/** A random mobile number in 09XXXXXXXXX format. */
+export function uniqueMobile(): string {
+  return `09${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}`;
+}
+
+/** Give a user a mobile number so others can Express Send to it. */
+export async function setMobile(request: APIRequestContext, user: TestUser, mobileNumber = uniqueMobile()) {
+  const response = await request.put('/api/accounts/me/mobile', {
+    data: { mobileNumber },
+    headers: authHeader(user.token),
+  });
+  expect(response.status(), await response.text()).toBe(200);
+  return (await response.json()).mobileNumber as string;
+}
+
+export interface BankTransferData {
+  bankCode: unknown;
+  accountNumber: unknown;
+  accountName: unknown;
+  amount: unknown;
+  mpin?: unknown;
+  otpChallengeId?: unknown;
+  otp?: unknown;
+}
+
+/** POST /api/transfers/bank. Sends the sender's own MPIN unless the test passes its own `mpin`. */
+export function bankTransfer(request: APIRequestContext, from: TestUser, data: BankTransferData) {
+  return request.post('/api/transfers/bank', {
+    data: { mpin: from.mpin, ...data },
+    headers: authHeader(from.token),
+  });
 }
