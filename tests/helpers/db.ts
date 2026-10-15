@@ -128,6 +128,22 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
   });
 }
 
+/**
+ * Test hook: move an account's outgoing transactions back in time (instead of waiting),
+ * e.g. 11 seconds to get past the anti-spam window, or 1 day to make them "yesterday".
+ */
+export async function ageOutgoingTransactions(accountNumber: string, interval: string): Promise<void> {
+  await withClient((client) =>
+    client.query(
+      `UPDATE transactions SET created_at = created_at - $2::interval
+       WHERE id IN (SELECT le.transaction_id FROM ledger_entries le
+                    JOIN accounts a ON a.id = le.account_id
+                    WHERE a.account_number = $1 AND le.direction = 'DEBIT')`,
+      [accountNumber, interval],
+    ),
+  );
+}
+
 /** Test hook: make an OTP challenge expire now instead of waiting 30 seconds. */
 export async function expireOtpChallenge(challengeId: string): Promise<void> {
   await withClient((client) =>

@@ -28,7 +28,8 @@ test.describe('Concurrency', () => {
 
     const statuses = responses.map((r) => r.status());
     const succeeded = statuses.filter((s) => s === 201).length;
-    const rejected = statuses.filter((s) => s === 422).length;
+    // 422 = insufficient funds, 429 = anti-spam rule (more than 3 transfers in 10 seconds)
+    const rejected = statuses.filter((s) => s === 422 || s === 429).length;
     console.log(`Statuses: ${statuses.join(', ')}  ->  ${succeeded} succeeded, ${rejected} rejected`);
 
     const senderBalance = await getBalanceCents(request, sender);
@@ -41,7 +42,7 @@ test.describe('Concurrency', () => {
 
     const maxPossible = Math.floor(STARTING_BALANCE / TRANSFER_AMOUNT);
     expect.soft(succeeded, 'more transfers succeeded than the balance allows').toBeLessThanOrEqual(maxPossible);
-    expect.soft(succeeded + rejected, 'every request should be a 201 or a 422').toBe(PARALLEL_REQUESTS);
+    expect.soft(succeeded + rejected, 'every request should be a 201, 422 or 429').toBe(PARALLEL_REQUESTS);
     expect.soft(senderBalance + receiverBalance, 'money was created or destroyed').toBe(STARTING_BALANCE * 100);
     expect.soft(senderBalance).toBe(STARTING_BALANCE * 100 - succeeded * TRANSFER_AMOUNT * 100);
     expect.soft(report.mismatchedAccounts, 'cached balances disagree with the ledger').toEqual([]);

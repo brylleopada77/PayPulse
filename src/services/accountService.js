@@ -3,6 +3,8 @@ const { findBank } = require('./banks');
 const { conflict, notFound } = require('../utils/errors');
 const { fromCents } = require('../utils/money');
 const { requireMobile } = require('../utils/mobile');
+const { maskAccount } = require('../utils/privacy');
+const { formatReference } = require('./receiptService');
 
 async function getAccountForUser(userId) {
   const { rows } = await pool.query(
@@ -69,6 +71,7 @@ async function getTransactions(userId, limit = 50) {
 
   return rows.map((row) => ({
     transactionId: row.id,
+    reference: formatReference(row.id, row.created_at),
     type: row.type,
     direction: row.direction,
     amount: fromCents(row.amount_cents),
@@ -77,9 +80,9 @@ async function getTransactions(userId, limit = 50) {
     createdAt: row.created_at,
     ...(row.reference && {
       bankTransfer: {
-        reference: row.reference,
+        bankReference: row.reference,
         bank: findBank(row.bank_code)?.name ?? row.bank_code,
-        accountNumber: `••••${row.bank_account.slice(-4)}`,
+        accountNumber: maskAccount(row.bank_account),
         accountName: row.account_name,
         amount: fromCents(row.bank_amount_cents),
         fee: fromCents(row.fee_cents),

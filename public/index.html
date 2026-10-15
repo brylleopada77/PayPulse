@@ -116,11 +116,6 @@
           <code id="account-number" data-testid="account-number">—</code>
           <button type="button" id="copy-btn" class="chip" data-testid="copy-account">Copy</button>
         </div>
-        <div class="account-row">
-          <span>Mobile no.</span>
-          <code id="mobile-number" data-testid="mobile-number">—</code>
-          <button type="button" id="mobile-btn" class="chip" data-testid="mobile-edit">Add</button>
-        </div>
         <div class="actions">
           <button type="button" class="action" data-open="send-dialog" data-testid="open-send">
             <span class="icon" aria-hidden="true">↗</span>Send
@@ -227,20 +222,28 @@
     </div>
   </dialog>
 
-  <!-- ============ Mobile number ============ -->
-  <dialog id="mobile-dialog" class="sheet" data-testid="mobile-dialog">
-    <form id="mobile-form" class="form" novalidate>
-      <header class="sheet-head">
-        <h2>Your mobile number</h2>
-        <button type="button" class="close" data-close aria-label="Close">×</button>
-      </header>
-      <p class="summary">Other PayPulse users can Express Send to you with this number.</p>
-      <label>Mobile number
-        <input name="mobileNumber" type="tel" inputmode="tel" placeholder="09171234567" autocomplete="tel" required data-testid="mobile-input">
-      </label>
-      <p class="form-error" role="alert"></p>
-      <button type="submit" class="btn primary" data-testid="mobile-save">Save</button>
-    </form>
+  <!-- ============ Transaction receipt ============ -->
+  <dialog id="receipt-dialog" class="sheet receipt-sheet" aria-labelledby="receipt-title" data-testid="receipt-dialog">
+    <div class="receipt-head">
+      <span class="receipt-check" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      </span>
+      <h2 id="receipt-title" data-testid="receipt-title">Transfer Successful</h2>
+      <p class="receipt-amount" id="receipt-amount" data-testid="receipt-amount"></p>
+      <p class="receipt-date" id="receipt-date" data-testid="receipt-date"></p>
+    </div>
+    <div class="receipt-body">
+      <div class="receipt-ref">
+        <span>Reference No.</span>
+        <strong id="receipt-ref" data-testid="receipt-ref"></strong>
+      </div>
+      <dl class="review receipt-rows" id="receipt-rows" data-testid="receipt-rows"></dl>
+      <p class="receipt-note">PayPulse demo receipt. Amounts are play money.</p>
+      <div class="receipt-actions">
+        <button type="button" class="btn secondary" id="receipt-download" data-testid="receipt-download">Download / Save Receipt</button>
+        <button type="button" class="btn primary" id="receipt-done" data-testid="receipt-done">Done</button>
+      </div>
+    </div>
   </dialog>
 
   <!-- ============ MPIN ============ -->
@@ -253,7 +256,7 @@
       <p class="summary" id="mpin-summary" data-testid="mpin-summary"></p>
       <div class="code-input" id="mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="mpin-input"></div>
       <p class="countdown" id="mpin-pad-timer" data-testid="mpin-pad-timer"></p>
-      <button type="button" class="btn link" id="forgot-mpin" data-testid="forgot-mpin">Forgot MPIN?</button>
+      <button type="button" class="btn link" id="forgot-mpin" data-testid="forgot-mpin">Forgot or didn't get your MPIN?</button>
       <p class="form-error" role="alert"></p>
       <!-- Intentionally NOT disabled while the request is in flight (see QA_NOTES.md):
            double-clicking sends duplicate transfers and exposes the backend race condition. -->
@@ -269,6 +272,7 @@
       </header>
       <p class="summary">Use this 6-digit MPIN to confirm every transfer.</p>
       <p class="mpin-reveal" id="mpin-reveal" data-testid="mpin-reveal"></p>
+      <button type="button" class="chip copy-mpin" id="mpin-copy" data-testid="mpin-copy">Copy MPIN</button>
       <p class="countdown" id="mpin-reveal-timer" aria-live="polite" data-testid="mpin-reveal-timer"></p>
       <p class="warning">It will <strong>not</strong> be shown again and works for <strong>5 minutes</strong>. After that, get a new one with your password. PayPulse will never ask you for your MPIN.</p>
       <button type="button" class="btn primary" id="mpin-saved" data-testid="mpin-saved">I've saved my MPIN</button>

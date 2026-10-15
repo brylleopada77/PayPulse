@@ -33,6 +33,17 @@ When several requests arrive at the same moment (a user double-clicking the MPIN
 Result: the sender paid 30 once but the receiver got 60. **Money was created.**
 This is a classic *lost update*.
 
+## Same root cause: the transfer limits can be bypassed
+
+The daily ₱50,000 limit and the anti-spam rule (3 transfers / 10 seconds) in
+`src/services/limitsService.js` also read the account's history **without a lock**. Sequential
+requests are limited correctly, but a burst of simultaneous requests all read "0 transfers so far"
+and all pass. In `concurrency.spec.ts` you'll typically see 7 to 10 of the 10 parallel requests
+succeed (201) even though only 3 are allowed in 10 seconds, plus the money created by the race.
+
+Locking the sender's account row (Option 1 below) fixes all three problems at once, as long as the
+limit checks run inside the same transaction, after the lock.
+
 ## How the tests catch it
 
 | Test | What it sees |

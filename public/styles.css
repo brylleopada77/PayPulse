@@ -197,6 +197,38 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 }
 .review-total strong { font-size: 1.4rem; color: var(--brand-dark); font-variant-numeric: tabular-nums; }
 
+/* ---------- Transaction receipt ---------- */
+.receipt-sheet { padding: 0; overflow: hidden; width: min(400px, calc(100vw - 32px)); }
+.receipt-head {
+  padding: 28px 24px 22px; text-align: center; color: #fff;
+  background: linear-gradient(135deg, var(--brand) 0%, #7a4cf0 55%, var(--accent) 140%);
+}
+.receipt-check {
+  width: 56px; height: 56px; margin: 0 auto 10px; border-radius: 50%;
+  display: grid; place-items: center; background: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.receipt-check svg { width: 30px; height: 30px; fill: none; stroke: var(--success); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.receipt-head h2 { font-size: 1.15rem; }
+.receipt-amount { margin: 8px 0 2px; font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.receipt-date { margin: 0; opacity: 0.9; font-size: 0.88rem; }
+.receipt-body { padding: 18px 24px 22px; display: grid; gap: 14px; }
+.receipt-ref {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 10px; background: #f0eeff; font-size: 0.9rem; color: var(--muted);
+}
+.receipt-ref strong { color: var(--brand-dark); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.02em; }
+.receipt-rows { padding-bottom: 14px; border-bottom: 1px dashed var(--border); font-size: 0.92rem; }
+.receipt-rows dd.total { color: var(--brand-dark); font-size: 1.05rem; }
+.receipt-note { margin: 0; text-align: center; color: var(--muted); font-size: 0.78rem; }
+.receipt-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btn.secondary { background: #f0eeff; color: var(--brand-dark); width: 100%; }
+.btn.secondary:hover { background: #e4e0ff; }
+
+/* Recent activity rows open their receipt */
+.tx[role="button"] { cursor: pointer; border-radius: 10px; margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
+.tx[role="button"]:hover { background: #f7f6ff; }
+.tx[role="button"]:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
 /* ---------- MPIN / OTP ---------- */
 .summary { margin: 0; color: var(--muted); text-align: center; }
 .summary strong { color: var(--text); }
@@ -205,6 +237,8 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   padding: 14px 0 14px 0.35em; border-radius: 14px; background: #f0eeff; color: var(--brand-dark);
   font-variant-numeric: tabular-nums; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
+.copy-mpin { justify-self: center; margin-top: -6px; padding: 6px 16px; font-weight: 600; color: var(--brand-dark); border-color: #d9d4ff; background: #f7f6ff; }
+.copy-mpin.copied { color: var(--success); border-color: #b9ead9; background: #e1f7ef; }
 .warning { margin: 0; padding: 10px 12px; border-radius: 10px; background: #fff4d6; color: #6b4600; font-size: 0.88rem; }
 .code-input { display: flex; justify-content: center; gap: 8px; }
 .form .code-input input {

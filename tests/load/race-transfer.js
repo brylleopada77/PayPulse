@@ -89,7 +89,8 @@ export default function ({ sender, receiver }) {
     auth(sender.token),
   );
 
-  check(res, { 'status is 201 or 422': (r) => r.status === 201 || r.status === 422 });
+  // 422 = insufficient funds, 429 = anti-spam rule (more than 3 transfers in 10 seconds)
+  check(res, { 'status is 201, 422 or 429': (r) => [201, 422, 429].includes(r.status) });
   if (res.status === 201) successfulTransfers.add(1);
 }
 

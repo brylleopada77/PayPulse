@@ -280,8 +280,6 @@
     currentBalance = account.balance;
     renderBalance();
     $('#account-number').textContent = account.accountNumber;
-    $('#mobile-number').textContent = account.mobileNumber || 'Not set';
-    $('#mobile-btn').textContent = account.mobileNumber ? 'Change' : 'Add';
     renderTransactions(history.transactions);
   }
 
@@ -297,6 +295,17 @@
       const li = document.createElement('li');
       li.className = `tx ${incoming ? 'in' : 'out'}`;
       li.dataset.testid = 'tx-item';
+      // Each row opens its receipt (click, Enter or Space).
+      li.tabIndex = 0;
+      li.setAttribute('role', 'button');
+      li.setAttribute('aria-label', `${title}, ${money(tx.amount)}. View receipt`);
+      li.addEventListener('click', () => openReceipt(tx.transactionId));
+      li.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openReceipt(tx.transactionId);
+        }
+      });
 
       const iconEl = document.createElement('span');
       iconEl.className = 'tx-icon';
@@ -416,13 +425,26 @@
     loadWallet().then(() => toast('Balance updated')).catch((err) => toast(err.message, 'error'));
   });
 
-  $('#copy-btn').addEventListener('click', async () => {
+  /** Copy text to the clipboard; falls back to the older method where the Clipboard API is blocked. */
+  async function copyText(text) {
     try {
-      await navigator.clipboard.writeText($('#account-number').textContent);
-      toast('Account number copied');
+      await navigator.clipboard.writeText(text);
+      return true;
     } catch {
-      toast('Could not copy. Select the number and copy it manually.', 'error');
+      const area = Object.assign(document.createElement('textarea'), { value: text, readOnly: true });
+      area.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+      // Inside an open <dialog> the textarea must live in the dialog to be focusable.
+      (document.querySelector('dialog[open]') || document.body).append(area);
+      area.select();
+      const ok = document.execCommand('copy');
+      area.remove();
+      return ok;
     }
+  }
+
+  $('#copy-btn').addEventListener('click', async () => {
+    if (await copyText($('#account-number').textContent)) toast('Account number copied');
+    else toast('Could not copy. Select the number and copy it manually.', 'error');
   });
 
   document.querySelectorAll('[data-amount]').forEach((chip) => {
@@ -450,35 +472,6 @@
       await loadWallet();
     } catch (err) {
       setFormError(form, err.message);
-    }
-  });
-
-  // ---------- Mobile number ----------
-
-  const mobileDialog = $('#mobile-dialog');
-  const mobileForm = $('#mobile-form');
-
-  $('#mobile-btn').addEventListener('click', () => {
-    mobileForm.reset();
-    setFormError(mobileForm);
-    const current = $('#mobile-number').textContent;
-    if (/^09d{9}$/.test(current)) mobileForm.elements.mobileNumber.value = current;
-    mobileDialog.showModal();
-  });
-
-  mobileForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    setFormError(mobileForm);
-    try {
-      const { mobileNumber } = await api('/api/accounts/me/mobile', {
-        method: 'PUT',
-        body: { mobileNumber: mobileForm.elements.mobileNumber.value.trim() },
-      });
-      mobileDialog.close();
-      toast(`Mobile number saved: ${mobileNumber}`, 'success');
-      await loadWallet();
-    } catch (err) {
-      setFormError(mobileForm, err.message);
     }
   });
 
@@ -692,16 +685,8 @@
     otpDialog.close();
     hidePopover($('#sms'));
     pending = null;
-    if (result.method === 'BANK') {
-      toast(
-        `Sent ${money(result.amount)} to ${result.bank.name} ${result.accountNumber} ` +
-          `(${money(result.totalDeducted)} incl. ${money(result.fee)} fee) · Ref ${result.reference}`,
-        'success',
-      );
-    } else {
-      toast(`Sent ${money(result.amount)} to ${result.receiverName} (${result.to})`, 'success');
-    }
     await loadWallet();
+    await openReceipt(result.transactionId);
   }
 
   /** Errors about the transfer itself (receiver, funds, amount) go back to its form. */
@@ -863,10 +848,42 @@
   /** Show a freshly generated MPIN. The user must acknowledge it before continuing. */
   function showMpinReveal(mpin, expiresInSeconds) {
     $('#mpin-reveal').textContent = mpin;
+    resetMpinCopyButton();
     setMpinExpiry(expiresInSeconds);
     revealDialog.showModal();
     updateMpinTimers();
+    // Also "deliver" it like a text message (mock SMS), so it is still visible after this screen.
+    showMockMessage(
+      '💬 Messages',
+      `PayPulse: Your MPIN is ${mpin}. It works for ${Math.round(expiresInSeconds / 60)} minutes. ` +
+        'Never share it with anyone.',
+      60_000,
+    );
   }
+
+  let mpinCopyTimer = null;
+  function resetMpinCopyButton() {
+    clearTimeout(mpinCopyTimer);
+    const button = $('#mpin-copy');
+    button.textContent = 'Copy MPIN';
+    button.classList.remove('copied');
+  }
+
+  // Copy the MPIN, then paste it into the PIN pad (the pad accepts pasted digits).
+  $('#mpin-copy').addEventListener('click', async () => {
+    const mpin = $('#mpin-reveal').textContent.trim();
+    if (!mpin) return;
+    if (await copyText(mpin)) {
+      const button = $('#mpin-copy');
+      button.textContent = 'Copied ✓';
+      button.classList.add('copied');
+      clearTimeout(mpinCopyTimer);
+      mpinCopyTimer = setTimeout(resetMpinCopyButton, 2500);
+      toast('MPIN copied. Paste it into the PIN pad (Ctrl+V).', 'success');
+    } else {
+      toast('Could not copy. Please write the MPIN down instead.', 'error');
+    }
+  });
 
   /** Live "expires in m:ss" on the reveal screen and the PIN pad. */
   function updateMpinTimers() {
@@ -897,8 +914,8 @@
 
   const RESET_MODES = {
     forgot: {
-      title: 'Forgot MPIN',
-      text: "Enter your account password and we'll give you a new random MPIN.",
+      title: 'Get a new MPIN',
+      text: "Forgot your MPIN or didn't get it? Enter your account password and we'll send you a new random MPIN.",
       button: 'Get a new MPIN',
     },
     setup: {
@@ -1072,6 +1089,183 @@
       }
     }
   });
+
+  // ---------- Transaction receipt ----------
+
+  const receiptDialog = $('#receipt-dialog');
+  let currentReceipt = null;
+
+  const RECEIPT_TIME = new Intl.DateTimeFormat('en-PH', {
+    timeZone: 'Asia/Manila',
+    dateStyle: 'long',
+    timeStyle: 'medium',
+  });
+
+  /** [label, value, isTotal?] rows shared by the modal and the downloaded image. */
+  function receiptRows(r) {
+    const hasFee = Number(r.fee) > 0;
+    if (r.type === 'DEPOSIT') {
+      return [
+        ['Amount', money(r.amount)],
+        ['Fee', `${money(0)} (free)`],
+        ['Paid with', 'Card payment (test mode)'],
+        ['Payment ID', r.sender.account],
+        ['Recipient Name', r.recipient.name],
+        ['Recipient Account', r.recipient.account],
+        ['Bank Name', r.bankName],
+      ];
+    }
+    return [
+      ['Amount', money(r.amount)],
+      ['Fee', hasFee ? money(r.fee) : `${money(0)} (free)`],
+      ...(hasFee ? [['Total deducted', money(r.total), true]] : []),
+      ['Sender Name', r.sender.name],
+      ['Sender Account', r.sender.account],
+      ['Recipient Name', r.recipient.name],
+      ['Recipient Account', r.recipient.account],
+      ['Bank Name', r.bankName],
+      ...(r.note ? [['Note', r.note]] : []),
+      ...(r.bankReference ? [['Bank Reference', r.bankReference]] : []),
+    ];
+  }
+
+  /** Big number at the top: what left your wallet (incl. fee), or what arrived. */
+  const receiptHeadline = (r) => `${r.direction === 'SENT' ? '−' : '+'}${money(r.direction === 'SENT' ? r.total : r.amount)}`;
+
+  async function openReceipt(transactionId) {
+    try {
+      const r = await api(`/api/accounts/me/transactions/${transactionId}/receipt`);
+      currentReceipt = r;
+      $('#receipt-title').textContent = r.title;
+      $('#receipt-amount').textContent = receiptHeadline(r);
+      $('#receipt-date').textContent = RECEIPT_TIME.format(new Date(r.createdAt));
+      $('#receipt-ref').textContent = r.reference;
+      $('#receipt-rows').replaceChildren(
+        ...receiptRows(r).flatMap(([label, value, isTotal]) => [
+          Object.assign(document.createElement('dt'), { textContent: label }),
+          Object.assign(document.createElement('dd'), { textContent: value, className: isTotal ? 'total' : '' }),
+        ]),
+      );
+      if (!receiptDialog.open) receiptDialog.showModal();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  $('#receipt-done').addEventListener('click', () => receiptDialog.close());
+
+  $('#receipt-download').addEventListener('click', async () => {
+    if (!currentReceipt) return;
+    try {
+      const blob = await drawReceiptImage(currentReceipt);
+      const link = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(blob),
+        download: `PayPulse-receipt-${currentReceipt.reference}.png`,
+      });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+      toast('Receipt saved to your downloads', 'success');
+    } catch {
+      toast('Could not create the receipt image.', 'error');
+    }
+  });
+
+  /** Draw the receipt on a canvas (2x for sharp text) and return it as a PNG blob. */
+  function drawReceiptImage(r) {
+    const W = 380;
+    const PAD = 24;
+    const ROW = 30;
+    const rows = [['Reference No.', r.reference], ...receiptRows(r)];
+    const headH = 190;
+    const H = headH + 20 + rows.length * ROW + 70;
+    const scale = 2;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W * scale;
+    canvas.height = H * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+    const font = (size, weight = 400) => `${weight} ${size}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+
+    // Card background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    // Purple header
+    const gradient = ctx.createLinearGradient(0, 0, W, headH);
+    gradient.addColorStop(0, '#5b4cf0');
+    gradient.addColorStop(0.55, '#7a4cf0');
+    gradient.addColorStop(1, '#3fa9c9');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, headH);
+
+    // Check icon
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(W / 2, 46, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#12996e';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(W / 2 - 10, 47);
+    ctx.lineTo(W / 2 - 3, 54);
+    ctx.lineTo(W / 2 + 11, 39);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.font = font(18, 700);
+    ctx.fillText(r.title, W / 2, 98);
+    ctx.font = font(30, 700);
+    ctx.fillText(receiptHeadline(r), W / 2, 138);
+    ctx.font = font(13);
+    ctx.fillText(RECEIPT_TIME.format(new Date(r.createdAt)), W / 2, 164);
+
+    // Rows: label left, value right (shortened with … if too long)
+    const fit = (text, maxWidth) => {
+      let value = String(text);
+      if (ctx.measureText(value).width <= maxWidth) return value;
+      while (value.length > 1 && ctx.measureText(`${value}…`).width > maxWidth) value = value.slice(0, -1);
+      return `${value}…`;
+    };
+    let y = headH + 34;
+    for (const [label, value, isTotal] of rows) {
+      ctx.textAlign = 'left';
+      ctx.font = font(13);
+      ctx.fillStyle = '#6b7086';
+      ctx.fillText(label, PAD, y);
+      ctx.textAlign = 'right';
+      ctx.font = font(isTotal ? 15 : 13, 600);
+      ctx.fillStyle = isTotal || label === 'Reference No.' ? '#4335d8' : '#1b1d2a';
+      ctx.fillText(fit(value, W - PAD * 2 - 130), W - PAD, y);
+      y += ROW;
+    }
+
+    // Footer
+    ctx.strokeStyle = '#e3e5ef';
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PAD, y - 10);
+    ctx.lineTo(W - PAD, y - 10);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.textAlign = 'center';
+    ctx.font = font(12, 700);
+    ctx.fillStyle = '#5b4cf0';
+    ctx.fillText('PayPulse', W / 2, y + 16);
+    ctx.font = font(11);
+    ctx.fillStyle = '#6b7086';
+    ctx.fillText('Demo receipt. Amounts are play money.', W / 2, y + 34);
+
+    return new Promise((resolve, reject) =>
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('toBlob failed'))), 'image/png'),
+    );
+  }
 
   // ---------- Start ----------
 

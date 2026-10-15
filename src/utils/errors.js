@@ -1,12 +1,28 @@
 /**
- * An error that is safe to show to API clients.
+ * An error that is safe to show to API clients, sent as
+ *   { "error": { "code": "...", "message": "...", "details": { ... } } }
  * `code` is a stable, machine-readable value that tests can assert on.
+ * Optional: `details` (extra numbers for clients/tests) and `headers` (e.g. Retry-After).
  */
 class AppError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, { details, headers } = {}) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details = details;
+    this.headers = headers;
+  }
+
+  /** Add machine-readable details to the JSON error. Returns the error for chaining. */
+  withDetails(details) {
+    this.details = details;
+    return this;
+  }
+
+  /** Add response headers (e.g. Retry-After). Returns the error for chaining. */
+  withHeaders(headers) {
+    this.headers = headers;
+    return this;
   }
 }
 

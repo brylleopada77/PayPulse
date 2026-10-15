@@ -117,9 +117,11 @@ All bodies are JSON. Amounts are decimal numbers or strings with up to 2 decimal
 | GET | `/api/accounts/me` | Bearer | – → balance |
 | GET | `/api/accounts/me/transactions` | Bearer | – → ledger history |
 | POST | `/api/accounts/me/mpin/reset` | Bearer | `{ password }` → `{ mpin }` ("Forgot MPIN") |
+| GET | `/api/accounts/me/transactions/:id/receipt` | Bearer | – → receipt (own transactions only, else 404) |
 | PUT | `/api/accounts/me/mobile` | Bearer | `{ mobileNumber }` → `{ mobileNumber }` (add or change) |
 | POST | `/api/transfers` | Bearer + MPIN | Express Send: `{ toAccountNumber \| toMobileNumber, amount, description?, mpin, otpChallengeId?, otp? }` |
 | GET | `/api/transfers/banks` | Bearer | – → `{ feeCents, banks }` |
+| GET | `/api/transfers/limits` | Bearer | – → daily limit used/remaining, anti-spam rule |
 | POST | `/api/transfers/bank` | Bearer + MPIN | Bank Transfer: `{ bankCode, accountNumber, accountName, amount, mpin, otpChallengeId?, otp? }` |
 | POST | `/api/webhooks/payments` | HMAC signature | `{ paymentId, accountNumber, amount, status }` |
 | POST | `/api/payments/mock-checkout` | Bearer | `{ amount, outcome?: "approve" \| "decline" }` (used by the UI) |
@@ -175,6 +177,42 @@ A bank transfer is one balanced ledger transaction (type `BANK_TRANSFER`): **DEB
 Both kinds of transfer use the same MPIN and OTP rules below. For Bank Transfer the OTP is bound to
 the bank and account number. Extra error codes: `INVALID_BANK`, `INVALID_BANK_ACCOUNT`,
 `INVALID_ACCOUNT_NAME`, `INVALID_MOBILE_NUMBER` (400) and `MOBILE_TAKEN` (409).
+
+### Transfer limits (negative-scenario rules)
+
+Checked by `middleware/transferLimits.js` before every Express Send and Bank Transfer (including
+the OTP step of large transfers):
+
+| Rule | Response |
+|------|----------|
+| **Daily limit:** at most ₱50,000 sent per account per calendar day (Philippine time). Counts the amounts sent; bank fees and money received don't count. | **400** `DAILY_LIMIT_EXCEEDED`, message `Daily transaction limit of ₱50,000 exceeded.`, `details`: `dailyLimit`, `sentToday`, `remainingToday`, `requested`, `resetsAt` |
+| **Anti-spam:** at most 3 completed transfers in any 10 seconds (simulated fraud prevention). Failed transfers don't count. | **429** `TOO_MANY_TRANSFERS`, `Retry-After` header, `details`: `maxTransfers`, `windowSeconds`, `retryAfterSeconds` |
+
+`GET /api/transfers/limits` shows how much of today's limit is left. Both rules have the same
+deliberate weakness as the balance check (see QA_NOTES.md).
+
+### Error format
+
+Every error, from every endpoint, has the same JSON shape so tests can assert on it:
+
+```json
+{ "error": { "code": "DAILY_LIMIT_EXCEEDED", "message": "Daily transaction limit of ₱50,000 exceeded.",
+             "details": { "remainingToday": "0.00", "...": "..." } } }
+```
+
+`code` is stable and machine-readable, `message` is for people, and `details` is only present
+when there is extra data. Unknown routes return `404 ROUTE_NOT_FOUND`, broken JSON
+`400 INVALID_JSON`, bodies over 100 kB `413 PAYLOAD_TOO_LARGE`, and unexpected failures
+`500 INTERNAL_ERROR` (no stack traces).
+
+### Receipts
+
+Every transaction has a reference `REF-<YYYYMMDD>-<id>` (date in Philippine time), e.g.
+`REF-20261015-0931`. It is returned by both send endpoints, listed in the history, and shown on the
+receipt from `GET /api/accounts/me/transactions/:id/receipt` (title, date, amount, fee, total,
+sender, recipient, bank, note, bank reference). Your own name is shown in full, the other party's
+shortened ("Maria S."). In the web UI the receipt opens after every successful transfer and when
+you click a row in Recent activity; **Download / Save Receipt** saves it as a PNG.
 
 ### Transfer security: MPIN and OTP
 
@@ -249,19 +287,20 @@ fast double-click can reproduce the race-condition bug from the browser (for amo
 ₱1,000; above that the single-use OTP blocks duplicates). Elements carry `data-testid`
 attributes for UI automation.
 
-### Error format
-
-```json
-{ "error": { "code": "INSUFFICIENT_FUNDS", "message": "Insufficient balance for this transfer" } }
-```
+### Error codes (general)
 
 | Status | Codes |
 |--------|-------|
-| 400 | `INVALID_AMOUNT`, `INVALID_ACCOUNT_NUMBER`, `SAME_ACCOUNT`, `INVALID_EMAIL`, `INVALID_PASSWORD`, `INVALID_NAME`, `INVALID_STATUS`, `INVALID_JSON` |
+| 400 | `INVALID_AMOUNT`, `INVALID_ACCOUNT_NUMBER`, `SAME_ACCOUNT`, `INVALID_EMAIL`, `INVALID_PASSWORD`, `INVALID_NAME`, `INVALID_STATUS`, `INVALID_JSON`, `DAILY_LIMIT_EXCEEDED` |
 | 401 | `UNAUTHORIZED` |
-| 404 | `RECEIVER_NOT_FOUND`, `ACCOUNT_NOT_FOUND` |
-| 409 | `EMAIL_TAKEN` |
+| 404 | `RECEIVER_NOT_FOUND`, `ACCOUNT_NOT_FOUND`, `RECEIPT_NOT_FOUND`, `ROUTE_NOT_FOUND` |
+| 409 | `EMAIL_TAKEN`, `MOBILE_TAKEN` |
+| 413 | `PAYLOAD_TOO_LARGE` |
 | 422 | `INSUFFICIENT_FUNDS` |
+| 429 | `TOO_MANY_TRANSFERS` |
+| 500 | `INTERNAL_ERROR` |
+
+The MPIN, OTP, password reset and bank transfer codes are listed in their own sections above.
 
 ## 6. How the ledger works
 

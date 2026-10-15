@@ -7,6 +7,8 @@ const { BANK_TRANSFER_FEE_CENTS, BANK_ACCOUNT_PATTERN, findBank } = require('./b
 const { badRequest, notFound, unprocessable } = require('../utils/errors');
 const { toCents, fromCents } = require('../utils/money');
 const { normalizeMobile, requireMobile } = require('../utils/mobile');
+const { maskAccount, shortName } = require('../utils/privacy');
+const { referenceFor } = require('./receiptService');
 
 // Transfers ABOVE this amount (₱1,000.00) need a one-time code on top of the MPIN.
 const OTP_THRESHOLD_CENTS = 100_000;
@@ -65,13 +67,6 @@ async function loadSender(db, userId, totalCents, insufficientMessage) {
     throw unprocessable('INSUFFICIENT_FUNDS', insufficientMessage || 'Insufficient balance for this transfer');
   }
   return sender;
-}
-
-/** "Maria Santos" -> "Maria S." (enough to confirm the recipient without exposing the full name). */
-function shortName(fullName) {
-  const [first, ...rest] = fullName.trim().split(/\s+/);
-  const last = rest.pop();
-  return last ? `${first} ${last[0]}.` : first;
 }
 
 // ---------- Shared security pipeline ----------
@@ -162,6 +157,7 @@ async function transfer(userId, input) {
       return {
         method: 'EXPRESS',
         transactionId,
+        reference: await referenceFor(client, transactionId),
         from: sender.account_number,
         to: receiver.account_number,
         receiverName: shortName(receiver.full_name),
@@ -203,10 +199,6 @@ function parseBankDestination({ bankCode, accountNumber, accountName }) {
     throw badRequest('INVALID_ACCOUNT_NAME', "Enter the account holder's name");
   }
   return { bank, account, name };
-}
-
-function maskAccount(account) {
-  return `••••${account.slice(-4)}`;
 }
 
 /**
@@ -251,18 +243,19 @@ async function bankTransfer(userId, input) {
         feeAccountId,
       ]);
 
-      const reference = `BT-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+      const bankReference = `BT-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
       await client.query(
         `INSERT INTO bank_transfers
            (reference, transaction_id, user_id, bank_code, account_number, account_name, amount_cents, fee_cents)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [reference, transactionId, userId, bank.code, account, name, amountCents, feeCents],
+        [bankReference, transactionId, userId, bank.code, account, name, amountCents, feeCents],
       );
 
       return {
         method: 'BANK',
         transactionId,
-        reference,
+        reference: await referenceFor(client, transactionId),
+        bankReference,
         from: sender.account_number,
         bank: { code: bank.code, name: bank.name },
         accountNumber: maskAccount(account),
@@ -279,4 +272,4 @@ async function bankTransfer(userId, input) {
   });
 }
 
-module.exports = { transfer, bankTransfer, OTP_THRESHOLD_CENTS, maskAccount };
+module.exports = { transfer, bankTransfer, OTP_THRESHOLD_CENTS };

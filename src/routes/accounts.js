@@ -2,6 +2,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const accountService = require('../services/accountService');
 const mpinService = require('../services/mpinService');
+const receiptService = require('../services/receiptService');
 
 const router = express.Router();
 
@@ -15,6 +16,11 @@ router.get('/me', async (req, res) => {
 // GET /api/accounts/me/transactions  -> ledger history
 router.get('/me/transactions', async (req, res) => {
   res.json({ transactions: await accountService.getTransactions(req.user.id) });
+});
+
+// GET /api/accounts/me/transactions/:id/receipt  -> receipt details (own transactions only)
+router.get('/me/transactions/:id/receipt', async (req, res) => {
+  res.json(await receiptService.getReceipt(req.user.id, req.params.id));
 });
 
 // PUT /api/accounts/me/mobile  { mobileNumber }  -> { mobileNumber }  (add or change)

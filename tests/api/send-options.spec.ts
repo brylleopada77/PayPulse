@@ -107,7 +107,8 @@ test.describe('Bank Transfer (₱15 fee)', () => {
       totalDeductedCents: 51500,
       balanceAfter: '485.00',
     });
-    expect(result.reference).toMatch(/^BT-[0-9A-F]{10}$/);
+    expect(result.reference).toMatch(/^REF-\d{8}-\d{4,}$/);
+    expect(result.bankReference).toMatch(/^BT-[0-9A-F]{10}$/);
     expect(await getBalanceCents(request, alice)).toBe(48500);
 
     const history = await (await request.get('/api/accounts/me/transactions', { headers: authHeader(alice.token) })).json();
@@ -116,7 +117,8 @@ test.describe('Bank Transfer (₱15 fee)', () => {
       direction: 'DEBIT',
       description: 'Bank Transfer to BDO',
       amountCents: 51500,
-      bankTransfer: { bank: 'BDO', accountNumber: '••••7890', amount: '500.00', fee: '15.00', reference: result.reference },
+      reference: result.reference,
+      bankTransfer: { bank: 'BDO', accountNumber: '••••7890', amount: '500.00', fee: '15.00', bankReference: result.bankReference },
     });
   });
 

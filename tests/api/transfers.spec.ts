@@ -64,13 +64,14 @@ test.describe('Money transfer - happy path', () => {
     const alice = await createFundedUser(request, 100);
     const bob = await createUser(request);
 
-    for (let i = 0; i < 5; i++) {
+    // 3 transfers: the anti-spam rule allows at most 3 in 10 seconds (see limits.spec.ts).
+    for (let i = 0; i < 3; i++) {
       const response = await transfer(request, alice, { toAccountNumber: bob.accountNumber, amount: 10 });
       expect(response.status()).toBe(201);
     }
 
-    expect(await getBalanceCents(request, alice)).toBe(5000);
-    expect(await getBalanceCents(request, bob)).toBe(5000);
+    expect(await getBalanceCents(request, alice)).toBe(7000);
+    expect(await getBalanceCents(request, bob)).toBe(3000);
   });
 });
 
