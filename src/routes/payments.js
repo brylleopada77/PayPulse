@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { simulateServerError } = require('../middleware/accountGuards');
 const accountService = require('../services/accountService');
 const paymentService = require('../services/paymentService');
 const { badRequest } = require('../utils/errors');
@@ -13,7 +14,7 @@ const OUTCOMES = { approve: 'SUCCESS', decline: 'FAILED' };
 // Stands in for a real payment provider (used by the web UI's "Add money" screen):
 // it builds the provider's callback, signs it with WEBHOOK_SECRET and runs it
 // through the same webhook handler as POST /api/webhooks/payments.
-router.post('/mock-checkout', requireAuth, async (req, res) => {
+router.post('/mock-checkout', requireAuth, simulateServerError, async (req, res) => {
   const { amount, outcome = 'approve' } = req.body || {};
   const status = OUTCOMES[outcome];
   if (!status) {

@@ -93,7 +93,14 @@ npx playwright show-report     # open the HTML report
 docker compose run --rm k6     # k6 concurrency test (10 simultaneous transfers)
 
 npm run db:check               # verify the whole ledger is balanced
+npm run db:assert-ledger       # standalone: money in system = user balances + collected fees
 ```
+
+`tests/assert-system-ledger.js` is a plain Node.js script (no test runner). It works out the
+total money in the system from the ledger history (top-ups − bank payouts + QA adjustments) and
+asserts it equals `sum(user balances) + sum(collected fees)`; it also checks that every transaction
+balances, all balances sum to 0, and cached balances match the ledger. Exit code 0 = consistent,
+1 = not, 2 = could not run. Add `--json` for machine-readable output.
 
 Because of the intentional bug, expect these results:
 
@@ -102,6 +109,7 @@ Because of the intentional bug, expect these results:
 | `npx playwright test` | All pass. The concurrency test is marked as an *expected failure* |
 | `docker compose run --rm k6` | Thresholds **fail** (money was created) |
 | `npm run db:check` | **FAIL** after the concurrency tests have run |
+| `npm run db:assert-ledger` | **FAIL** after the concurrency tests have run (shows the money created) |
 
 ## 5. API reference
 
@@ -177,6 +185,32 @@ A bank transfer is one balanced ledger transaction (type `BANK_TRANSFER`): **DEB
 Both kinds of transfer use the same MPIN and OTP rules below. For Bank Transfer the OTP is bound to
 the bank and account number. Extra error codes: `INVALID_BANK`, `INVALID_BANK_ACCOUNT`,
 `INVALID_ACCOUNT_NAME`, `INVALID_MOBILE_NUMBER` (400) and `MOBILE_TAKEN` (409).
+
+### QR Ph: Receive via QR and Scan QR
+
+`GET /api/qr/me?amount=` returns the user's **QR Ph** code (payload + SVG). The payload follows the
+EMVCo layout QR Ph uses: P2P id `com.p2pqrpay`, a mock PayPulse code `PAYPPHM2XXX`, the account
+number, currency `608` (PHP), country `PH`, an optional amount (tag 54, "dynamic QR") and a
+**CRC-16** checksum (tag 63). `POST /api/qr/decode { payload }` reads a scanned code (or a plain
+`PP…` account number) and returns `{ accountNumber, receiverName, amount, isOwnAccount }`.
+Errors: `INVALID_QR`, `QR_CHECKSUM_MISMATCH` (edited/damaged code), `QR_NOT_SUPPORTED` (another
+bank's QR Ph code), `RECEIVER_NOT_FOUND`. In the UI, **Receive QR** shows/downloads your code and
+**Scan QR** reads an uploaded image (jsQR, in the browser) or pasted text, then opens Express Send
+with the recipient and amount filled in.
+
+### QA Sandbox Controls (dev mode only)
+
+Start the server with `QA_SANDBOX=true` (set in `.env`, Docker Compose and CI; **never in
+production**; Render doesn't set it). Then a **🧪 QA** button appears in the web app, and these
+endpoints exist (otherwise they return 404). Every action affects **only the caller's own account**.
+
+| Control | API | Effect |
+|---------|-----|--------|
+| Slow network | `PUT /api/qa/settings { slowNetwork }` | Every authenticated API call waits 3 s (not the QA calls themselves) |
+| Fail next transaction | `PUT /api/qa/settings { failNextTransaction }` | The next transfer or top-up returns `500 INTERNAL_ERROR` (`details.simulated: true`), no money moves, the switch turns itself off |
+| Freeze account | `PUT /api/qa/settings { frozen }` | Sending money returns `423 ACCOUNT_FROZEN`; receiving still works |
+| Reset account state | `POST /api/qa/reset` | Balance becomes ₱1,000.00 via a `QA_ADJUSTMENT` ledger transaction, history is hidden from now on (rows are kept, so other users' history and the ledger stay intact), limits restart, all switches off |
+| State | `GET /api/qa/state` | Current switches and balance |
 
 ### Transfer limits (negative-scenario rules)
 

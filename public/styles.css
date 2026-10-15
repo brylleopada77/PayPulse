@@ -119,7 +119,7 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .account-row { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; opacity: 0.95; flex-wrap: wrap; }
 .account-row code { background: rgba(255, 255, 255, 0.18); padding: 3px 8px; border-radius: 6px; }
 .account-row .chip { background: rgba(255, 255, 255, 0.15); color: #fff; border-color: rgba(255, 255, 255, 0.35); padding: 3px 10px; }
-.actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; }
+.actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 10px; margin-top: 22px; }
 .action {
   display: grid; justify-items: center; gap: 6px; padding: 12px 6px;
   background: rgba(255, 255, 255, 0.16); color: #fff; border: 0; border-radius: 14px;
@@ -196,6 +196,104 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   padding-top: 12px; border-top: 1px dashed var(--border); font-weight: 600;
 }
 .review-total strong { font-size: 1.4rem; color: var(--brand-dark); font-variant-numeric: tabular-nums; }
+
+/* ---------- Frozen account ---------- */
+.frozen-badge {
+  margin-left: auto; padding: 3px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700;
+  background: #e3f2ff; color: #0b5cad;
+}
+
+/* ---------- QR ---------- */
+.qr-box { justify-self: center; width: 232px; height: 232px; padding: 8px; border-radius: 16px; border: 1px solid var(--border); background: #fff; }
+.qr-box svg { width: 100%; height: 100%; display: block; }
+.qr-owner { margin: 0; display: grid; justify-items: center; gap: 2px; }
+.qr-owner span { color: var(--muted); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.upload-zone {
+  display: grid; justify-items: center; gap: 4px; padding: 18px; text-align: center; cursor: pointer;
+  border: 2px dashed #d9d4ff; border-radius: 14px; background: #faf9ff;
+}
+.upload-zone:hover, .upload-zone:focus-within { border-color: var(--brand); }
+.upload-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.upload-icon { font-size: 1.8rem; color: var(--brand); }
+.form textarea {
+  font: inherit; font-weight: 400; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
+  resize: vertical; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.82rem;
+}
+.scan-result { padding: 12px; border-radius: 12px; background: #e1f7ef; }
+
+/* ---------- QA Sandbox panel (dev only) ---------- */
+.qa-fab {
+  position: fixed; left: 16px; bottom: 16px; z-index: 30; padding: 10px 14px; border: 0; border-radius: 999px;
+  background: #1b1d2a; color: #fff; font: inherit; font-weight: 700; cursor: pointer; box-shadow: var(--shadow);
+}
+.qa-fab.active::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: #ffb020; }
+.qa-panel {
+  position: fixed; left: 16px; bottom: 70px; z-index: 30; width: min(320px, calc(100vw - 32px));
+  display: grid; gap: 10px; padding: 16px; border-radius: 16px; background: #1b1d2a; color: #f2f2f7;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+.qa-panel[hidden] { display: none; }
+.qa-head { display: flex; align-items: center; gap: 8px; }
+.qa-head .close { margin-left: auto; background: rgba(255, 255, 255, 0.1); color: #fff; }
+.qa-badge { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 6px; background: #ffb020; color: #1b1d2a; }
+.qa-note { margin: 0; font-size: 0.8rem; color: #a9abc0; }
+.switch { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; cursor: pointer; }
+.switch input { appearance: none; width: 40px; height: 22px; border-radius: 999px; background: #3a3d52; position: relative; cursor: pointer; margin: 0; transition: background 0.2s; }
+.switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+.switch input:checked { background: var(--brand); }
+.switch input:checked::after { transform: translateX(18px); }
+.switch input:focus-visible { outline: 2px solid #ffb020; outline-offset: 2px; }
+.switch span { display: grid; }
+.switch small { color: #a9abc0; font-size: 0.78rem; }
+.qa-panel .btn.secondary { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.qa-panel .btn.secondary:hover { background: rgba(255, 255, 255, 0.18); }
+.qa-status { margin: 0; min-height: 1.2em; font-size: 0.8rem; color: #8fe3c4; }
+
+.net-indicator {
+  position: fixed; inset: auto; margin: 0; top: 14px; right: 14px; padding: 8px 14px; border: 0; border-radius: 999px;
+  background: #1b1d2a; color: #fff; font-size: 0.85rem; font-weight: 600; box-shadow: var(--shadow);
+}
+
+/* ---------- Profile ---------- */
+.profile-btn {
+  display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  font: inherit; font-weight: 600; color: var(--text); cursor: pointer;
+}
+.profile-btn:hover { border-color: var(--brand); }
+.profile-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.avatar {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--brand), var(--accent)); color: #fff;
+  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em;
+}
+.avatar.large { width: 52px; height: 52px; font-size: 1.1rem; }
+
+/* Grid only while open: a plain `display` here would override the closed <dialog>'s hidden state. */
+.profile-sheet { width: min(460px, calc(100vw - 32px)); gap: 18px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.profile-sheet[open] { display: grid; }
+.profile-id { display: flex; align-items: center; gap: 14px; }
+.profile-name { margin: 0; font-weight: 700; font-size: 1.05rem; }
+.profile-email { margin: 2px 0 0; color: var(--muted); font-size: 0.88rem; overflow-wrap: anywhere; }
+.profile-section { display: grid; gap: 10px; }
+.profile-section h3 { margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.section-head { display: flex; justify-content: space-between; align-items: center; }
+.live-badge { font-size: 0.75rem; font-weight: 600; color: var(--success); }
+
+.limit-card { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; }
+.limit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-weight: 600; }
+.limit-head strong { font-variant-numeric: tabular-nums; }
+.limit-text { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.limit-text.blocked { color: var(--danger); font-weight: 600; }
+
+/* Single-value meter: one brand hue on a light track, rounded ends; the numbers are always in text. */
+.meter { height: 10px; border-radius: 999px; background: #ebe9fb; overflow: hidden; }
+.meter-fill { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--brand); transition: width 0.3s ease; }
+
+/* 3 slots = 3 transfers allowed per 10 seconds; filled slots are used. */
+.slots { display: flex; gap: 6px; }
+.slot { flex: 1; height: 10px; border-radius: 999px; background: #ebe9fb; }
+.slot.used { background: var(--brand); }
 
 /* ---------- Transaction receipt ---------- */
 .receipt-sheet { padding: 0; overflow: hidden; width: min(400px, calc(100vw - 32px)); }

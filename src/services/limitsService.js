@@ -32,6 +32,9 @@ async function getUsage(accountId) {
      WHERE le.account_id = $1
        AND le.direction = 'DEBIT'
        AND t.type IN ('TRANSFER', 'BANK_TRANSFER')
+       -- a QA sandbox reset restarts the limits
+       AND t.created_at > COALESCE((SELECT u.history_cleared_at FROM users u
+                                    JOIN accounts a ON a.user_id = u.id WHERE a.id = $1), '-infinity')
        AND t.created_at >= LEAST(date_trunc('day', now() AT TIME ZONE $2) AT TIME ZONE $2,
                                  now() - make_interval(secs => $3))`,
     [accountId, TIME_ZONE, WINDOW_SECONDS],

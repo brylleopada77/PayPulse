@@ -9,6 +9,7 @@ const { formatReference } = require('./receiptService');
 async function getAccountForUser(userId) {
   const { rows } = await pool.query(
     `SELECT a.id, a.account_number, a.balance_cents, a.currency, u.full_name, u.mobile_number,
+            u.email, u.created_at AS member_since, u.frozen, u.history_cleared_at,
             u.mpin_hash IS NOT NULL AS has_mpin,
             GREATEST(0, CEIL(EXTRACT(EPOCH FROM (u.mpin_expires_at - now()))))::int AS mpin_seconds_left
      FROM accounts a
@@ -27,6 +28,10 @@ async function getBalance(userId) {
   return {
     accountNumber: account.account_number,
     accountHolder: account.full_name,
+    email: account.email,
+    memberSince: account.member_since,
+    // A frozen account cannot send money (423 ACCOUNT_FROZEN).
+    frozen: account.frozen,
     // Others can Express Send to this number. null until the user adds one.
     mobileNumber: account.mobile_number,
     currency: account.currency,
@@ -53,7 +58,10 @@ async function setMobileNumber(userId, mobileNumber) {
   return { mobileNumber: mobile };
 }
 
-/** Ledger history for the user's wallet, newest first. Bank transfers include their details. */
+/**
+ * Ledger history for the user's wallet, newest first. Bank transfers include their details.
+ * Entries from before a QA sandbox reset (users.history_cleared_at) are hidden.
+ */
 async function getTransactions(userId, limit = 50) {
   const account = await getAccountForUser(userId);
   const { rows } = await pool.query(
@@ -64,9 +72,11 @@ async function getTransactions(userId, limit = 50) {
      JOIN transactions t ON t.id = le.transaction_id
      LEFT JOIN bank_transfers bt ON bt.transaction_id = t.id
      WHERE le.account_id = $1
+       -- compared inside SQL: a JS Date would drop the microseconds of history_cleared_at
+       AND t.created_at > COALESCE((SELECT history_cleared_at FROM users WHERE id = $3), '-infinity')
      ORDER BY le.id DESC
      LIMIT $2`,
-    [account.id, limit],
+    [account.id, limit, userId],
   );
 
   return rows.map((row) => ({

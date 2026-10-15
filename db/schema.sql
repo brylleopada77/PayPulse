@@ -118,10 +118,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_mobile_number ON users (mobile_number)
   WHERE mobile_number IS NOT NULL;
 
--- Allow the BANK_TRANSFER transaction type (re-created so this file stays re-runnable).
-ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
-ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
-  CHECK (type IN ('TRANSFER', 'DEPOSIT', 'BANK_TRANSFER'));
+-- The allowed transaction types (incl. BANK_TRANSFER) are defined once, further down in the
+-- QA sandbox section. Keep a single definition: re-adding an older, narrower list here would
+-- fail on re-runs once newer transaction types exist.
 
 -- Money that leaves PayPulse to an outside bank / e-wallet, and the fees PayPulse earns.
 -- A bank transfer is: DEBIT user (amount + fee), CREDIT settlement (amount), CREDIT fees (fee).
@@ -142,3 +141,23 @@ CREATE TABLE IF NOT EXISTS bank_transfers (
   fee_cents       BIGINT      NOT NULL CHECK (fee_cents >= 0),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------- Account freeze + QA sandbox ----------
+
+-- A frozen account cannot send money (real rule; the QA sandbox can toggle it for testing).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS frozen BOOLEAN NOT NULL DEFAULT false;
+-- QA sandbox switches (only used when the server runs with QA_SANDBOX=true).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS qa_latency_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS qa_fail_next BOOLEAN NOT NULL DEFAULT false;
+-- "Reset" hides history and restarts the transfer limits from this moment (rows are kept).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS history_cleared_at TIMESTAMPTZ;
+
+-- All allowed transaction types (the single definition; re-created so this file stays re-runnable).
+-- QA_ADJUSTMENT: sandbox resets set a balance through the ledger, so debits still equal credits.
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
+ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
+  CHECK (type IN ('TRANSFER', 'DEPOSIT', 'BANK_TRANSFER', 'QA_ADJUSTMENT'));
+
+INSERT INTO accounts (account_number, is_system)
+VALUES ('SYS-QA-ADJUSTMENT', true)
+ON CONFLICT (account_number) DO NOTHING;

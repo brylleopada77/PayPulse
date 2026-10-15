@@ -60,6 +60,11 @@ jobs:
         continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
         run: npm run db:check
 
+      - name: Assert system ledger (money in system = user balances + fees)
+        id: systemledger
+        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
+        run: node tests/assert-system-ledger.js
+
       - name: Note known bug results
         if: always()
         run: |
@@ -68,6 +73,7 @@ jobs:
             echo "- Known race bug expected: \`${RACE_BUG_EXPECTED}\`"
             echo "- k6 concurrency test: \`${{ steps.k6.outcome }}\`"
             echo "- Database ledger check: \`${{ steps.dbcheck.outcome }}\`"
+            echo "- System ledger assertion: \`${{ steps.systemledger.outcome }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save container logs

@@ -10,7 +10,8 @@
     "db:init": "node scripts/init-db.js",
     "db:check": "tsx tests/helpers/db-check.ts",
     "test:api": "playwright test",
-    "test:report": "playwright show-report"
+    "test:report": "playwright show-report",
+    "db:assert-ledger": "node tests/assert-system-ledger.js"
   },
   "engines": {
     "node": ">=20"
@@ -20,7 +21,9 @@
     "dotenv": "^18.0.7",
     "express": "^5.3.0",
     "jsonwebtoken": "^9.0.3",
-    "pg": "^8.23.1"
+    "jsqr": "^1.4.0",
+    "pg": "^8.23.1",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",

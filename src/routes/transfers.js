@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { enforceTransferLimits } = require('../middleware/transferLimits');
+const { blockFrozenAccounts, simulateServerError } = require('../middleware/accountGuards');
 const transferService = require('../services/transferService');
 const limitsService = require('../services/limitsService');
 const { BANKS, BANK_TRANSFER_FEE_CENTS } = require('../services/banks');
@@ -12,12 +13,13 @@ const router = express.Router();
 //   201 -> transfer completed
 //   202 -> amount is above ₱1,000: { otpRequired, challengeId, expiresInSeconds, demoCode };
 //          repeat the same request with otpChallengeId + otp to complete it
+//   423 ACCOUNT_FROZEN, 500 (QA sandbox) -> see middleware/accountGuards.js
 //   400 DAILY_LIMIT_EXCEEDED / 429 TOO_MANY_TRANSFERS -> see middleware/transferLimits.js
 const reply = (res, result) => res.status(result.otpRequired ? 202 : 201).json(result);
 
 // POST /api/transfers  (Express Send, free)
 //   { toAccountNumber | toMobileNumber, amount, description?, mpin, otpChallengeId?, otp? }
-router.post('/', requireAuth, enforceTransferLimits, async (req, res) => {
+router.post('/', requireAuth, blockFrozenAccounts, simulateServerError, enforceTransferLimits, async (req, res) => {
   reply(res, await transferService.transfer(req.user.id, req.body || {}));
 });
 
@@ -33,7 +35,7 @@ router.get('/limits', requireAuth, async (req, res) => {
 
 // POST /api/transfers/bank  (Bank Transfer, ₱15 fee)
 //   { bankCode, accountNumber, accountName, amount, description?, mpin, otpChallengeId?, otp? }
-router.post('/bank', requireAuth, enforceTransferLimits, async (req, res) => {
+router.post('/bank', requireAuth, blockFrozenAccounts, simulateServerError, enforceTransferLimits, async (req, res) => {
   reply(res, await transferService.bankTransfer(req.user.id, req.body || {}));
 });
 

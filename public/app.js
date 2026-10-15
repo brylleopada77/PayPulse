@@ -8,6 +8,8 @@
   const appView = $('#app-view');
   let currency = 'PHP';
   let hasMpin = true; // false for accounts created before random MPINs
+  let lastAccount = null; // latest GET /api/accounts/me (used by the profile screen)
+  let qaEnabled = false; // true when the server runs with QA_SANDBOX=true (GET /api/qa/state works)
   let mpinDeadline = 0; // Date.now() value when the current MPIN expires
   let refreshTimer = null;
 
@@ -18,11 +20,17 @@
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const res = await fetch(path, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    networkStarted();
+    let res;
+    try {
+      res = await fetch(path, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } finally {
+      networkFinished();
+    }
     const data = await res.json().catch(() => ({}));
 
     if (res.status === 401 && token) {
@@ -35,6 +43,23 @@
       throw err;
     }
     return { ...data, httpStatus: res.status };
+  }
+
+  // "⏳ Waiting for server…" when a request takes longer than 400 ms (e.g. QA slow network).
+  let pendingRequests = 0;
+  let networkTimer = null;
+  function networkStarted() {
+    pendingRequests += 1;
+    if (pendingRequests === 1) {
+      networkTimer = setTimeout(() => showPopover(document.getElementById('net-indicator')), 400);
+    }
+  }
+  function networkFinished() {
+    pendingRequests = Math.max(0, pendingRequests - 1);
+    if (pendingRequests === 0) {
+      clearTimeout(networkTimer);
+      hidePopover(document.getElementById('net-indicator'));
+    }
   }
 
   function getToken() {
@@ -151,10 +176,13 @@
     }
 
     boxes.forEach((box, i) => {
-      box.addEventListener('input', () => {
-        const text = box.value;
+      // Select the digit on focus, so typing into a filled box replaces it instead of appending.
+      box.addEventListener('focus', () => box.select());
+      box.addEventListener('input', (event) => {
+        // A single typed digit replaces the box; longer input (paste/autofill) fills the next boxes.
+        const text = event.inputType === 'insertText' && event.data ? event.data : box.value;
         box.value = '';
-        fillFrom(i, text); // handles typing, autofill and multi-digit input
+        fillFrom(i, text);
       });
       box.addEventListener('keydown', (event) => {
         if (event.key === 'Backspace' && !box.value && i > 0) {
@@ -258,6 +286,7 @@
     stopAutoRefresh();
     appView.hidden = true;
     authView.hidden = false;
+    hideQaControls();
   }
 
   async function showWallet() {
@@ -265,6 +294,7 @@
     appView.hidden = false;
     await loadWallet();
     startAutoRefresh();
+    initQaControls(); // shows the QA panel only when the server runs in QA sandbox mode
     if (!hasMpin) openMpinReset('setup');
   }
 
@@ -276,11 +306,15 @@
     currency = account.currency;
     hasMpin = account.hasMpin;
     setMpinExpiry(account.mpinExpiresInSeconds);
+    lastAccount = account;
     $('#user-name').textContent = account.accountHolder;
+    $('#avatar').textContent = initials(account.accountHolder);
     currentBalance = account.balance;
     renderBalance();
     $('#account-number').textContent = account.accountNumber;
+    $('#frozen-badge').hidden = !account.frozen;
     renderTransactions(history.transactions);
+    if (qaEnabled) refreshQaState().catch(() => {});
   }
 
   function renderTransactions(transactions) {
@@ -735,7 +769,12 @@
       } else if (err.status === 400 || err.status === 404 || err.status === 422) {
         backToSendForm(err.message);
       } else {
-        setFormError(mpinForm, err.message);
+        // e.g. 423 frozen, 429 too many transfers, 500 server error: start the retry with an empty pad.
+        mpinInput.clear();
+        setFormError(
+          mpinForm,
+          err.status >= 500 ? 'Something went wrong on our side. No money was sent. Please try again.' : err.message,
+        );
       }
     }
   });
@@ -1087,6 +1126,345 @@
       } else {
         setFormError(pwResetForm, err.message);
       }
+    }
+  });
+
+  // ---------- My profile: account, transfer limits (live), security ----------
+
+  const profileDialog = $('#profile-dialog');
+  let profileTimer = null;
+
+  /** "Juan Dela Cruz" -> "JC" */
+  function initials(name) {
+    const parts = name.trim().split(/\s+/);
+    return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+  }
+
+  const MEMBER_SINCE = new Intl.DateTimeFormat('en-PH', { dateStyle: 'long', timeZone: 'Asia/Manila' });
+  const RESET_TIME = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
+
+  function fillRows(listEl, rows) {
+    listEl.replaceChildren(
+      ...rows.flatMap(([term, value]) => [
+        Object.assign(document.createElement('dt'), { textContent: term }),
+        Object.assign(document.createElement('dd'), { textContent: value }),
+      ]),
+    );
+  }
+
+  function renderProfileStatic() {
+    const a = lastAccount;
+    $('#profile-avatar').textContent = initials(a.accountHolder);
+    $('#profile-name').textContent = a.accountHolder;
+    $('#profile-email').textContent = a.email;
+    fillRows($('#profile-account'), [
+      ['Account no.', a.accountNumber],
+      ...(a.mobileNumber ? [['Mobile no.', a.mobileNumber]] : []),
+      ['Currency', a.currency],
+      ['Member since', MEMBER_SINCE.format(new Date(a.memberSince))],
+    ]);
+  }
+
+  function renderSecurity() {
+    const left = mpinSecondsLeft();
+    const mpinStatus = !hasMpin ? 'Not set up' : left > 0 ? `Valid for ${formatCountdown(left)}` : 'Expired';
+    fillRows($('#profile-security'), [
+      ['MPIN', mpinStatus],
+      ['MPIN lifetime', '5 minutes after you get it'],
+      ['Wrong MPIN', '5 in a row locks transfers for 5 min'],
+      ['One-time code (OTP)', 'For transfers above ₱1,000'],
+      ['Bank transfer fee', `${money(15)} per transfer`],
+    ]);
+  }
+
+  /** Daily limit meter + anti-spam slots, from GET /api/transfers/limits. */
+  async function refreshLimits() {
+    const { daily, rateLimit } = await api('/api/transfers/limits');
+    const limit = Number(daily.limit);
+    const sent = Number(daily.sentToday);
+    const percent = Math.min(100, (sent / limit) * 100);
+
+    $('#daily-left').textContent = `${money(daily.remaining)} left`;
+    $('#daily-bar').style.width = `${percent}%`;
+    const meter = $('#daily-meter');
+    meter.setAttribute('aria-valuenow', String(sent));
+    meter.setAttribute('aria-valuetext', `${money(sent)} of ${money(limit)} sent today`);
+    const dailyText = $('#daily-text');
+    dailyText.textContent = Number(daily.remaining) > 0
+      ? `${money(sent)} of ${money(limit)} sent today · Resets at ${RESET_TIME.format(new Date(daily.resetsAt))} (PH time)`
+      : `Limit reached: ${money(limit)} sent today. Resets at ${RESET_TIME.format(new Date(daily.resetsAt))} (PH time).`;
+    dailyText.classList.toggle('blocked', Number(daily.remaining) <= 0);
+
+    const used = Math.min(rateLimit.transfersInWindow, rateLimit.maxTransfers);
+    $('#spam-count').textContent = `${used} of ${rateLimit.maxTransfers} used`;
+    $('#spam-slots').replaceChildren(
+      ...Array.from({ length: rateLimit.maxTransfers }, (_, i) =>
+        Object.assign(document.createElement('span'), { className: `slot${i < used ? ' used' : ''}` }),
+      ),
+    );
+    const spamText = $('#spam-text');
+    const blocked = used >= rateLimit.maxTransfers;
+    spamText.textContent = blocked
+      ? `Blocked: the next transfer is refused until the oldest one is more than ${rateLimit.windowSeconds} seconds old.`
+      : `At most ${rateLimit.maxTransfers} transfers in any ${rateLimit.windowSeconds} seconds. ` +
+        `Transfers in the last ${rateLimit.windowSeconds} seconds: ${rateLimit.transfersInWindow}.`;
+    spamText.classList.toggle('blocked', blocked);
+  }
+
+  async function openProfile() {
+    if (!lastAccount) await loadWallet();
+    renderProfileStatic();
+    renderSecurity();
+    try {
+      await refreshLimits();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    profileDialog.showModal();
+    clearInterval(profileTimer);
+    // Live while open, so you can watch the anti-spam window empty again.
+    profileTimer = setInterval(() => {
+      renderSecurity();
+      refreshLimits().catch(() => {});
+    }, 2000);
+  }
+
+  profileDialog.addEventListener('close', () => clearInterval(profileTimer));
+  $('#profile-btn').addEventListener('click', openProfile);
+  $('#profile-new-mpin').addEventListener('click', () => openMpinReset());
+
+  // ---------- Receive via QR ----------
+
+  const receiveQrDialog = $('#receive-qr-dialog');
+  let currentQr = null; // { payload, svg, accountNumber, name, amount }
+  let qrAmountTimer = null;
+
+  async function loadMyQr() {
+    const amount = $('#qr-amount').value.trim();
+    const form = receiveQrDialog.querySelector('.form');
+    setFormError(form);
+    if (amount && !validAmount(amount)) return setFormError(form, 'Enter a valid amount, e.g. 250 or 99.50.');
+    try {
+      currentQr = await api(`/api/qr/me${amount ? `?amount=${encodeURIComponent(amount)}` : ''}`);
+      $('#qr-image').innerHTML = currentQr.svg; // SVG generated by our own server (qrcode library)
+      $('#qr-name').textContent = currentQr.name;
+      $('#qr-account').textContent = currentQr.amount
+        ? `${currentQr.accountNumber} · requesting ${money(currentQr.amount)}`
+        : currentQr.accountNumber;
+    } catch (err) {
+      setFormError(form, err.message);
+    }
+  }
+
+  $('#receive-qr-btn').addEventListener('click', async () => {
+    $('#qr-amount').value = '';
+    await loadMyQr();
+    receiveQrDialog.showModal();
+  });
+  $('#qr-amount').addEventListener('input', () => {
+    clearTimeout(qrAmountTimer);
+    qrAmountTimer = setTimeout(loadMyQr, 400);
+  });
+  $('#qr-copy').addEventListener('click', async () => {
+    if (currentQr && (await copyText(currentQr.payload))) toast('QR text copied', 'success');
+  });
+
+  /** Save the QR as a PNG (white background, with the account number underneath). */
+  $('#qr-download').addEventListener('click', async () => {
+    if (!currentQr) return;
+    const img = new Image();
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(currentQr.svg)}`;
+    await img.decode();
+    const size = 600;
+    const canvas = Object.assign(document.createElement('canvas'), { width: size, height: size + 90 });
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, size, size);
+    ctx.fillStyle = '#1b1d2a';
+    ctx.textAlign = 'center';
+    ctx.font = '700 26px system-ui, sans-serif';
+    ctx.fillText(`PayPulse · ${currentQr.accountNumber}`, size / 2, size + 40);
+    ctx.font = '20px system-ui, sans-serif';
+    ctx.fillStyle = '#6b7086';
+    ctx.fillText(currentQr.amount ? `QR Ph · ${money(currentQr.amount)}` : 'QR Ph · scan to send money', size / 2, size + 72);
+    canvas.toBlob((blob) => {
+      const link = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(blob),
+        download: `PayPulse-QR-${currentQr.accountNumber}.png`,
+      });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+    }, 'image/png');
+  });
+
+  // ---------- Scan QR (mock scanner: upload an image or paste the text) ----------
+
+  const scanDialog = $('#scan-qr-dialog');
+  const scanForm = $('#scan-qr-form');
+  let scanned = null; // result of POST /api/qr/decode
+
+  $('#scan-qr-btn').addEventListener('click', () => {
+    scanForm.reset();
+    setFormError(scanForm);
+    scanned = null;
+    $('#scan-result').hidden = true;
+    $('#scan-send').hidden = true;
+    scanDialog.showModal();
+  });
+
+  /** Load the QR image reader (jsQR) only when it is first needed. */
+  let jsQrLoading = null;
+  function loadJsQr() {
+    jsQrLoading ??= new Promise((resolve, reject) => {
+      const script = Object.assign(document.createElement('script'), { src: '/vendor/jsQR.js' });
+      script.onload = () => resolve(window.jsQR);
+      script.onerror = () => reject(new Error('Could not load the QR reader'));
+      document.head.append(script);
+    });
+    return jsQrLoading;
+  }
+
+  $('#scan-file').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setFormError(scanForm);
+    try {
+      const jsQR = await loadJsQr();
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
+      const canvas = Object.assign(document.createElement('canvas'), {
+        width: Math.round(bitmap.width * scale),
+        height: Math.round(bitmap.height * scale),
+      });
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(data, width, height);
+      if (!code) return setFormError(scanForm, 'No QR code found in that image. Try a clearer picture.');
+      scanForm.elements.payload.value = code.data;
+      await decodeScanned();
+    } catch (err) {
+      setFormError(scanForm, err.message || 'Could not read that image.');
+    } finally {
+      event.target.value = '';
+    }
+  });
+
+  async function decodeScanned() {
+    setFormError(scanForm);
+    $('#scan-result').hidden = true;
+    $('#scan-send').hidden = true;
+    try {
+      scanned = await api('/api/qr/decode', { method: 'POST', body: { payload: scanForm.elements.payload.value } });
+      fillRows($('#scan-result-rows'), [
+        ['Recipient', scanned.receiverName],
+        ['Account no.', scanned.accountNumber],
+        ['Amount', scanned.amount ? money(scanned.amount) : 'Sender chooses'],
+        ['QR type', scanned.format === 'QR_PH' ? 'QR Ph (checksum OK)' : 'Account number'],
+      ]);
+      $('#scan-result').hidden = false;
+      if (scanned.isOwnAccount) {
+        setFormError(scanForm, 'This is your own QR code. Ask the other person to show theirs.');
+      } else {
+        $('#scan-send').hidden = false;
+      }
+    } catch (err) {
+      scanned = null;
+      setFormError(scanForm, err.message);
+    }
+  }
+
+  scanForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    decodeScanned();
+  });
+
+  // Continue in the normal Express Send flow with the recipient (and amount) filled in.
+  $('#scan-send').addEventListener('click', () => {
+    if (!scanned) return;
+    scanDialog.close();
+    openSendDialog();
+    showSendStep('express');
+    sendForm.elements.recipient.value = scanned.accountNumber;
+    if (scanned.amount) sendForm.elements.amount.value = scanned.amount;
+    (scanned.amount ? sendForm.elements.description : sendForm.elements.amount).focus();
+  });
+
+  // ---------- QA Sandbox Controls (dev mode only) ----------
+
+  const qaPanel = $('#qa-panel');
+  const qaFab = $('#qa-fab');
+
+  async function initQaControls() {
+    try {
+      await refreshQaState();
+      qaEnabled = true;
+      qaFab.hidden = false;
+    } catch {
+      hideQaControls(); // 404: server is not in QA sandbox mode
+    }
+  }
+
+  function hideQaControls() {
+    qaEnabled = false;
+    qaFab.hidden = true;
+    qaPanel.hidden = true;
+  }
+
+  async function refreshQaState() {
+    const state = await api('/api/qa/state');
+    $('#qa-slow').checked = state.slowNetwork;
+    $('#qa-fail').checked = state.failNextTransaction;
+    $('#qa-freeze').checked = state.frozen;
+    qaFab.classList.toggle('active', state.slowNetwork || state.failNextTransaction || state.frozen);
+    return state;
+  }
+
+  function qaStatus(text) {
+    $('#qa-status').textContent = text;
+  }
+
+  qaFab.addEventListener('click', () => {
+    qaPanel.hidden = !qaPanel.hidden;
+    qaFab.setAttribute('aria-expanded', String(!qaPanel.hidden));
+    if (!qaPanel.hidden) refreshQaState().catch(() => {});
+  });
+  $('#qa-close').addEventListener('click', () => {
+    qaPanel.hidden = true;
+    qaFab.setAttribute('aria-expanded', 'false');
+  });
+
+  const QA_SWITCHES = [
+    ['#qa-slow', 'slowNetwork', 'Slow network'],
+    ['#qa-fail', 'failNextTransaction', 'Fail next transaction'],
+    ['#qa-freeze', 'frozen', 'Freeze account'],
+  ];
+  for (const [selector, setting, label] of QA_SWITCHES) {
+    $(selector).addEventListener('change', async (event) => {
+      const on = event.target.checked;
+      try {
+        await api('/api/qa/settings', { method: 'PUT', body: { [setting]: on } });
+        qaStatus(`${label}: ${on ? 'ON' : 'off'}`);
+        await loadWallet();
+      } catch (err) {
+        event.target.checked = !on;
+        qaStatus(err.message);
+      }
+    });
+  }
+
+  $('#qa-reset').addEventListener('click', async () => {
+    if (!window.confirm('Reset your account? Balance becomes ₱1,000.00, recent history is cleared, limits restart and all QA switches turn off.')) return;
+    try {
+      await api('/api/qa/reset', { method: 'POST' });
+      qaStatus('Account reset: ₱1,000.00, history cleared');
+      await loadWallet();
+      toast('Account reset to ₱1,000.00', 'success');
+    } catch (err) {
+      qaStatus(err.message);
     }
   });
 

@@ -17,11 +17,11 @@ async function main() {
   const line = (pass: boolean, text: string) => console.log(`${pass ? 'PASS' : 'FAIL'}  ${text}`);
 
   line(report.totalBalanceCents === 0, `Sum of all balances is 0 (actual: ${cents(report.totalBalanceCents)})`);
-  const expectedUsers = report.totalDepositsCents - report.bankOutflowCents;
+  const expectedUsers = report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents;
   line(
     report.userBalanceCents === expectedUsers,
-    `User wallets (${cents(report.userBalanceCents)}) equal top-ups minus bank transfers and fees ` +
-      `(${cents(report.totalDepositsCents)} - ${cents(report.bankOutflowCents)} = ${cents(expectedUsers)})`,
+    `User wallets (${cents(report.userBalanceCents)}) equal top-ups - bank transfers and fees + QA adjustments ` +
+      `(${cents(report.totalDepositsCents)} - ${cents(report.bankOutflowCents)} + ${cents(report.qaAdjustmentCents)} = ${cents(expectedUsers)})`,
   );
   line(report.unbalancedTransactions.length === 0, `Unbalanced transactions: ${report.unbalancedTransactions.length}`);
   line(report.mismatchedAccounts.length === 0, `Accounts where cached balance != ledger: ${report.mismatchedAccounts.length}`);

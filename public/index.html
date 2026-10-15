@@ -99,7 +99,10 @@
         <span class="brand-name">PayPulse</span>
       </div>
       <div class="user">
-        <span id="user-name" data-testid="user-name"></span>
+        <button type="button" id="profile-btn" class="profile-btn" data-testid="open-profile" aria-label="Open my profile">
+          <span class="avatar" id="avatar" aria-hidden="true"></span>
+          <span id="user-name" data-testid="user-name"></span>
+        </button>
         <button type="button" id="logout-btn" class="btn ghost" data-testid="logout">Log out</button>
       </div>
     </header>
@@ -109,6 +112,7 @@
         <p class="label">
           Available balance
           <button type="button" id="balance-toggle" class="balance-toggle" data-testid="balance-toggle"></button>
+          <span class="frozen-badge" id="frozen-badge" data-testid="frozen-badge" hidden>❄ Frozen</span>
         </p>
         <p class="balance"><span id="balance" data-testid="balance">—</span></p>
         <div class="account-row">
@@ -122,6 +126,12 @@
           </button>
           <button type="button" class="action" data-open="topup-dialog" data-testid="open-topup">
             <span class="icon" aria-hidden="true">＋</span>Add money
+          </button>
+          <button type="button" class="action" id="receive-qr-btn" data-testid="open-receive-qr">
+            <span class="icon" aria-hidden="true">▦</span>Receive QR
+          </button>
+          <button type="button" class="action" id="scan-qr-btn" data-testid="open-scan-qr">
+            <span class="icon" aria-hidden="true">⌖</span>Scan QR
           </button>
           <button type="button" class="action" id="refresh-btn" data-testid="refresh">
             <span class="icon" aria-hidden="true">⟳</span>Refresh
@@ -220,6 +230,61 @@
       </div>
       <button type="button" class="btn primary" id="review-confirm" data-testid="review-confirm">Confirm &amp; enter MPIN</button>
     </div>
+  </dialog>
+
+  <!-- ============ My profile (account, transfer limits, security) ============ -->
+  <dialog id="profile-dialog" class="sheet profile-sheet" aria-labelledby="profile-title" data-testid="profile-dialog">
+    <header class="sheet-head">
+      <h2 id="profile-title">My profile</h2>
+      <button type="button" class="close" data-close aria-label="Close">×</button>
+    </header>
+
+    <div class="profile-id">
+      <span class="avatar large" id="profile-avatar" aria-hidden="true"></span>
+      <div>
+        <p class="profile-name" id="profile-name" data-testid="profile-name"></p>
+        <p class="profile-email" id="profile-email" data-testid="profile-email"></p>
+      </div>
+    </div>
+
+    <section class="profile-section" aria-labelledby="limits-heading">
+      <div class="section-head">
+        <h3 id="limits-heading">Transfer limits</h3>
+        <span class="live-badge" title="Updates every 2 seconds while this screen is open">● Live</span>
+      </div>
+
+      <div class="limit-card" data-testid="daily-limit">
+        <div class="limit-head">
+          <span>Daily transfer limit</span>
+          <strong id="daily-left" data-testid="daily-left"></strong>
+        </div>
+        <div class="meter" role="progressbar" id="daily-meter" aria-label="Daily transfer limit used"
+             aria-valuemin="0" aria-valuemax="50000">
+          <span class="meter-fill" id="daily-bar"></span>
+        </div>
+        <p class="limit-text" id="daily-text" data-testid="daily-text"></p>
+      </div>
+
+      <div class="limit-card" data-testid="spam-limit">
+        <div class="limit-head">
+          <span>Anti-spam protection</span>
+          <strong id="spam-count" data-testid="spam-count"></strong>
+        </div>
+        <div class="slots" id="spam-slots" aria-hidden="true"></div>
+        <p class="limit-text" id="spam-text" data-testid="spam-text"></p>
+      </div>
+    </section>
+
+    <section class="profile-section" aria-labelledby="account-heading">
+      <h3 id="account-heading">Account</h3>
+      <dl class="review" id="profile-account" data-testid="profile-account"></dl>
+    </section>
+
+    <section class="profile-section" aria-labelledby="security-heading">
+      <h3 id="security-heading">Security &amp; rules</h3>
+      <dl class="review" id="profile-security" data-testid="profile-security"></dl>
+      <button type="button" class="btn secondary" id="profile-new-mpin" data-testid="profile-new-mpin">Get a new MPIN</button>
+    </section>
   </dialog>
 
   <!-- ============ Transaction receipt ============ -->
@@ -346,6 +411,79 @@
       <button type="submit" class="btn primary" data-testid="topup-submit">Pay</button>
     </form>
   </dialog>
+
+  <!-- ============ Receive via QR ============ -->
+  <dialog id="receive-qr-dialog" class="sheet" aria-labelledby="receive-qr-title" data-testid="receive-qr-dialog">
+    <div class="form">
+      <header class="sheet-head">
+        <h2 id="receive-qr-title">Receive via QR</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary">Let the sender scan this QR Ph code with PayPulse.</p>
+      <div class="qr-box" id="qr-image" data-testid="qr-image" role="img" aria-label="QR code for your account"></div>
+      <p class="qr-owner"><strong id="qr-name"></strong><span id="qr-account" data-testid="qr-account"></span></p>
+      <label>Request a specific amount <span class="hint">optional</span>
+        <input id="qr-amount" inputmode="decimal" placeholder="0.00" data-testid="qr-amount">
+      </label>
+      <p class="form-error" role="alert"></p>
+      <div class="receipt-actions">
+        <button type="button" class="btn secondary" id="qr-copy" data-testid="qr-copy">Copy QR text</button>
+        <button type="button" class="btn primary" id="qr-download" data-testid="qr-download">Download QR</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ============ Scan QR (mock scanner) ============ -->
+  <dialog id="scan-qr-dialog" class="sheet" aria-labelledby="scan-qr-title" data-testid="scan-qr-dialog">
+    <form id="scan-qr-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2 id="scan-qr-title">Scan QR</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <label class="upload-zone" data-testid="scan-upload-zone">
+        <input type="file" accept="image/*" id="scan-file" data-testid="scan-file">
+        <span class="upload-icon" aria-hidden="true">⌖</span>
+        <strong>Upload a QR image</strong>
+        <span class="hint">PNG or JPG, e.g. a saved PayPulse QR</span>
+      </label>
+      <label>…or paste the QR text / account number
+        <textarea name="payload" rows="3" placeholder="000201010211…  or  PP1000000002" data-testid="scan-text"></textarea>
+      </label>
+      <p class="form-error" role="alert"></p>
+      <div class="scan-result" id="scan-result" data-testid="scan-result" hidden>
+        <dl class="review" id="scan-result-rows"></dl>
+      </div>
+      <button type="submit" class="btn secondary" id="scan-submit" data-testid="scan-submit">Read QR</button>
+      <button type="button" class="btn primary" id="scan-send" data-testid="scan-send" hidden>Send money to this account</button>
+    </form>
+  </dialog>
+
+  <!-- ============ QA Sandbox Controls (dev mode only: shown when /api/qa exists) ============ -->
+  <button type="button" class="qa-fab" id="qa-fab" data-testid="qa-toggle" aria-expanded="false" aria-controls="qa-panel" hidden>🧪 QA</button>
+  <aside class="qa-panel" id="qa-panel" aria-label="QA Sandbox Controls" data-testid="qa-panel" hidden>
+    <header class="qa-head">
+      <strong>QA Sandbox</strong>
+      <span class="qa-badge">DEV ONLY</span>
+      <button type="button" class="close" id="qa-close" aria-label="Close QA panel">×</button>
+    </header>
+    <p class="qa-note">Affects only your own account.</p>
+    <label class="switch">
+      <input type="checkbox" id="qa-slow" data-testid="qa-slow">
+      <span><strong>Slow network</strong><small>Every API call waits 3 seconds</small></span>
+    </label>
+    <label class="switch">
+      <input type="checkbox" id="qa-fail" data-testid="qa-fail">
+      <span><strong>Fail next transaction</strong><small>Next transfer or top-up returns HTTP 500, then turns off</small></span>
+    </label>
+    <label class="switch">
+      <input type="checkbox" id="qa-freeze" data-testid="qa-freeze">
+      <span><strong>Freeze account</strong><small>Sending money is blocked (423 ACCOUNT_FROZEN)</small></span>
+    </label>
+    <button type="button" class="btn secondary" id="qa-reset" data-testid="qa-reset">Reset account state</button>
+    <p class="qa-status" id="qa-status" data-testid="qa-status" aria-live="polite"></p>
+  </aside>
+
+  <div id="net-indicator" class="net-indicator" role="status" data-testid="net-indicator" popover="manual">⏳ Waiting for server…</div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" data-testid="toast" popover="manual"></div>
 

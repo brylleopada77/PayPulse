@@ -51,6 +51,10 @@ limit checks run inside the same transaction, after the lock.
 | `tests/api/concurrency.spec.ts` | More than 3 of 10 transfers succeed; sender + receiver > 100 |
 | `tests/load/race-transfer.js` (k6) | `money_created_cents` and `overspent_transfers` thresholds fail |
 | `npm run db:check` | Sum of all balances ≠ 0, cached balances ≠ ledger history |
+| `npm run db:assert-ledger` | "Total money in system ≠ user balances + fees" with the exact amount created |
+
+Tip: the QA Sandbox **Reset account state** rebuilds an account's balance from its ledger history,
+so it also repairs a cached balance that the race bug broke (for that one account).
 
 Note: the ledger itself still has balanced debits and credits for every transaction.
 That's why the DB check also compares each account's **cached balance** with its

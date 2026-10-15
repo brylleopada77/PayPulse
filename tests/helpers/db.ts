@@ -22,6 +22,8 @@ export interface IntegrityReport {
   totalDepositsCents: number;
   /** Money that left user wallets through bank transfers: amounts sent out plus fees. */
   bankOutflowCents: number;
+  /** Net money QA sandbox resets added to (or removed from) user wallets. */
+  qaAdjustmentCents: number;
   /** Transactions whose debits do not equal their credits. */
   unbalancedTransactions: number[];
   /** Accounts whose cached balance disagrees with their ledger history. */
@@ -65,6 +67,13 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       JOIN accounts a ON a.id = le.account_id
       WHERE le.direction = 'CREDIT' AND a.account_number IN ('SYS-BANK-SETTLEMENT', 'SYS-FEE-INCOME')`);
 
+    const qaAdjustments = await client.query(`
+      SELECT COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents ELSE -le.amount_cents END), 0) AS total
+      FROM ledger_entries le
+      JOIN transactions t ON t.id = le.transaction_id
+      JOIN accounts a ON a.id = le.account_id
+      WHERE t.type = 'QA_ADJUSTMENT' AND NOT a.is_system`);
+
     const unbalanced = await client.query(`
       SELECT transaction_id
       FROM ledger_entries
@@ -103,6 +112,7 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       userBalanceCents: totals.rows[0].users,
       totalDepositsCents: deposits.rows[0].total,
       bankOutflowCents: outflow.rows[0].total,
+      qaAdjustmentCents: qaAdjustments.rows[0].total,
       unbalancedTransactions: unbalanced.rows.map((r) => r.transaction_id),
       mismatchedAccounts: mismatched.rows.map((r) => ({
         accountNumber: r.account_number,
@@ -116,7 +126,7 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
     const totalsOk = accountNumbers?.length
       ? true
       : report.totalBalanceCents === 0 &&
-        report.userBalanceCents === report.totalDepositsCents - report.bankOutflowCents;
+        report.userBalanceCents === report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents;
 
     report.ok =
       totalsOk &&
