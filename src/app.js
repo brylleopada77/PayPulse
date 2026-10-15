@@ -11,6 +11,9 @@ const webhookRoutes = require('./routes/webhooks');
 const paymentRoutes = require('./routes/payments');
 const qrRoutes = require('./routes/qr');
 const qaRoutes = require('./routes/qa');
+const savingsV1Routes = require('./routes/v1/savings');
+const cardsV1Routes = require('./routes/v1/cards');
+const { chaos } = require('./middleware/chaos');
 
 const app = express();
 
@@ -38,12 +41,25 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Chaos engineering for QA (x-chaos-* headers); a no-op unless QA_SANDBOX=true.
+app.use('/api', chaos);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/transfers', transferRoutes);
 app.use('/api/webhooks', webhookRoutes);
-app.use('/api/payments', paymentRoutes);
+// Mock payment provider ("Add money"): only with MOCK_PAYMENTS=true, otherwise a 404.
+if (config.mockPayments) {
+  app.use('/api/payments', paymentRoutes);
+}
+
+// Public feature flags for the web UI (no secrets).
+app.get('/api/config', (req, res) => {
+  res.json({ features: { mockPayments: config.mockPayments, qaSandbox: config.qaSandbox } });
+});
 app.use('/api/qr', qrRoutes);
+app.use('/api/v1/savings', savingsV1Routes);
+app.use('/api/v1/cards', cardsV1Routes);
 // QA Sandbox: dev/CI only. Without QA_SANDBOX=true these routes don't exist (404).
 if (config.qaSandbox) {
   app.use('/api/qa', qaRoutes);

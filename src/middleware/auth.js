@@ -30,7 +30,7 @@ async function requireAuth(req, res, next) {
 
   // JWT `iat` is whole seconds, so compare against the change time rounded down.
   const { rows } = await pool.query(
-    `SELECT FLOOR(EXTRACT(EPOCH FROM password_changed_at))::bigint AS changed_at, qa_latency_ms
+    `SELECT FLOOR(EXTRACT(EPOCH FROM password_changed_at))::bigint AS changed_at, qa_latency_ms, role
      FROM users WHERE id = $1`,
     [payload.sub],
   );
@@ -41,7 +41,7 @@ async function requireAuth(req, res, next) {
     return next(unauthorized('Your password was changed. Please log in again.'));
   }
 
-  req.user = { id: payload.sub, email: payload.email };
+  req.user = { id: payload.sub, email: payload.email, role: rows[0].role };
 
   if (config.qaSandbox && rows[0].qa_latency_ms > 0 && req.baseUrl !== '/api/qa') {
     await sleep(rows[0].qa_latency_ms);

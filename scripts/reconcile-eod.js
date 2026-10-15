@@ -13,6 +13,8 @@
  *   6. Outbound settlements      GL 1020 = settled bank transfers (InstaPay + PESONet batches)
  *   7. PESONet clearing          GL 2020 = PESONet transfers still queued at the cut-off
  *   8. Fee revenue               GL 4010 = fees on bank transfers
+ *      Savings deposits          GL 2030 = sum of PayPulse Save vaults (all mapped to 2030)
+ *      Interest expense          GL 5010 = interest posted by the daily interest job
  *   9. Payment messages          every bank transfer has an ISO 20022 pacs.008 with the same status
  *  10. Overdrafts                no customer wallet below zero
  *
@@ -73,6 +75,17 @@ async function reconcile(client, businessDate) {
     FROM ledger_entries le JOIN transactions t ON t.id = le.transaction_id
     JOIN accounts a ON a.id = le.account_id
     WHERE a.user_id IS NOT NULL AND t.created_at <= $1`);
+  const savingsSubledger = await one(`
+    SELECT COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents ELSE -le.amount_cents END), 0) AS v
+    FROM ledger_entries le JOIN transactions t ON t.id = le.transaction_id
+    JOIN accounts a ON a.id = le.account_id
+    WHERE a.savings_owner_id IS NOT NULL AND t.created_at <= $1`);
+  const unmappedVaults = await one(`
+    SELECT COUNT(*) AS v FROM accounts WHERE savings_owner_id IS NOT NULL AND gl_code <> '2030' AND created_at <= $1`);
+  const interestPosted = await one(`
+    SELECT COALESCE(SUM(i.posted_cents), 0) AS v FROM savings_interest_accruals i
+    LEFT JOIN transactions t ON t.id = i.transaction_id
+    WHERE i.posted_cents > 0 AND t.created_at <= $1`);
   const unmappedWallets = await one(`
     SELECT COUNT(*) AS v FROM accounts WHERE user_id IS NOT NULL AND gl_code <> '2010' AND created_at <= $1`);
   const unbalancedJournals = await one(`
@@ -139,6 +152,9 @@ async function reconcile(client, businessDate) {
     check('OUT-1', 'Outbound settled: GL 1020 = settled bank transfers', settledOutbound, -gl['1020'].balance),
     check('PSN-1', 'PESONet clearing: GL 2020 = transfers queued at cut-off', queuedPesonet, gl['2020'].balance),
     check('FEE-1', 'Fee revenue: GL 4010 = bank transfer fees', bankFees, gl['4010'].balance),
+    check('SAV-1', 'Savings deposits: GL 2030 = sum of PayPulse Save vaults', savingsSubledger, gl['2030'].balance),
+    check('SAV-2', 'Savings vaults not mapped to GL 2030', 0, unmappedVaults, { money: false }),
+    check('INT-1', 'Interest expense: GL 5010 = interest posted by the daily job', interestPosted, gl['5010'].balance),
     check('MSG-1', 'Bank transfers without an ISO 20022 message (since the switch went live)', 0, missingMessages, { money: false }),
     check('MSG-2', 'Bank transfer vs pacs.008 status mismatches', 0, statusMismatches, { money: false }),
     check('OD-1', 'Overdrawn customer wallets (balance < 0)', 0, overdrawn.length, {
@@ -154,7 +170,10 @@ async function reconcile(client, businessDate) {
     status: exceptions === 0 ? 'BALANCED' : 'EXCEPTIONS',
     exceptions,
     totals: {
-      totalCustomerLiability: peso(gl['2010'].balance),
+      totalCustomerLiability: peso(gl['2010'].balance + gl['2030'].balance),
+      walletLiability: peso(gl['2010'].balance),
+      savingsLiability: peso(gl['2030'].balance),
+      interestExpense: peso(gl['5010'].balance),
       customerWalletsSubledger: peso(walletSubledger),
       pesonetPending: peso(gl['2020'].balance),
       feeRevenue: peso(gl['4010'].balance),
@@ -190,7 +209,9 @@ function auditLog(report, runAt) {
     lines.push(`${pad(r.code, 6)}${pad(r.name, 44)}${pad(r.debits, 20)}${pad(r.credits, 20)}${r.balance}`);
   }
   lines.push('');
-  lines.push(`Total customer liability (GL 2010): ${report.totals.totalCustomerLiability}`);
+  lines.push(`Total customer liability (GL 2010 + 2030): ${report.totals.totalCustomerLiability}`);
+  lines.push(`  wallets (GL 2010)                      : ${report.totals.walletLiability}`);
+  lines.push(`  PayPulse Save (GL 2030)                : ${report.totals.savingsLiability}`);
   lines.push(`Customer wallets (sub-ledger)     : ${report.totals.customerWalletsSubledger}`);
   lines.push('');
   lines.push('RECONCILIATION CHECKS');

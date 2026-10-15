@@ -45,8 +45,12 @@ jobs:
           docker compose ps
           curl --fail --silent http://localhost:3000/health
 
-      - name: Run Playwright API tests
-        run: npx playwright test
+      # Project "api" (REST) + project "ui" (tests/resilience.spec.ts in Google Chrome,
+      # which is preinstalled on GitHub's ubuntu runners: no browser download needed).
+      - name: Run Playwright tests (API + UI resilience)
+        run: |
+          google-chrome --version
+          npx playwright test
 
       - name: Run k6 concurrency test
         id: k6

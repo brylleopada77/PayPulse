@@ -6,7 +6,9 @@
  *   total money in the system  ==  sum(user balances) + sum(collected fees) + PESONet pending
  *
  * "Total money in the system" is worked out from the ledger *flows*:
- *   top-ups paid in  -  amounts paid out to banks (settled)  +  net QA sandbox adjustments.
+ *   top-ups paid in  -  amounts paid out to banks (settled)  +  net QA sandbox adjustments
+ *   +  savings interest paid by PayPulse.
+ * (User balances include PayPulse Save vaults.)
  * The other side comes from the balances, which are themselves computed from the ledger
  * (view account_balances; nothing is stored). Bank fees stay inside PayPulse, and PESONet
  * transfers waiting for their batch cut-off are still inside PayPulse too.
@@ -53,7 +55,9 @@ async function main() {
         COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE -amount_cents END)
                  FILTER (WHERE account_number = 'SYS-BANK-SETTLEMENT'), 0)                                    AS bank_payouts,
         COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE -amount_cents END)
-                 FILTER (WHERE type = 'QA_ADJUSTMENT' AND NOT is_system), 0)                                   AS qa_net
+                 FILTER (WHERE type = 'QA_ADJUSTMENT' AND NOT is_system), 0)                                   AS qa_net,
+        COALESCE(SUM(amount_cents) FILTER (WHERE type = 'INTEREST' AND direction = 'CREDIT' AND NOT is_system), 0)
+                                                                                                               AS interest_paid
       FROM flows`);
     const n = Object.fromEntries(Object.entries(rows[0]).map(([k, v]) => [k, Number(v)]));
 
@@ -65,7 +69,7 @@ async function main() {
       SELECT account_number, balance_cents FROM account_balances
       WHERE NOT is_system AND balance_cents < 0 ORDER BY balance_cents LIMIT 10`);
 
-    const totalInSystem = n.deposits_in - n.bank_payouts + n.qa_net;
+    const totalInSystem = n.deposits_in - n.bank_payouts + n.qa_net + n.interest_paid;
     const heldInside = n.user_balances + n.fees + n.pesonet_pending;
 
     const checks = [
@@ -111,6 +115,7 @@ async function main() {
       topUpsPaidIn: peso(n.deposits_in),
       paidOutToBanks: peso(n.bank_payouts),
       qaAdjustmentsNet: peso(n.qa_net),
+      savingsInterestPaid: peso(n.interest_paid),
       totalMoneyInSystem: peso(totalInSystem),
       userBalances: peso(n.user_balances),
       feesCollected: peso(n.fees),
@@ -125,6 +130,7 @@ async function main() {
       console.log(`  top-ups paid in          ${breakdown.topUpsPaidIn}`);
       console.log(`  - paid out to banks      ${breakdown.paidOutToBanks}`);
       console.log(`  + QA adjustments (net)   ${breakdown.qaAdjustmentsNet}`);
+      console.log(`  + savings interest paid  ${breakdown.savingsInterestPaid}`);
       console.log(`  = total money in system  ${breakdown.totalMoneyInSystem}`);
       console.log(
         `Held by: users ${breakdown.userBalances} + fees ${breakdown.feesCollected} + PESONet pending ${breakdown.pesonetPending}\n`,

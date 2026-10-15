@@ -62,13 +62,18 @@ async function consumeFailNext(userId) {
  */
 async function reset(userId) {
   await withTransaction(async (client) => {
-    const { rows } = await client.query('SELECT id FROM accounts WHERE user_id = $1 FOR UPDATE', [userId]);
-    const walletId = rows[0].id;
-    const delta = RESET_BALANCE_CENTS - (await getBalanceCents(client, walletId));
+    const { rows } = await client.query(
+      'SELECT id, user_id FROM accounts WHERE user_id = $1 OR savings_owner_id = $1 ORDER BY id FOR UPDATE',
+      [userId],
+    );
+    const qa = await client.query('SELECT id FROM accounts WHERE account_number = $1', [QA_ACCOUNT]);
+    const qaId = qa.rows[0].id;
 
-    if (delta !== 0) {
-      const qa = await client.query('SELECT id FROM accounts WHERE account_number = $1', [QA_ACCOUNT]);
-      const qaId = qa.rows[0].id;
+    // Wallet back to ₱1,000; PayPulse Save vault (if any) back to ₱0.
+    for (const account of rows) {
+      const target = account.user_id === userId ? RESET_BALANCE_CENTS : 0;
+      const delta = target - (await getBalanceCents(client, account.id));
+      if (delta === 0) continue;
       const amountCents = Math.abs(delta);
       await recordTransaction(client, {
         type: 'QA_ADJUSTMENT',
@@ -77,10 +82,10 @@ async function reset(userId) {
           delta > 0
             ? [
                 { accountId: qaId, direction: 'DEBIT', amountCents },
-                { accountId: walletId, direction: 'CREDIT', amountCents },
+                { accountId: account.id, direction: 'CREDIT', amountCents },
               ]
             : [
-                { accountId: walletId, direction: 'DEBIT', amountCents },
+                { accountId: account.id, direction: 'DEBIT', amountCents },
                 { accountId: qaId, direction: 'CREDIT', amountCents },
               ],
       });

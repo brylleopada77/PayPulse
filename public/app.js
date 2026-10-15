@@ -15,10 +15,35 @@
 
   // ---------- API helper ----------
 
-  async function api(path, { method = 'GET', body } = {}) {
-    const headers = { 'Content-Type': 'application/json' };
+  const CHAOS_KEY = 'paypulse.chaos';
+  const MAX_RETRIES = 3;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /** A unique Idempotency-Key for one user action (reused by that action's automatic retries). */
+  function newIdempotencyKey() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /** QA Sandbox "Chaos mode": extra x-chaos-* headers for every API call (dev servers only). */
+  function chaosHeaders() {
+    let mode = 'off';
+    try { mode = localStorage.getItem(CHAOS_KEY) || 'off'; } catch { /* storage unavailable */ }
+    switch (mode) {
+      case 'db-lock': return { 'x-chaos-mode': 'true', 'x-chaos-fault': 'db-lock' };
+      case 'drop': return { 'x-chaos-mode': 'true', 'x-chaos-fault': 'drop', 'x-chaos-rate': '0.5' };
+      case 'drop-after':
+        return { 'x-chaos-mode': 'true', 'x-chaos-fault': 'drop', 'x-chaos-rate': '0.5', 'x-chaos-drop-when': 'after' };
+      default: return {};
+    }
+  }
+
+  /** One HTTP call. Throws an Error with .status/.code/.details (status 0 + .network on no connection). */
+  async function apiOnce(path, { method, body, idempotencyKey }) {
+    const headers = { 'Content-Type': 'application/json', ...chaosHeaders() };
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
 
     networkStarted();
     let res;
@@ -28,6 +53,11 @@
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
       });
+    } catch {
+      const err = new Error('Network error');
+      err.status = 0;
+      err.network = true;
+      throw err;
     } finally {
       networkFinished();
     }
@@ -43,7 +73,35 @@
       err.status = res.status;
       throw err;
     }
-    return { ...data, httpStatus: res.status };
+    return { ...data, httpStatus: res.status, replayed: res.headers.get('Idempotent-Replayed') === 'true' };
+  }
+
+  const isTransient = (err) => err.network || err.status === 502 || err.status === 503 || err.status === 504;
+
+  /**
+   * API call with automatic retries for temporary failures (503 / no connection): up to 3 retries
+   * with back-off and a "Retrying..." toast. GETs are always retried; POSTs only when they carry an
+   * Idempotency-Key, so a retry can never repeat a transfer (the server replays the first answer).
+   */
+  async function api(path, { method = 'GET', body, idempotencyKey } = {}) {
+    const canRetry = method === 'GET' || Boolean(idempotencyKey);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        const result = await apiOnce(path, { method, body, idempotencyKey });
+        if (attempt > 1 && method !== 'GET') toast('Connection restored. Done.', 'success');
+        return result;
+      } catch (err) {
+        if (!isTransient(err) || !canRetry || attempt > MAX_RETRIES) {
+          if (isTransient(err)) {
+            err.code = err.code || 'SERVICE_UNAVAILABLE';
+            err.unconfirmed = method !== 'GET'; // a POST may or may not have gone through
+          }
+          throw err;
+        }
+        toast(`Connection problem. Retrying (${attempt}/${MAX_RETRIES})…`, 'warn');
+        await sleep(600 * 2 ** (attempt - 1));
+      }
+    }
   }
 
   // "⏳ Waiting for server…" when a request takes longer than 400 ms (e.g. QA slow network).
@@ -99,6 +157,9 @@
   function describe(tx) {
     if (tx.type === 'DEPOSIT') return { title: 'Added money', icon: '+' };
     if (tx.type === 'BANK_TRANSFER') return { title: tx.description, icon: '🏦' };
+    if (tx.type === 'SAVINGS_TRANSFER') {
+      return { title: tx.direction === 'DEBIT' ? 'Moved to PayPulse Save' : 'From PayPulse Save', icon: '🐷' };
+    }
     if (tx.direction === 'DEBIT') return { title: 'Money sent', icon: '↗' };
     return { title: 'Money received', icon: '↙' };
   }
@@ -296,6 +357,7 @@
     await loadWallet();
     startAutoRefresh();
     initQaControls(); // shows the QA panel only when the server runs in QA sandbox mode
+    loadFeatures(); // shows "Add money" only when the mock payment provider is on
     if (!hasMpin) openMpinReset('setup');
   }
 
@@ -310,12 +372,14 @@
     lastAccount = account;
     $('#user-name').textContent = account.accountHolder;
     $('#avatar').textContent = initials(account.accountHolder);
+    $('#role-chip').hidden = account.role !== 'ADMIN';
     currentBalance = account.balance;
     renderBalance();
     $('#account-number').textContent = account.accountNumber;
     $('#frozen-badge').hidden = !account.frozen;
     $('#aml-badge').hidden = account.amlStatus !== 'UNDER_REVIEW';
     renderTransactions(history.transactions);
+    loadSavingsAndCards().catch(() => {});
     if (qaEnabled) refreshQaState().catch(() => {});
   }
 
@@ -384,6 +448,10 @@
 
   function logout(message) {
     setToken(null);
+    hideCardDetails(); // never leave a revealed card number on screen for the next person
+    renderCard(null);
+    $('#topup-btn').hidden = true;
+    $('#role-chip').hidden = true;
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     hidePopover($('#sms'));
     showAuth();
@@ -451,8 +519,37 @@
       form.reset();
       setFormError(form);
       dialog.showModal();
+      if (btn.dataset.open === 'topup-dialog') loadTopupLimits();
     });
   });
+
+  /** "You can add up to ₱X today · ₱Y more can be held": from GET /api/payments/limits. */
+  async function loadTopupLimits() {
+    const el = $('#topup-limits');
+    el.textContent = '';
+    try {
+      const l = await api('/api/payments/limits');
+      const canAdd = Math.min(Number(l.remainingToday), Number(l.roomLeft));
+      el.replaceChildren(
+        Object.assign(document.createElement('span'), { textContent: `You can add up to ${money(canAdd)} now` }),
+        Object.assign(document.createElement('span'), {
+          textContent: `Limits: ${money(l.dailyLimit)} a day, ${money(l.walletLimit)} held`,
+        }),
+      );
+    } catch {
+      /* the server still enforces the limits */
+    }
+  }
+
+  /** "Add money" is for ADMIN accounts only, and only when the mock payment provider is enabled. */
+  async function loadFeatures() {
+    try {
+      const { features } = await api('/api/config');
+      $('#topup-btn').hidden = !(features.mockPayments && lastAccount?.role === 'ADMIN');
+    } catch {
+      $('#topup-btn').hidden = true;
+    }
+  }
 
   document.querySelectorAll('[data-close]').forEach((btn) => {
     btn.addEventListener('click', () => btn.closest('dialog').close());
@@ -497,6 +594,7 @@
     setFormError(form);
     try {
       const result = await api('/api/payments/mock-checkout', {
+        idempotencyKey: newIdempotencyKey(),
         method: 'POST',
         body: { amount: amount.trim(), outcome },
       });
@@ -508,7 +606,9 @@
       toast(`${money(result.amount)} added to your wallet`, 'success');
       await loadWallet();
     } catch (err) {
-      setFormError(form, err.message);
+      // e.g. TOPUP_DAILY_LIMIT_EXCEEDED, WALLET_LIMIT_EXCEEDED or a compliance hold
+      setFormError(form, describeError(err));
+      loadTopupLimits();
     }
   });
 
@@ -758,7 +858,11 @@
 
     // The Confirm button is intentionally left enabled while this request runs (QA exercise).
     try {
-      const result = await api(pending.endpoint, { method: 'POST', body: transferBody({ mpin }) });
+      const result = await api(pending.endpoint, {
+        method: 'POST',
+        body: transferBody({ mpin }),
+        idempotencyKey: newIdempotencyKey(), // one key per click: retries reuse it, a double-click doesn't
+      });
       if (result.otpRequired) {
         pending.mpin = mpin;
         mpinDialog.close();
@@ -784,16 +888,23 @@
       } else if (err.status === 400 || err.status === 404 || err.status === 422) {
         backToSendForm(err.message);
       } else {
-        // e.g. 403 compliance hold, 423 frozen, 429 too many transfers, 500 server error:
+        // e.g. 403 compliance hold, 423 frozen, 429 too many transfers, 500/503 server errors:
         // start the retry with an empty pad.
         mpinInput.clear();
         setFormError(mpinForm, describeError(err));
+        if (err.unconfirmed) loadWallet().catch(() => {});
       }
     }
   });
 
   /** A user-facing message for a failed transfer, with the compliance reason when it was held. */
   function describeError(err) {
+    if (err.unconfirmed) {
+      // Still failing after the automatic retries: the answer may have been lost after the
+      // transfer went through, so don't claim either way. Retries never send twice.
+      return "We couldn't reach PayPulse after 3 retries, so this transfer isn't confirmed. " +
+        'Your balance has been refreshed: check Recent activity before trying again.';
+    }
     if (err.status >= 500) return 'Something went wrong on our side. No money was sent. Please try again.';
     if (err.code === 'TRANSACTION_HELD_FOR_REVIEW' && err.details?.reason) {
       return `${err.message}: ${err.details.reason} No money was sent.`;
@@ -855,6 +966,7 @@
     try {
       const result = await api(pending.endpoint, {
         method: 'POST',
+        idempotencyKey: newIdempotencyKey(),
         body: transferBody({ otpChallengeId: pending.challengeId, otp }),
       });
       await completeTransfer(result);
@@ -887,7 +999,7 @@
     if (!pending) return;
     $('#otp-resend').disabled = true;
     try {
-      const result = await api(pending.endpoint, { method: 'POST', body: transferBody() });
+      const result = await api(pending.endpoint, { method: 'POST', body: transferBody(), idempotencyKey: newIdempotencyKey() });
       if (result.otpRequired) {
         startOtp(result);
         toast('A new code has been sent');
@@ -1191,6 +1303,7 @@
     const left = mpinSecondsLeft();
     const mpinStatus = !hasMpin ? 'Not set up' : left > 0 ? `Valid for ${formatCountdown(left)}` : 'Expired';
     fillRows($('#profile-security'), [
+      ['Role', lastAccount?.role === 'ADMIN' ? 'Admin (can Add money and use QA tools)' : 'Customer'],
       ['Compliance status', lastAccount?.amlStatus === 'UNDER_REVIEW' ? 'Under review: sending is on hold' : 'Clear'],
       ['MPIN', mpinStatus],
       ['MPIN lifetime', '5 minutes after you get it'],
@@ -1256,6 +1369,160 @@
   profileDialog.addEventListener('close', () => clearInterval(profileTimer));
   $('#profile-btn').addEventListener('click', openProfile);
   $('#profile-new-mpin').addEventListener('click', () => openMpinReset());
+
+  // ---------- PayPulse Save ----------
+
+  const savingsDialog = $('#savings-dialog');
+  const savingsForm = $('#savings-form');
+  let savings = null; // GET /api/v1/savings
+  let savingsDirection = 'DEPOSIT';
+
+  async function loadSavingsAndCards() {
+    const [vault, cards] = await Promise.all([api('/api/v1/savings'), api('/api/v1/cards')]);
+    savings = vault;
+    $('#savings-balance').textContent = money(vault.balance);
+    $('#savings-rate').textContent = `${vault.annualRate}% p.a.`;
+    $('#savings-meta').textContent =
+      `Interest earned ${money(vault.interestEarned)} · about ${money(vault.estimatedDailyInterest)} a day` +
+      (vault.lastAccrualDate ? ` · last credited for ${vault.lastAccrualDate}` : '');
+    renderCard(cards.cards[0] || null);
+  }
+
+  function openSavings(direction) {
+    savingsDirection = direction;
+    savingsForm.reset();
+    setFormError(savingsForm);
+    const toSavings = direction === 'DEPOSIT';
+    $('#savings-title').textContent = toSavings ? 'Add to Savings' : 'Withdraw to Wallet';
+    $('#savings-submit').textContent = toSavings ? 'Move to Savings' : 'Withdraw';
+    $('#savings-available').textContent = toSavings
+      ? `Available in your wallet: ${money(currentBalance ?? 0)}`
+      : `Available in PayPulse Save: ${money(savings?.balance ?? 0)}`;
+    savingsDialog.showModal();
+  }
+
+  $('#savings-add').addEventListener('click', () => openSavings('DEPOSIT'));
+  $('#savings-withdraw').addEventListener('click', () => openSavings('WITHDRAW'));
+
+  savingsForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const amount = savingsForm.elements.amount.value.trim();
+    setFormError(savingsForm);
+    if (!validAmount(amount)) return setFormError(savingsForm, 'Enter a valid amount, e.g. 250 or 99.50.');
+    try {
+      const path = savingsDirection === 'DEPOSIT' ? '/api/v1/savings/deposit' : '/api/v1/savings/withdraw';
+      const result = await api(path, { method: 'POST', body: { amount }, idempotencyKey: newIdempotencyKey() });
+      savingsDialog.close();
+      toast(
+        savingsDirection === 'DEPOSIT'
+          ? `${money(result.amount)} moved to PayPulse Save`
+          : `${money(result.amount)} withdrawn to your wallet`,
+        'success',
+      );
+      await loadWallet();
+    } catch (err) {
+      setFormError(savingsForm, describeError(err));
+      if (err.unconfirmed) loadWallet().catch(() => {});
+    }
+  });
+
+  // ---------- Virtual card ----------
+
+  const cardMpinDialog = $('#card-mpin-dialog');
+  const cardMpinForm = $('#card-mpin-form');
+  const cardMpinInput = createCodeInput($('#card-mpin-input'));
+  let card = null; // the user's first card (public, masked view)
+  let cardMpinAction = null; // 'generate' | 'reveal'
+  let maskTimer = null;
+
+  const groupPan = (pan) => pan.replace(/(\d{4})(?=\d)/g, '$1 ');
+
+  function renderCard(c) {
+    card = c;
+    $('#card-empty').hidden = Boolean(c);
+    $('#card-view').hidden = !c;
+    if (!c) return;
+    if (!maskTimer) {
+      $('#vcard-number').textContent = c.maskedPan;
+      $('#vcard-cvv').textContent = '•••';
+    }
+    $('#vcard-name').textContent = c.cardholderName;
+    $('#vcard-expiry').textContent = c.expiry;
+    $('#vcard-status').textContent = c.status === 'FROZEN' ? 'FROZEN' : 'ACTIVE';
+    $('#vcard').classList.toggle('frozen', c.status === 'FROZEN');
+    $('#card-freeze').textContent = c.status === 'FROZEN' ? 'Unfreeze card' : 'Freeze card';
+  }
+
+  function hideCardDetails() {
+    clearTimeout(maskTimer);
+    maskTimer = null;
+    if (card) {
+      $('#vcard-number').textContent = card.maskedPan;
+      $('#vcard-cvv').textContent = '•••';
+    }
+    $('#card-reveal').textContent = 'Show card details';
+    $('#card-hint').textContent = 'Card details are hidden. They are shown for 30 seconds after you enter your MPIN.';
+  }
+
+  function askCardMpin(action) {
+    cardMpinAction = action;
+    $('#card-mpin-purpose').textContent =
+      action === 'generate'
+        ? 'Confirm with your MPIN to create a virtual Visa card linked to your wallet.'
+        : 'Confirm with your MPIN to show the full card number and CVV.';
+    setFormError(cardMpinForm);
+    cardMpinDialog.showModal();
+    cardMpinInput.clear();
+  }
+
+  $('#card-generate').addEventListener('click', () => askCardMpin('generate'));
+  $('#card-reveal').addEventListener('click', () => (maskTimer ? hideCardDetails() : askCardMpin('reveal')));
+
+  $('#card-freeze').addEventListener('click', async () => {
+    if (!card) return;
+    try {
+      const next = card.status === 'FROZEN' ? 'ACTIVE' : 'FROZEN';
+      renderCard(await api(`/api/v1/cards/${card.token}`, { method: 'PATCH', body: { status: next } }));
+      toast(next === 'FROZEN' ? 'Card frozen' : 'Card is active again', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  cardMpinForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const mpin = cardMpinInput.value();
+    setFormError(cardMpinForm);
+    if (!/^\d{6}$/.test(mpin)) return setFormError(cardMpinForm, 'Enter all 6 digits of your MPIN.');
+    try {
+      if (cardMpinAction === 'generate') {
+        const created = await api('/api/v1/cards/generate', {
+          method: 'POST',
+          body: { mpin },
+          idempotencyKey: newIdempotencyKey(),
+        });
+        cardMpinDialog.close();
+        renderCard(created);
+        toast('Your virtual Visa card is ready', 'success');
+      } else {
+        const details = await api(`/api/v1/cards/${card.token}/reveal`, { method: 'POST', body: { mpin } });
+        cardMpinDialog.close();
+        $('#vcard-number').textContent = groupPan(details.pan);
+        $('#vcard-cvv').textContent = details.cvv;
+        $('#card-reveal').textContent = 'Hide card details';
+        $('#card-hint').textContent = 'Shown for 30 seconds. Never share your card number or CVV.';
+        clearTimeout(maskTimer);
+        maskTimer = setTimeout(hideCardDetails, 30_000);
+      }
+    } catch (err) {
+      if (err.code === 'INVALID_MPIN') {
+        toast('Invalid MPIN', 'error');
+        cardMpinInput.clear();
+      } else {
+        setFormError(cardMpinForm, err.message);
+      }
+    }
+  });
 
   // ---------- Receive via QR ----------
 
@@ -1443,9 +1710,28 @@
     $('#qa-slow').checked = state.slowNetwork;
     $('#qa-fail').checked = state.failNextTransaction;
     $('#qa-freeze').checked = state.frozen;
-    qaFab.classList.toggle('active', state.slowNetwork || state.failNextTransaction || state.frozen);
+    const chaos = $('#qa-chaos').value !== 'off';
+    qaFab.classList.toggle('active', state.slowNetwork || state.failNextTransaction || state.frozen || chaos);
     return state;
   }
+
+  // Chaos mode is a browser-side setting: it adds x-chaos-* headers to every API call.
+  try { $('#qa-chaos').value = localStorage.getItem(CHAOS_KEY) || 'off'; } catch { /* storage unavailable */ }
+  $('#qa-chaos').addEventListener('change', (event) => {
+    try { localStorage.setItem(CHAOS_KEY, event.target.value); } catch { /* not remembered */ }
+    qaStatus(`Chaos mode: ${event.target.selectedOptions[0].textContent}`);
+    refreshQaState().catch(() => {});
+  });
+
+  $('#qa-interest').addEventListener('click', async () => {
+    try {
+      const result = await api('/api/qa/savings/accrue', { method: 'POST', body: { days: 30 } });
+      qaStatus(`30 days of interest: ${money(result.postedCents / 100)} credited to PayPulse Save`);
+      await loadWallet();
+    } catch (err) {
+      qaStatus(err.message);
+    }
+  });
 
   function qaStatus(text) {
     $('#qa-status').textContent = text;

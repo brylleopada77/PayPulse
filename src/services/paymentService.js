@@ -63,7 +63,13 @@ async function creditWallet(client, walletId, amountCents, paymentId) {
  * Handle a payment status callback from the (mock) payment provider.
  * Idempotent: the same paymentId only ever credits the wallet once.
  */
-async function handlePaymentCallback(rawBody, signature, payload) {
+/**
+ * @param {object} [options]
+ * @param {(client) => Promise<void>} [options.beforeCredit]  runs inside the same database transaction
+ *   before anything is recorded (used by the mock checkout to lock and check its limits); throwing
+ *   from it rolls everything back.
+ */
+async function handlePaymentCallback(rawBody, signature, payload, { beforeCredit } = {}) {
   verifySignature(rawBody, signature);
   validatePayload(payload);
   const amountCents = toCents(payload.amount);
@@ -78,6 +84,7 @@ async function handlePaymentCallback(rawBody, signature, payload) {
       throw notFound('ACCOUNT_NOT_FOUND', 'Account does not exist');
     }
     const walletId = wallet.rows[0].id;
+    if (beforeCredit) await beforeCredit(client);
 
     // Create the payment row, or lock the existing one so parallel callbacks queue up.
     await client.query(

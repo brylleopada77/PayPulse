@@ -20,6 +20,9 @@ services:
         generateValue: true
       - key: WEBHOOK_SECRET
         generateValue: true
+      # Encrypts virtual card numbers at rest (PCI-DSS style); never reuse JWT_SECRET for this.
+      - key: CARD_ENCRYPTION_KEY
+        generateValue: true
 
 databases:
   - name: paypulse-db

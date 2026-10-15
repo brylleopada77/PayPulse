@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const mpinService = require('./mpinService');
+const { roleForNewUser } = require('./roleService');
 const { withTransaction, pool } = require('../db/pool');
 const { badRequest, conflict, unauthorized } = require('../utils/errors');
 const { requireMobile } = require('../utils/mobile');
@@ -39,10 +40,10 @@ async function register({ email, password, fullName, mobileNumber }) {
   try {
     return await withTransaction(async (client) => {
       const userResult = await client.query(
-        `INSERT INTO users (email, password_hash, full_name, mpin_hash, mpin_expires_at, mobile_number)
-         VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6)
+        `INSERT INTO users (email, password_hash, full_name, mpin_hash, mpin_expires_at, mobile_number, role)
+         VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6, $7)
          RETURNING id, email, full_name, mobile_number`,
-        [normalizedEmail, passwordHash, fullName.trim(), mpinHash, expiresInSeconds, mobile],
+        [normalizedEmail, passwordHash, fullName.trim(), mpinHash, expiresInSeconds, mobile, roleForNewUser(normalizedEmail)],
       );
       const user = userResult.rows[0];
 

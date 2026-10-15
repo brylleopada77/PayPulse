@@ -66,6 +66,27 @@ async function getReceipt(userId, transactionId) {
     createdAt,
   };
 
+  if (type === 'SAVINGS_TRANSFER') {
+    // Between the user's own wallet and PayPulse Save vault.
+    const { rows: vault } = await pool.query(
+      'SELECT account_number FROM accounts WHERE savings_owner_id = $1',
+      [userId],
+    );
+    const wallet = { name: `${mine.full_name} (Main Wallet)`, account: mine.account_number };
+    const save = { name: `${mine.full_name} (PayPulse Save)`, account: vault[0]?.account_number ?? 'PayPulse Save' };
+    const toSavings = mine.direction === 'DEBIT';
+    return {
+      ...receipt,
+      title: toSavings ? 'Moved to PayPulse Save' : 'Withdrawn from PayPulse Save',
+      amount: fromCents(mine.amount_cents),
+      fee: fromCents(0),
+      total: fromCents(mine.amount_cents),
+      sender: toSavings ? wallet : save,
+      recipient: toSavings ? save : wallet,
+      bankName: 'PayPulse',
+    };
+  }
+
   if (type === 'DEPOSIT') {
     const { rows } = await pool.query('SELECT payment_id FROM payments WHERE transaction_id = $1', [id]);
     return {

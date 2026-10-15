@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const { enforceTransferLimits } = require('../middleware/transferLimits');
 const { blockFrozenAccounts, simulateServerError } = require('../middleware/accountGuards');
 const { amlMonitor } = require('../middleware/amlMonitor');
+const { idempotency } = require('../middleware/idempotency');
 const transferService = require('../services/transferService');
 const limitsService = require('../services/limitsService');
 const paymentSwitch = require('../services/paymentSwitch');
@@ -13,13 +14,14 @@ const { fromCents } = require('../utils/money');
 const router = express.Router();
 
 // Every outgoing transfer passes, in order:
-//   requireAuth -> blockFrozenAccounts (423) -> simulateServerError (QA 500)
+//   requireAuth -> idempotency (replay) -> blockFrozenAccounts (423) -> simulateServerError (QA 500)
 //   -> amlMonitor (403 TRANSACTION_HELD_FOR_REVIEW) -> enforceTransferLimits (429 / 400)
 // and then answers:
 //   201 -> transfer completed (Bank Transfer via PESONet: status QUEUED until the cut-off)
 //   202 -> amount is above ₱1,000: { otpRequired, challengeId, expiresInSeconds, demoCode };
 //          repeat the same request with otpChallengeId + otp to complete it
-const outgoingTransfer = [requireAuth, blockFrozenAccounts, simulateServerError, amlMonitor, enforceTransferLimits];
+// idempotency comes first after auth: a retry with the same Idempotency-Key replays the first answer.
+const outgoingTransfer = [requireAuth, idempotency, blockFrozenAccounts, simulateServerError, amlMonitor, enforceTransferLimits];
 const reply = (res, result) => res.status(result.otpRequired ? 202 : 201).json(result);
 
 // POST /api/transfers  (Express Send, free)

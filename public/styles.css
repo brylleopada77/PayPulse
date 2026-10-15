@@ -197,6 +197,42 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 }
 .review-total strong { font-size: 1.4rem; color: var(--brand-dark); font-variant-numeric: tabular-nums; }
 
+/* ---------- PayPulse Save ---------- */
+.vault-card, .cards-section { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); display: grid; gap: 12px; }
+.vault-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.vault-label { margin: 0; font-weight: 600; color: var(--muted); font-size: 0.9rem; }
+.vault-balance { margin: 4px 0 0; font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.rate-badge { padding: 4px 10px; border-radius: 999px; background: #e1f7ef; color: var(--success); font-weight: 700; font-size: 0.82rem; white-space: nowrap; }
+.vault-meta { margin: 0; color: var(--muted); font-size: 0.88rem; }
+.vault-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.summary.left { text-align: left; }
+
+/* ---------- Virtual card ---------- */
+.vcard {
+  aspect-ratio: 1.586; max-width: 360px; width: 100%; padding: 18px 20px; border-radius: 16px; color: #fff;
+  display: grid; grid-template-rows: auto 1fr auto; box-shadow: 0 14px 30px rgba(67, 53, 216, 0.35);
+  background: radial-gradient(circle at 85% 15%, rgba(255, 255, 255, 0.22), transparent 40%),
+              linear-gradient(135deg, #2b1f8f 0%, var(--brand) 55%, #7a4cf0 100%);
+}
+.vcard.frozen { filter: grayscale(0.85); opacity: 0.8; }
+#card-view { display: grid; gap: 12px; }
+.vcard-top { display: flex; justify-content: space-between; align-items: center; }
+.vcard-brand { font-weight: 700; letter-spacing: 0.02em; }
+.vcard-status { font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.2); }
+.vcard-number { align-self: center; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 1.25rem; letter-spacing: 0.08em; }
+.vcard-bottom { display: grid; grid-template-columns: 1.6fr 1fr 0.7fr auto; gap: 8px; align-items: end; font-size: 0.85rem; }
+.vcard-bottom div { display: grid; gap: 2px; min-width: 0; }
+.vcard-bottom span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.vcard-bottom small { opacity: 0.75; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.visa { font-style: italic; font-weight: 800; font-size: 1.3rem; letter-spacing: 0.02em; }
+
+.toast.warn { background: #b26a00; }
+
+.qa-select { display: grid; gap: 6px; }
+.qa-select span { display: grid; }
+.qa-select small { color: #a9abc0; font-size: 0.78rem; }
+.qa-select select { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid #3a3d52; background: #2a2c3d; color: #fff; }
+
 /* ---------- Frozen account ---------- */
 .frozen-badge {
   margin-left: auto; padding: 3px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700;
@@ -272,6 +308,7 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   background: linear-gradient(135deg, var(--brand), var(--accent)); color: #fff;
   font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em;
 }
+.role-chip { padding: 2px 8px; border-radius: 999px; background: #1b1d2a; color: #ffb020; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
 .avatar.large { width: 52px; height: 52px; font-size: 1.1rem; }
 
 /* Grid only while open: a plain `display` here would override the closed <dialog>'s hidden state. */

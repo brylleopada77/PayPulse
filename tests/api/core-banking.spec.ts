@@ -1,6 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { test, expect, type APIRequestContext, type APIResponse } from '@playwright/test';
 import {
+  createAdmin,
+  createFundedAdmin,
   authHeader,
   bankTransfer,
   createFundedUser,
@@ -130,7 +132,7 @@ test.describe('Payment switch: ISO 20022 pacs.008', () => {
 
 test.describe('PESONet batch queue', () => {
   test('a PESONet transfer waits in clearing until the cut-off, then settles in a batch', async ({ request }) => {
-    const alice = await createFundedUser(request, 1000);
+    const alice = await createFundedAdmin(request, 1000);
     const sent = await (await sendToBank(request, alice, { ...BDO, amount: 400, rail: 'PESONET' })).json();
 
     // Queued: the money has left the wallet (amount + fee) but not PayPulse yet.
@@ -159,7 +161,7 @@ test.describe('PESONet batch queue', () => {
   });
 
   test('a cut-off with nothing queued creates no batch', async ({ request }) => {
-    const alice = await createUser(request);
+    const alice = await createAdmin(request);
     expect(await (await qaPost(request, alice, '/api/qa/pesonet/run-cutoff')).json()).toEqual({ batch: null });
   });
 });
@@ -186,7 +188,7 @@ test.describe('AML: Transaction Held for Compliance Review', () => {
   });
 
   test('while under review every outgoing transfer is held; clearing releases the account', async ({ request }) => {
-    const alice = await createFundedUser(request, 600_000);
+    const alice = await createFundedAdmin(request, 600_000);
     const bob = await createUser(request);
     await transfer(request, alice, { toAccountNumber: bob.accountNumber, amount: 600_000 });
 
@@ -258,10 +260,10 @@ test.describe('End-of-day reconciliation script', () => {
     expect(run.status, run.stderr).not.toBe(2); // 0 = balanced, 1 = exceptions (e.g. race-bug overdrafts)
     const report = JSON.parse(run.stdout);
 
-    expect(report.trialBalance.map((r: { code: string }) => r.code)).toEqual(['1010', '1020', '2010', '2020', '3900', '4010']);
+    expect(report.trialBalance.map((r: { code: string }) => r.code)).toEqual(['1010', '1020', '2010', '2020', '2030', '3900', '4010', '5010']);
     const status = Object.fromEntries(report.checks.map((c: { id: string; status: string }) => [c.id, c.status]));
     // These must reconcile even while other tests run (the script reads one consistent snapshot).
-    for (const id of ['TB-1', 'TB-2', 'LIAB-1', 'LIAB-2', 'EQ-1', 'CASH-1', 'OUT-1', 'PSN-1', 'FEE-1', 'MSG-2']) {
+    for (const id of ['TB-1', 'TB-2', 'LIAB-1', 'LIAB-2', 'EQ-1', 'CASH-1', 'OUT-1', 'PSN-1', 'FEE-1', 'SAV-1', 'SAV-2', 'INT-1', 'MSG-2']) {
       expect(status[id], id).toBe('MATCHED');
     }
     expect(report.auditLog).toMatch(/reports[\\/]eod[\\/]eod-\d{4}-\d{2}-\d{2}-.*\.log$/);

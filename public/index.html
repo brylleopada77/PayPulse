@@ -102,6 +102,7 @@
         <button type="button" id="profile-btn" class="profile-btn" data-testid="open-profile" aria-label="Open my profile">
           <span class="avatar" id="avatar" aria-hidden="true"></span>
           <span id="user-name" data-testid="user-name"></span>
+          <span class="role-chip" id="role-chip" data-testid="role-chip" hidden>Admin</span>
         </button>
         <button type="button" id="logout-btn" class="btn ghost" data-testid="logout">Log out</button>
       </div>
@@ -125,7 +126,8 @@
           <button type="button" class="action" data-open="send-dialog" data-testid="open-send">
             <span class="icon" aria-hidden="true">↗</span>Send
           </button>
-          <button type="button" class="action" data-open="topup-dialog" data-testid="open-topup">
+          <!-- Admins only, and only when the server has the mock payment provider on (MOCK_PAYMENTS=true). -->
+          <button type="button" class="action" id="topup-btn" data-open="topup-dialog" data-testid="open-topup" hidden>
             <span class="icon" aria-hidden="true">＋</span>Add money
           </button>
           <button type="button" class="action" id="receive-qr-btn" data-testid="open-receive-qr">
@@ -137,6 +139,49 @@
           <button type="button" class="action" id="refresh-btn" data-testid="refresh">
             <span class="icon" aria-hidden="true">⟳</span>Refresh
           </button>
+        </div>
+      </section>
+
+      <section class="vault-card" aria-label="PayPulse Save" data-testid="savings-card">
+        <div class="vault-head">
+          <div>
+            <p class="vault-label">🐷 PayPulse Save</p>
+            <p class="vault-balance" id="savings-balance" data-testid="savings-balance">₱0.00</p>
+          </div>
+          <span class="rate-badge" id="savings-rate" data-testid="savings-rate">6.00% p.a.</span>
+        </div>
+        <p class="vault-meta" id="savings-meta" data-testid="savings-meta"></p>
+        <div class="vault-actions">
+          <button type="button" class="btn secondary" id="savings-add" data-testid="savings-add">Add to Savings</button>
+          <button type="button" class="btn secondary" id="savings-withdraw" data-testid="savings-withdraw">Withdraw to Wallet</button>
+        </div>
+      </section>
+
+      <section class="cards-section" aria-label="Virtual card" data-testid="cards-section">
+        <h2>Virtual Card</h2>
+        <div id="card-empty" data-testid="card-empty">
+          <p class="summary left">Pay online with a virtual Visa card linked to your wallet.</p>
+          <button type="button" class="btn primary" id="card-generate" data-testid="card-generate">Get a virtual Visa card</button>
+        </div>
+        <div id="card-view" hidden>
+          <div class="vcard" id="vcard" data-testid="vcard">
+            <div class="vcard-top">
+              <span class="vcard-brand">PayPulse</span>
+              <span class="vcard-status" id="vcard-status" data-testid="vcard-status"></span>
+            </div>
+            <div class="vcard-number" id="vcard-number" data-testid="vcard-number"></div>
+            <div class="vcard-bottom">
+              <div><small>Card holder</small><span id="vcard-name"></span></div>
+              <div><small>Expires</small><span id="vcard-expiry" data-testid="vcard-expiry"></span></div>
+              <div><small>CVV</small><span id="vcard-cvv" data-testid="vcard-cvv">•••</span></div>
+              <span class="visa" aria-label="Visa">VISA</span>
+            </div>
+          </div>
+          <div class="vault-actions">
+            <button type="button" class="btn secondary" id="card-reveal" data-testid="card-reveal">Show card details</button>
+            <button type="button" class="btn secondary" id="card-freeze" data-testid="card-freeze">Freeze card</button>
+          </div>
+          <p class="hint" id="card-hint" data-testid="card-hint">Card details are hidden. They are shown for 30 seconds after you enter your MPIN.</p>
         </div>
       </section>
 
@@ -237,6 +282,37 @@
       </div>
       <button type="button" class="btn primary" id="review-confirm" data-testid="review-confirm">Confirm &amp; enter MPIN</button>
     </div>
+  </dialog>
+
+  <!-- ============ PayPulse Save: move money ============ -->
+  <dialog id="savings-dialog" class="sheet" aria-labelledby="savings-title" data-testid="savings-dialog">
+    <form id="savings-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2 id="savings-title">Add to Savings</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary" id="savings-available" data-testid="savings-available"></p>
+      <label>Amount (₱)
+        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="savings-amount">
+      </label>
+      <p class="hint center">Earns 6.00% a year, credited daily.</p>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" id="savings-submit" data-testid="savings-submit">Move money</button>
+    </form>
+  </dialog>
+
+  <!-- ============ Virtual card: MPIN ============ -->
+  <dialog id="card-mpin-dialog" class="sheet" aria-labelledby="card-mpin-title" data-testid="card-mpin-dialog">
+    <form id="card-mpin-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2 id="card-mpin-title">Enter your MPIN</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary" id="card-mpin-purpose"></p>
+      <div class="code-input" id="card-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="card-mpin-input"></div>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="card-mpin-submit">Confirm</button>
+    </form>
   </dialog>
 
   <!-- ============ My profile (account, transfer limits, security) ============ -->
@@ -405,6 +481,7 @@
       <label>Amount (₱)
         <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="topup-amount">
       </label>
+      <p class="fee-preview" id="topup-limits" data-testid="topup-limits"></p>
       <div class="mock-card">
         <span class="test-badge">TEST MODE</span>
         <p>Mock card •••• 4242</p>
@@ -487,6 +564,16 @@
       <input type="checkbox" id="qa-freeze" data-testid="qa-freeze">
       <span><strong>Freeze account</strong><small>Sending money is blocked (423 ACCOUNT_FROZEN)</small></span>
     </label>
+    <label class="qa-select">
+      <span><strong>Chaos mode</strong><small>Sends x-chaos-* headers with every API call</small></span>
+      <select id="qa-chaos" data-testid="qa-chaos">
+        <option value="off">Off</option>
+        <option value="db-lock">DB lock: 2 s per call</option>
+        <option value="drop">503 drops (50%, request not run)</option>
+        <option value="drop-after">503 after success (50%, answer lost)</option>
+      </select>
+    </label>
+    <button type="button" class="btn secondary" id="qa-interest" data-testid="qa-interest">Simulate 30 days of savings interest</button>
     <div class="qa-actions">
       <button type="button" class="btn secondary" id="qa-pesonet" data-testid="qa-pesonet">Run PESONet cut-off now</button>
       <button type="button" class="btn secondary" id="qa-clear-aml" data-testid="qa-clear-aml">Clear compliance hold</button>

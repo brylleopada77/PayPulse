@@ -16,7 +16,7 @@ export interface IntegrityReport {
   ok: boolean;
   /** Sum of every account balance (customers + system accounts). Always 0 in double entry. */
   totalBalanceCents: number;
-  /** Money held in customer wallets (GL 2010). Must equal top-ups - bank transfers + QA adjustments. */
+  /** Money held by customers (wallets GL 2010 + savings GL 2030). = top-ups - bank transfers + QA + interest. */
   userBalanceCents: number;
   /** Total of all successful top-ups that ever entered the system. */
   totalDepositsCents: number;
@@ -24,6 +24,8 @@ export interface IntegrityReport {
   bankOutflowCents: number;
   /** Net money QA sandbox resets added to (or removed from) customer wallets. */
   qaAdjustmentCents: number;
+  /** Savings interest PayPulse paid into PayPulse Save vaults. */
+  interestCents: number;
   /** Transactions whose debits do not equal their credits. */
   unbalancedTransactions: number[];
   /**
@@ -66,7 +68,9 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
           AS bank_outflow,
         COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents ELSE -le.amount_cents END)
                  FILTER (WHERE t.type = 'QA_ADJUSTMENT' AND NOT a.is_system), 0)
-          AS qa_adjustments
+          AS qa_adjustments,
+        COALESCE(SUM(le.amount_cents) FILTER (WHERE t.type = 'INTEREST' AND le.direction = 'CREDIT' AND NOT a.is_system), 0)
+          AS interest
       FROM ledger_entries le
       JOIN transactions t ON t.id = le.transaction_id
       JOIN accounts a ON a.id = le.account_id`);
@@ -94,6 +98,7 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       totalDepositsCents: Number(flows.rows[0].deposits),
       bankOutflowCents: Number(flows.rows[0].bank_outflow),
       qaAdjustmentCents: Number(flows.rows[0].qa_adjustments),
+      interestCents: Number(flows.rows[0].interest),
       unbalancedTransactions: unbalanced.rows.map((r) => r.transaction_id),
       mismatchedAccounts: [],
       negativeAccounts: negative.rows.map((r) => r.account_number),
@@ -103,7 +108,8 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
     const totalsOk = accountNumbers?.length
       ? true
       : report.totalBalanceCents === 0 &&
-        report.userBalanceCents === report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents;
+        report.userBalanceCents ===
+          report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents + report.interestCents;
 
     report.ok = totalsOk && report.unbalancedTransactions.length === 0 && report.negativeAccounts.length === 0;
     return report;
@@ -183,4 +189,9 @@ export async function expirePasswordReset(resetId: string): Promise<void> {
   await withClient((client) =>
     client.query("UPDATE password_resets SET expires_at = now() - interval '1 second' WHERE id = $1", [resetId]),
   );
+}
+
+/** Test hook: give an account the ADMIN role (Add money, QA sandbox and chaos tools are admin-only). */
+export async function makeAdmin(email: string): Promise<void> {
+  await withClient((client) => client.query("UPDATE users SET role = 'ADMIN' WHERE email = $1", [email]));
 }

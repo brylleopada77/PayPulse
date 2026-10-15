@@ -1,5 +1,7 @@
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import {
+  createAdmin,
+  createFundedAdmin,
   authHeader,
   bankTransfer,
   createFundedUser,
@@ -23,7 +25,7 @@ const qa = {
 
 test.describe('QA sandbox: switches', () => {
   test('everything is off for a new user', async ({ request }) => {
-    const alice = await createUser(request);
+    const alice = await createAdmin(request);
     const response = await qa.state(request, alice);
     expect(response.status()).toBe(200);
     expect(await response.json()).toMatchObject({ slowNetwork: false, failNextTransaction: false, frozen: false });
@@ -35,7 +37,7 @@ test.describe('QA sandbox: switches', () => {
 
   test('slow network delays every API call by about 3 seconds', async ({ request }) => {
     test.slow();
-    const alice = await createUser(request);
+    const alice = await createAdmin(request);
     await qa.set(request, alice, { slowNetwork: true });
 
     const started = Date.now();
@@ -52,7 +54,7 @@ test.describe('QA sandbox: switches', () => {
   });
 
   test('fail next transaction: one 500 with no money moved, then back to normal', async ({ request }) => {
-    const alice = await createFundedUser(request, 100);
+    const alice = await createFundedAdmin(request, 100);
     const bob = await createUser(request);
     await qa.set(request, alice, { failNextTransaction: true });
 
@@ -73,7 +75,7 @@ test.describe('QA sandbox: switches', () => {
   });
 
   test('fail next transaction also applies to top-ups', async ({ request }) => {
-    const alice = await createUser(request);
+    const alice = await createAdmin(request);
     await qa.set(request, alice, { failNextTransaction: true });
 
     const topUp = await request.post('/api/payments/mock-checkout', { data: { amount: 50 }, headers: authHeader(alice.token) });
@@ -83,7 +85,7 @@ test.describe('QA sandbox: switches', () => {
   });
 
   test('a frozen account cannot send (Express or Bank) but can still receive', async ({ request }) => {
-    const alice = await createFundedUser(request, 500);
+    const alice = await createFundedAdmin(request, 500);
     const bob = await createFundedUser(request, 100);
     await qa.set(request, alice, { frozen: true });
 
@@ -104,8 +106,8 @@ test.describe('QA sandbox: switches', () => {
   });
 
   test('switches only affect your own account', async ({ request }) => {
-    const alice = await createFundedUser(request, 100);
-    const bob = await createUser(request);
+    const alice = await createFundedAdmin(request, 100);
+    const bob = await createAdmin(request);
     await qa.set(request, alice, { frozen: true, failNextTransaction: true });
 
     const bobState = await (await qa.state(request, bob)).json();
@@ -115,7 +117,7 @@ test.describe('QA sandbox: switches', () => {
 
 test.describe('QA sandbox: reset account state', () => {
   test('reset sets the balance to ₱1,000, clears history and turns all switches off', async ({ request }) => {
-    const alice = await createFundedUser(request, 300);
+    const alice = await createFundedAdmin(request, 300);
     const bob = await createUser(request);
     await transfer(request, alice, { toAccountNumber: bob.accountNumber, amount: 25 });
     await qa.set(request, alice, { frozen: true, slowNetwork: false, failNextTransaction: true });
@@ -133,7 +135,7 @@ test.describe('QA sandbox: reset account state', () => {
   });
 
   test('reset works down as well as up, and keeps the ledger balanced', async ({ request }) => {
-    const alice = await createFundedUser(request, 2500);
+    const alice = await createFundedAdmin(request, 2500);
     expect((await qa.reset(request, alice)).status()).toBe(200);
     expect(await getBalanceCents(request, alice)).toBe(100000);
 
@@ -143,7 +145,7 @@ test.describe('QA sandbox: reset account state', () => {
   });
 
   test('reset restarts the transfer limits', async ({ request }) => {
-    const alice = await createFundedUser(request, 100);
+    const alice = await createFundedAdmin(request, 100);
     const bob = await createUser(request);
     for (let i = 0; i < 3; i++) await transfer(request, alice, { toAccountNumber: bob.accountNumber, amount: 1 });
     expect((await transfer(request, alice, { toAccountNumber: bob.accountNumber, amount: 1 })).status()).toBe(429);
@@ -154,7 +156,7 @@ test.describe('QA sandbox: reset account state', () => {
   });
 
   test('after a reset, transfers work normally from ₱1,000', async ({ request }) => {
-    const alice = await createUser(request);
+    const alice = await createAdmin(request);
     const bob = await createUser(request);
     await qa.reset(request, alice);
 

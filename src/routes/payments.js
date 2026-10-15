@@ -1,40 +1,26 @@
-const crypto = require('crypto');
+// Mock payment provider for "Add money": ADMIN accounts only (403 ADMIN_ONLY for customers).
+// Only mounted when MOCK_PAYMENTS=true (see app.js):
+// in production these routes don't exist, and money can only come in through the provider's
+// signed callback (POST /api/webhooks/payments).
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { simulateServerError } = require('../middleware/accountGuards');
-const accountService = require('../services/accountService');
-const paymentService = require('../services/paymentService');
-const { badRequest } = require('../utils/errors');
+const { idempotency } = require('../middleware/idempotency');
+const { requireAdmin } = require('../middleware/requireAdmin');
+const topupService = require('../services/topupService');
 
 const router = express.Router();
 
-const OUTCOMES = { approve: 'SUCCESS', decline: 'FAILED' };
-
 // POST /api/payments/mock-checkout  { amount, outcome?: "approve" | "decline" }
-// Stands in for a real payment provider (used by the web UI's "Add money" screen):
-// it builds the provider's callback, signs it with WEBHOOK_SECRET and runs it
-// through the same webhook handler as POST /api/webhooks/payments.
-router.post('/mock-checkout', requireAuth, simulateServerError, async (req, res) => {
-  const { amount, outcome = 'approve' } = req.body || {};
-  const status = OUTCOMES[outcome];
-  if (!status) {
-    throw badRequest('INVALID_OUTCOME', 'outcome must be "approve" or "decline"');
-  }
+// Checks the top-up limits (₱100,000/day, ₱1,000,000 held, AML), then simulates the provider's
+// signed callback through the same handler as POST /api/webhooks/payments.
+router.post('/mock-checkout', requireAuth, requireAdmin, idempotency, simulateServerError, async (req, res) => {
+  res.status(201).json(await topupService.checkout(req.user.id, req.body || {}));
+});
 
-  const { accountNumber } = await accountService.getBalance(req.user.id);
-  const rawBody = JSON.stringify({
-    paymentId: `mock-${crypto.randomUUID()}`,
-    accountNumber,
-    amount,
-    status,
-  });
-
-  const result = await paymentService.handlePaymentCallback(
-    rawBody,
-    paymentService.sign(rawBody),
-    JSON.parse(rawBody),
-  );
-  res.status(201).json(result);
+// GET /api/payments/limits -> how much can still be added today / held
+router.get('/limits', requireAuth, requireAdmin, async (req, res) => {
+  res.json(await topupService.getLimits(req.user.id));
 });
 
 module.exports = router;

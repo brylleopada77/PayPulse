@@ -157,9 +157,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS history_cleared_at TIMESTAMPTZ;
 -- All allowed transaction types (the single definition; re-created so this file stays re-runnable).
 -- QA_ADJUSTMENT: sandbox resets set a balance through the ledger, so debits still equal credits.
 -- PESONET_SETTLEMENT: a PESONet batch leaving the clearing account at a cut-off.
+-- SAVINGS_TRANSFER: wallet <-> PayPulse Save vault.  INTEREST: daily savings interest posting.
 ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
 ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
-  CHECK (type IN ('TRANSFER', 'DEPOSIT', 'BANK_TRANSFER', 'QA_ADJUSTMENT', 'PESONET_SETTLEMENT'));
+  CHECK (type IN ('TRANSFER', 'DEPOSIT', 'BANK_TRANSFER', 'QA_ADJUSTMENT', 'PESONET_SETTLEMENT',
+                  'SAVINGS_TRANSFER', 'INTEREST'));
 
 INSERT INTO accounts (account_number, is_system)
 VALUES ('SYS-QA-ADJUSTMENT', true)
@@ -209,6 +211,7 @@ UPDATE accounts SET gl_code = CASE account_number
     WHEN 'SYS-PESONET-CLEARING' THEN '2020'
     WHEN 'SYS-QA-ADJUSTMENT'    THEN '3900'
     WHEN 'SYS-FEE-INCOME'       THEN '4010'
+    WHEN 'SYS-INTEREST-EXPENSE' THEN '5010'
     ELSE '2010' END
   WHERE gl_code IS NULL OR is_system;
 ALTER TABLE accounts ALTER COLUMN gl_code SET NOT NULL;
@@ -369,3 +372,115 @@ CREATE TABLE IF NOT EXISTS eod_reconciliations (
   summary        JSONB       NOT NULL,
   audit_log_path TEXT
 );
+
+-- =====================================================================================
+-- PayPulse Save: savings vault with daily interest
+-- =====================================================================================
+
+INSERT INTO gl_accounts (code, name, category, normal_balance, description) VALUES
+  ('2030', 'Customer Savings Deposits', 'LIABILITY', 'CREDIT',
+   'PayPulse Save vaults: money customers keep in savings'),
+  ('5010', 'Interest Expense - Savings', 'EXPENSE', 'DEBIT',
+   'Interest PayPulse pays on PayPulse Save balances')
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name, category = EXCLUDED.category,
+  normal_balance = EXCLUDED.normal_balance, description = EXCLUDED.description;
+
+INSERT INTO accounts (account_number, is_system, gl_code)
+VALUES ('SYS-INTEREST-EXPENSE', true, '5010')
+ON CONFLICT (account_number) DO NOTHING;
+
+-- A savings vault is an ordinary ledger account (GL 2030) owned through savings_owner_id.
+-- accounts.user_id stays reserved for the main wallet (one per user), so every wallet lookup
+-- (WHERE user_id = ...) keeps finding exactly the wallet.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS savings_owner_id INTEGER UNIQUE REFERENCES users (id);
+-- Annual interest rate in basis points (600 = 6.00%).
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS interest_rate_bps INTEGER;
+
+CREATE SEQUENCE IF NOT EXISTS savings_account_seq START 5000000001;
+
+-- One row per savings account per business day. interest_exact keeps the fractions of a
+-- centavo; posted_cents is what was actually credited (whole centavos), so the remainder
+-- carries over to the next day instead of being lost to rounding.
+CREATE TABLE IF NOT EXISTS savings_interest_accruals (
+  id                     SERIAL PRIMARY KEY,
+  account_id             INTEGER        NOT NULL REFERENCES accounts (id),
+  accrual_date           DATE           NOT NULL,
+  closing_balance_cents  BIGINT         NOT NULL,
+  rate_bps               INTEGER        NOT NULL,
+  interest_exact         NUMERIC(20, 6) NOT NULL,
+  posted_cents           BIGINT         NOT NULL,
+  transaction_id         INTEGER        REFERENCES transactions (id),
+  created_at             TIMESTAMPTZ    NOT NULL DEFAULT now(),
+  UNIQUE (account_id, accrual_date)
+);
+
+-- Scheduled job runs (e.g. daily-interest for a business date): makes each run idempotent.
+CREATE TABLE IF NOT EXISTS job_runs (
+  id             SERIAL PRIMARY KEY,
+  job            TEXT        NOT NULL,
+  business_date  DATE        NOT NULL,
+  started_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at    TIMESTAMPTZ,
+  summary        JSONB,
+  UNIQUE (job, business_date)
+);
+
+-- =====================================================================================
+-- Virtual cards (PCI-DSS style storage)
+-- =====================================================================================
+
+-- The full card number (PAN) is stored ONLY encrypted (AES-256-GCM). The CVV is never
+-- stored: it is derived on demand from the PAN and expiry with a secret key, like an HSM does.
+-- Everything outside this table refers to a card by its token.
+CREATE TABLE IF NOT EXISTS virtual_cards (
+  id               SERIAL PRIMARY KEY,
+  token            TEXT        NOT NULL UNIQUE,
+  user_id          INTEGER     NOT NULL REFERENCES users (id),
+  account_id       INTEGER     NOT NULL REFERENCES accounts (id),
+  brand            TEXT        NOT NULL DEFAULT 'VISA',
+  bin              TEXT        NOT NULL,
+  last4            TEXT        NOT NULL,
+  pan_encrypted    TEXT        NOT NULL,
+  pan_fingerprint  TEXT        NOT NULL UNIQUE,
+  expiry_month     INTEGER     NOT NULL,
+  expiry_year      INTEGER     NOT NULL,
+  cardholder_name  TEXT        NOT NULL,
+  status           TEXT        NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'FROZEN')),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_virtual_cards_user ON virtual_cards (user_id);
+
+-- =====================================================================================
+-- Idempotency keys: a retried POST (same Idempotency-Key) replays the first answer
+-- =====================================================================================
+
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  user_id       INTEGER     NOT NULL REFERENCES users (id),
+  key           TEXT        NOT NULL,
+  endpoint      TEXT        NOT NULL,
+  request_hash  TEXT        NOT NULL,
+  status_code   INTEGER,
+  response      JSONB,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key)
+);
+
+-- =====================================================================================
+-- Top-up controls (mock checkout / "Add money")
+-- =====================================================================================
+
+-- TOPUP_VELOCITY: more than 5 top-ups within a minute (possible abuse of the top-up channel).
+ALTER TABLE compliance_alerts DROP CONSTRAINT IF EXISTS compliance_alerts_rule_check;
+ALTER TABLE compliance_alerts ADD CONSTRAINT compliance_alerts_rule_check
+  CHECK (rule IN ('LARGE_TRANSFER', 'VELOCITY', 'TOPUP_VELOCITY'));
+
+-- =====================================================================================
+-- Roles (role-based access control)
+-- =====================================================================================
+
+-- CUSTOMER: normal user.  ADMIN: operator; the only role allowed to use "Add money" (mock top-ups)
+-- and the QA sandbox / chaos tools. Set with ADMIN_EMAILS or `npm run admin:set -- <email> ADMIN`.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'CUSTOMER';
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('CUSTOMER', 'ADMIN'));

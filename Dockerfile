@@ -13,6 +13,7 @@ COPY src ./src
 COPY public ./public
 COPY db ./db
 COPY scripts ./scripts
+COPY jobs ./jobs
 
 # Run as the non-root user that ships with the node image
 USER node

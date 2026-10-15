@@ -13,7 +13,8 @@
     "test:report": "playwright show-report",
     "db:assert-ledger": "node tests/assert-system-ledger.js",
     "eod:reconcile": "node scripts/reconcile-eod.js",
-    "pesonet:worker": "node scripts/pesonet-worker.js"
+    "pesonet:worker": "node scripts/pesonet-worker.js",
+    "admin:set": "node scripts/set-role.js"
   },
   "engines": {
     "node": ">=20"

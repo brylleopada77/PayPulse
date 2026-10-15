@@ -134,7 +134,9 @@ All bodies are JSON. Amounts are decimal numbers or strings with up to 2 decimal
 | GET | `/api/transfers/limits` | Bearer | – → daily limit used/remaining, anti-spam rule |
 | POST | `/api/transfers/bank` | Bearer + MPIN | Bank Transfer: `{ bankCode, accountNumber, accountName, amount, mpin, otpChallengeId?, otp? }` |
 | POST | `/api/webhooks/payments` | HMAC signature | `{ paymentId, accountNumber, amount, status }` |
-| POST | `/api/payments/mock-checkout` | Bearer | `{ amount, outcome?: "approve" \| "decline" }` (used by the UI) |
+| POST | `/api/payments/mock-checkout` | Bearer (admin) | `{ amount, outcome?: "approve" \| "decline" }`: mock "Add money", **only with `MOCK_PAYMENTS=true`** |
+| GET | `/api/payments/limits` | Bearer (admin) | – → top-up limits left (only with `MOCK_PAYMENTS=true`) |
+| GET | `/api/config` | – | – → `{ features: { mockPayments, qaSandbox } }` for the UI |
 
 ### Try it by hand
 
@@ -203,8 +205,9 @@ with the recipient and amount filled in.
 ### QA Sandbox Controls (dev mode only)
 
 Start the server with `QA_SANDBOX=true` (set in `.env`, Docker Compose and CI; **never in
-production**; Render doesn't set it). Then a **🧪 QA** button appears in the web app, and these
-endpoints exist (otherwise they return 404). Every action affects **only the caller's own account**.
+production**; Render doesn't set it). Then a **🧪 QA** button appears in the web app **for admin
+accounts**, and these endpoints exist (otherwise they return 404; customers get `403 ADMIN_ONLY`).
+Every action affects **only the caller's own account**.
 
 | Control | API | Effect |
 |---------|-----|--------|
@@ -240,6 +243,68 @@ Every error, from every endpoint, has the same JSON shape so tests can assert on
 when there is extra data. Unknown routes return `404 ROUTE_NOT_FOUND`, broken JSON
 `400 INVALID_JSON`, bodies over 100 kB `413 PAYLOAD_TOO_LARGE`, and unexpected failures
 `500 INTERNAL_ERROR` (no stack traces).
+
+### PayPulse Save (savings vault, 6.00% p.a.)
+
+Every customer has a savings vault (account `SV…`, GL **2030 Customer Savings Deposits**) next to
+the main wallet. `GET /api/v1/savings` shows the balance, rate, interest earned and estimated daily
+interest; `POST /api/v1/savings/deposit` and `/withdraw` with `{ amount }` move money as a
+`SAVINGS_TRANSFER` journal. These moves lock both accounts first, so (unlike Send) parallel moves
+can't overdraw anything.
+
+**Interest:** `jobs/daily-interest.js` accrues each vault's closing balance × 6% ÷ 365 for one
+business day (Manila), compounding daily, and posts whole centavos as an `INTEREST` journal (DEBIT GL
+**5010 Interest Expense**, CREDIT the vault). Fractions of a centavo carry over to the next day
+(`savings_interest_accruals.interest_exact`). Each vault/day is accrued once, so re-runs are safe.
+
+```bash
+node jobs/daily-interest.js                       # yesterday (schedule: 5 0 * * *)
+node jobs/daily-interest.js --date 2026-10-14     # a specific day (catch-up)
+node jobs/daily-interest.js --date 2026-10-14 --account SV5000000001   # one vault
+```
+
+The API server also runs it automatically for yesterday (`INTEREST_JOB=false` to disable). QA
+sandbox: `POST /api/qa/savings/accrue { days }` simulates N days of interest on your own vault.
+
+### Virtual cards (`/api/v1/cards`)
+
+| API | |
+|-----|---|
+| `POST /api/v1/cards/generate` `{ mpin }` | Issue a 16-digit virtual **Visa** (BIN `484735`, Luhn-valid, 3-year expiry) linked to the wallet |
+| `GET /api/v1/cards`, `GET /api/v1/cards/:token` | Your cards: **token + masked PAN** (`4847 35•• •••• 1234`) only |
+| `PATCH /api/v1/cards/:token` `{ status }` | `ACTIVE` / `FROZEN` |
+| `POST /api/v1/cards/:token/reveal` `{ mpin }` | Full PAN, expiry and CVV, for the cardholder only |
+
+PCI-DSS-style handling (mock issuer, not on the Visa network): the PAN is stored **only encrypted**
+(AES-256-GCM, key from `CARD_ENCRYPTION_KEY`) plus an HMAC fingerprint; the **CVV is never stored**
+but derived on demand from PAN + expiry with a separate key; every card response is
+`Cache-Control: no-store`; and `middleware/pciMask.js` masks any Luhn-valid card number (and any
+`cvv` field) in card responses, except the MPIN-protected reveal. At most 3 cards per user.
+
+### Chaos engineering and idempotency
+
+`middleware/chaos.js` (dev only: `QA_SANDBOX=true` and an ADMIN caller, otherwise ignored) injects faults per request:
+
+| Header | Effect |
+|--------|--------|
+| `x-chaos-mode: true` | enable chaos for this request |
+| `x-chaos-fault: db-lock \| drop \| random` | **db-lock**: hold a real row lock on your wallet for `x-chaos-lock-ms` (default 2000) first; **drop**: answer `503 SERVICE_UNAVAILABLE`; **random**: 50% lock, then drop with `x-chaos-rate` |
+| `x-chaos-rate: 0..1` | drop probability (default 0.3) |
+| `x-chaos-drop-when: before \| after` | **before**: the request never runs; **after**: it runs, then the answer is lost |
+| `x-chaos-drop-attempts: N` | deterministic: drop the first N attempts of each `Idempotency-Key` |
+
+Because an answer can be lost *after* money moved, money-moving POSTs accept an
+**`Idempotency-Key`** header (`middleware/idempotency.js`): the first final answer is stored and a
+retry with the same key gets it back (`Idempotent-Replayed: true`) instead of running again
+(`409 IDEMPOTENCY_IN_PROGRESS`, `422 IDEMPOTENCY_KEY_REUSED`). The web wallet sends one key per user
+action and retries 503 / network failures up to 3 times with "Retrying (1/3)…" toasts. A
+double-click is two actions with two keys, so the intentional race condition is still reproducible.
+The QA panel has a **Chaos mode** selector that adds these headers to every call.
+
+**`tests/resilience.spec.ts`** (Playwright project `ui`, real Chrome) asserts that under 503 drops,
+lost answers, exhausted retries and 2-second DB locks the UI shows retry toasts / clear errors and
+that balances are exactly right (no double transfers, no lost money). Run it with
+`npx playwright test --project=ui`; `--project=api` runs only the API suite.
 
 ### Receipts
 
@@ -287,6 +352,42 @@ code to the user instead of returning `demoCode`.
 | 410 | `OTP_EXPIRED` | More than 30 seconds passed; start again |
 | 429 | `OTP_ATTEMPTS_EXCEEDED` | 3 wrong codes; start again |
 
+### Add money: mock checkout (dev / demo only) and its limits
+
+"Add money" in the web UI does **not** charge anyone: it calls a mock payment provider. So it is
+**off by default** and only exists when the server runs with `MOCK_PAYMENTS=true` (set in `.env`,
+Docker Compose and CI; never on Render / production). Without it, the endpoint is a 404, the button
+is hidden, and money can only enter through the provider's **signed** webhook below.
+
+Even when it is on, **only ADMIN accounts** can use it (see *Roles* below): customers don't see the
+button and get `403 ADMIN_ONLY` from the API. So people you share the link with can only receive
+money and send what they were given. Every admin top-up is checked **before** money is credited,
+inside the payment's database transaction under a per-user lock (so a burst of parallel requests
+can't slip through):
+
+| Rule | Response |
+|------|----------|
+| caller is not an admin | `403 ADMIN_ONLY` "This feature is only available to PayPulse admins" |
+| at most **₱100,000 of mock top-ups per day** (Manila) | `400 TOPUP_DAILY_LIMIT_EXCEEDED` "Daily top-up limit of ₱100,000.00 exceeded." |
+| at most **₱1,000,000 held** (wallet + PayPulse Save) | `400 WALLET_LIMIT_EXCEEDED` "Wallet limit of ₱1,000,000.00 exceeded." |
+| account under compliance review | `403 TRANSACTION_HELD_FOR_REVIEW` (`ACCOUNT_UNDER_REVIEW`) |
+| more than **5 top-ups within a minute** | `403 TRANSACTION_HELD_FOR_REVIEW` (`TOPUP_VELOCITY`), opens an alert and puts the account under review |
+
+Declined payments don't count. Money from the real (signed) provider channel isn't capped by the
+daily mock limit, since it was actually paid and providers check limits before charging.
+
+### Roles: CUSTOMER and ADMIN
+
+Every new account is a `CUSTOMER`. Admin-only features: **Add money** (mock checkout and its
+limits), the **QA sandbox** (`/api/qa/*`, the 🧪 QA button) and **chaos headers** (ignored for
+customers). Admins see an **Admin** chip next to their name, and `GET /api/accounts/me` returns `role`.
+
+There are two ways to make someone an admin:
+
+- `ADMIN_EMAILS=you@example.com,other@example.com` in `.env`: these accounts are promoted when the
+  server starts, and when they register.
+- `npm run admin:set -- someone@example.com ADMIN` (or `CUSTOMER` to remove it).
+
 ### Payment webhook
 
 Money enters the system only through the webhook (a mock payment provider calling back).
@@ -309,7 +410,8 @@ Open **http://localhost:3000**. The UI is plain HTML/CSS/JS in `public/` (no bui
 uses the same API as the tests:
 
 - **Create account / Log in**: register a user and open their wallet.
-- **Add money**: a mock checkout in TEST MODE. Choose *Approve* or *Decline* to simulate the card
+- **Add money** (admins only, with `MOCK_PAYMENTS=true`; limited to ₱100,000/day and ₱1,000,000 held):
+  a mock checkout in TEST MODE. Choose *Approve* or *Decline* to simulate the card
   result. It calls `/api/payments/mock-checkout`, which signs a provider callback and runs it
   through the real webhook handler.
 - **Send**: transfer to another account number (find it on the wallet card, with a Copy button).
@@ -440,7 +542,8 @@ PayPulse/
 │   ├── routes/                HTTP endpoints
 │   ├── services/              Business logic: ledger, transfers, payment switch + ISO 20022,
 │   │                          PESONet, compliance (AML), limits, receipts, QR Ph, QA sandbox
-│   ├── workers/               PESONet batch worker (cut-offs)
+│   ├── routes/v1/             Versioned APIs: savings, virtual cards
+│   ├── workers/               PESONet batch worker, daily interest scheduler
 │   └── utils/                 Errors, money, mobile, QR Ph, privacy helpers
 ├── public/                    Web wallet UI (index.html, styles.css, app.js)
 ├── db/schema.sql              Database schema: GL accounts, immutable ledger, views, payments, AML
@@ -448,8 +551,10 @@ PayPulse/
 │   ├── init-db.js             Creates / upgrades tables
 │   ├── reconcile-eod.js       End-of-day reconciliation + audit log
 │   └── pesonet-worker.js      Standalone PESONet batch worker
+├── jobs/daily-interest.js     Daily savings interest (cron)
 ├── tests/
-│   ├── api/                   Playwright API tests
+│   ├── api/                   Playwright API tests (project "api")
+│   ├── resilience.spec.ts     Browser chaos / resilience tests (project "ui")
 │   ├── load/                  k6 concurrency test
 │   └── helpers/               API + database helpers, ledger checker
 ├── Dockerfile

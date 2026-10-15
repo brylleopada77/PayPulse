@@ -1,5 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { expect, type APIRequestContext } from '@playwright/test';
+import { makeAdmin } from './db';
 
 export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'dev-webhook-secret';
 
@@ -49,7 +50,8 @@ export async function sendPaymentWebhook(
   const signature = createHmac('sha256', secret).update(body).digest('hex');
   return request.post('/api/webhooks/payments', {
     data: body,
-    headers: { 'X-PayPulse-Signature': signature },
+    // Content-Type set here too: the body is a pre-serialised string (for the signature).
+    headers: { 'X-PayPulse-Signature': signature, 'Content-Type': 'application/json' },
   });
 }
 
@@ -129,4 +131,18 @@ export function bankTransfer(request: APIRequestContext, from: TestUser, data: B
     data: { mpin: from.mpin, ...data },
     headers: authHeader(from.token),
   });
+}
+
+/** A new ADMIN user (can use Add money, the QA sandbox and chaos headers). */
+export async function createAdmin(request: APIRequestContext, name = 'QA Admin'): Promise<TestUser> {
+  const user = await createUser(request, name);
+  await makeAdmin(user.email);
+  return user;
+}
+
+/** A new ADMIN user with a funded wallet. */
+export async function createFundedAdmin(request: APIRequestContext, amount: number, name?: string): Promise<TestUser> {
+  const user = await createFundedUser(request, amount, name);
+  await makeAdmin(user.email);
+  return user;
 }
