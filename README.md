@@ -125,7 +125,7 @@ All bodies are JSON. Amounts are decimal numbers or strings with up to 2 decimal
 | POST | `/api/auth/password/forgot` | – | `{ email }` → `{ message, resetId, expiresInSeconds, demoCode }` |
 | POST | `/api/auth/password/reset` | – | `{ resetId, code, newPassword }` → `{ message }` |
 | GET | `/api/accounts/me` | Bearer | – → balance |
-| GET | `/api/accounts/me/transactions` | Bearer | – → ledger history |
+| GET | `/api/accounts/me/transactions` | Bearer | optional `?limit=1..100&before=<transactionId>&direction=IN\|OUT` → `{ transactions, hasMore, nextBefore }`, newest first (default: latest 50). Home shows the latest 5 with **See all transactions**; the full history pages 30 at a time with *Load more* |
 | POST | `/api/accounts/me/mpin/reset` | Bearer | `{ password }` → `{ mpin }` ("Forgot MPIN") |
 | GET | `/api/accounts/me/transactions/:id/receipt` | Bearer | – → receipt (own transactions only, else 404) |
 | PUT | `/api/accounts/me/mobile` | Bearer | `{ mobileNumber }` → `{ mobileNumber }` (add or change) |

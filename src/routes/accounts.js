@@ -15,8 +15,10 @@ router.get('/me', async (req, res) => {
 });
 
 // GET /api/accounts/me/transactions  -> ledger history
+// GET /api/accounts/me/transactions[?limit=1..100&before=<transactionId>&direction=IN|OUT]
+//   -> { transactions, hasMore, nextBefore }  (newest first; pass nextBefore as `before` for the next page)
 router.get('/me/transactions', async (req, res) => {
-  res.json({ transactions: await accountService.getTransactions(req.user.id) });
+  res.json(await accountService.getTransactionPage(req.user.id, accountService.parseHistoryQuery(req.query)));
 });
 
 // GET /api/accounts/me/transactions/:id/receipt  -> receipt details (own transactions only)

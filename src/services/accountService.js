@@ -1,6 +1,6 @@
 const { pool } = require('../db/pool');
 const { findBank } = require('./banks');
-const { conflict, notFound } = require('../utils/errors');
+const { badRequest, conflict, notFound } = require('../utils/errors');
 const { fromCents } = require('../utils/money');
 const { requireMobile } = require('../utils/mobile');
 const { maskAccount } = require('../utils/privacy');
@@ -66,11 +66,39 @@ async function setMobileNumber(userId, mobileNumber) {
   return { mobileNumber: mobile };
 }
 
+const DIRECTIONS = { IN: 'CREDIT', OUT: 'DEBIT' };
+
+/**
+ * Validate the paging query of GET /me/transactions:
+ *   limit      1-100 (default 50)
+ *   before     a transactionId: only older transactions (the "Load more" cursor)
+ *   direction  IN (money in) | OUT (money out)
+ */
+function parseHistoryQuery({ limit, before, direction } = {}) {
+  const parsed = { limit: 50, before: null, direction: null };
+  if (limit !== undefined) {
+    parsed.limit = Number(limit);
+    if (!Number.isInteger(parsed.limit) || parsed.limit < 1 || parsed.limit > 100) {
+      throw badRequest('INVALID_LIMIT', 'limit must be a whole number from 1 to 100');
+    }
+  }
+  if (before !== undefined) {
+    parsed.before = Number(before);
+    if (!Number.isInteger(parsed.before) || parsed.before < 1) throw badRequest('INVALID_CURSOR', 'before must be a transaction id');
+  }
+  if (direction !== undefined) {
+    parsed.direction = DIRECTIONS[String(direction).toUpperCase()];
+    if (!parsed.direction) throw badRequest('INVALID_DIRECTION', 'direction must be IN or OUT');
+  }
+  return parsed;
+}
+
 /**
  * Ledger history for the user's wallet, newest first. Bank transfers include their details.
  * Entries from before a QA sandbox reset (users.history_cleared_at) are hidden.
+ * Returns one page: { transactions, hasMore, nextBefore } (nextBefore = cursor for the next page).
  */
-async function getTransactions(userId, limit = 50) {
+async function getTransactionPage(userId, { limit = 50, before = null, direction = null } = {}) {
   const account = await getAccountForUser(userId);
   const { rows } = await pool.query(
     `SELECT t.id, t.type, t.description, t.created_at, le.direction, le.amount_cents,
@@ -82,12 +110,16 @@ async function getTransactions(userId, limit = 50) {
      WHERE le.account_id = $1
        -- compared inside SQL: a JS Date would drop the microseconds of history_cleared_at
        AND t.created_at > COALESCE((SELECT history_cleared_at FROM users WHERE id = $3), '-infinity')
-     ORDER BY le.id DESC
+       AND ($4::int IS NULL OR t.id < $4)
+       AND ($5::text IS NULL OR le.direction = $5)
+     ORDER BY t.id DESC, le.id DESC
      LIMIT $2`,
-    [account.id, limit, userId],
+    [account.id, limit + 1, userId, before, direction], // one extra row tells us if there is more
   );
 
-  return rows.map((row) => ({
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const transactions = page.map((row) => ({
     transactionId: row.id,
     reference: formatReference(row.id, row.created_at),
     type: row.type,
@@ -109,6 +141,12 @@ async function getTransactions(userId, limit = 50) {
       },
     }),
   }));
+  return { transactions, hasMore, nextBefore: hasMore ? page[page.length - 1].id : null };
 }
 
-module.exports = { getBalance, getTransactions, setMobileNumber };
+/** The newest `limit` transactions (kept for existing callers). */
+async function getTransactions(userId, limit = 50) {
+  return (await getTransactionPage(userId, { limit })).transactions;
+}
+
+module.exports = { getBalance, getTransactions, getTransactionPage, parseHistoryQuery, setMobileNumber };

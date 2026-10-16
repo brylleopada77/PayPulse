@@ -109,24 +109,24 @@
           </button>
         </p>
       </div>
-      <button type="button" id="bell-btn" class="icon-btn round" data-testid="notifications" aria-label="Notifications" title="Notifications">
+      <button type="button" id="bell-btn" class="icon-btn round glass-btn" data-testid="notifications" aria-label="Notifications" title="Notifications">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span class="bell-dot" id="bell-dot" data-testid="bell-dot" hidden></span>
       </button>
-      <button type="button" id="logout-btn" class="icon-btn round" data-testid="logout" aria-label="Log out" title="Log out">
+      <button type="button" id="logout-btn" class="icon-btn round glass-btn" data-testid="logout" aria-label="Log out" title="Log out">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
       </button>
     </header>
 
     <!-- ===== Home tab ===== -->
     <main class="wallet" id="home-view" data-testid="home-view">
-      <section class="balance-card" aria-label="Wallet balance">
+      <section class="balance-card glass-card" aria-label="Wallet balance">
         <div class="balance-top">
           <p class="label">
             Available Balance
             <button type="button" id="balance-toggle" class="balance-toggle" data-testid="balance-toggle"></button>
           </p>
-          <button type="button" class="assets-pill" id="refresh-btn" data-testid="refresh" title="Refresh balance">
+          <button type="button" class="assets-pill glass-btn tinted" id="refresh-btn" data-testid="refresh" title="Refresh balance">
             Refresh
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>
           </button>
@@ -150,7 +150,7 @@
 
       <div class="product-grid">
         <!-- Left: the real virtual Visa card (summary; full controls live in the Card tab) -->
-        <section class="product product-card" aria-label="PayPulse Card" data-testid="card-summary">
+        <section class="product product-card glass-card" aria-label="PayPulse Card" data-testid="card-summary">
           <p class="product-title">
             <span class="product-icon card-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
@@ -167,7 +167,7 @@
 
         <div class="product-stack">
           <!-- Right top: PayPulse Save (6% p.a.) -->
-          <section class="product" aria-label="PayPulse Save" data-testid="savings-card">
+          <section class="product glass-card" aria-label="PayPulse Save" data-testid="savings-card">
             <p class="product-title">
               <span class="product-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
@@ -177,13 +177,13 @@
             <p class="product-amount"><span class="rate-badge" id="savings-rate" data-testid="savings-rate">6.00% p.a.</span></p>
             <p class="product-sub" id="savings-meta" data-testid="savings-meta"></p>
             <div class="mini-actions">
-              <button type="button" class="mini-btn" id="savings-add" data-testid="savings-add">Add</button>
-              <button type="button" class="mini-btn" id="savings-withdraw" data-testid="savings-withdraw">Withdraw</button>
+              <button type="button" class="mini-btn glass-btn" id="savings-add" data-testid="savings-add">Add</button>
+              <button type="button" class="mini-btn glass-btn" id="savings-withdraw" data-testid="savings-withdraw">Withdraw</button>
             </div>
           </section>
 
           <!-- Right bottom: Instant Loan (₱50,000 credit line) -->
-          <button type="button" class="product product-button" id="loan-open" aria-label="Instant Loan" data-testid="loan-open">
+          <button type="button" class="product product-button glass-card" id="loan-open" aria-label="Instant Loan" data-testid="loan-open">
             <span class="product-title">
               <span class="product-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5c-.5-1-1.5-1.5-2.5-1.5-1.4 0-2.5.8-2.5 2s1.1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-2-.5-2.5-1.5M12 6.5V8m0 8v1.5"/></svg>
@@ -197,34 +197,34 @@
       </div>
 
       <section class="quick-actions" aria-label="Quick actions">
-        <button type="button" class="quick" data-open="send-dialog" data-testid="open-send">
+        <button type="button" class="quick glass-card glass-press" data-open="send-dialog" data-testid="open-send">
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/></svg></span>
           Transfer
         </button>
-        <button type="button" class="quick" id="bills-btn" data-testid="open-bills">
+        <button type="button" class="quick glass-card glass-press" id="bills-btn" data-testid="open-bills">
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></span>
           Pay Bills
         </button>
         <!-- Admins only, and only when the server has the mock payment provider on (MOCK_PAYMENTS=true). -->
-        <button type="button" class="quick" id="topup-btn" data-open="topup-dialog" data-testid="open-topup" hidden>
+        <button type="button" class="quick glass-card glass-press" id="topup-btn" data-open="topup-dialog" data-testid="open-topup" hidden>
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg></span>
           Top Up
         </button>
-        <button type="button" class="quick" id="receive-qr-btn" data-testid="open-receive-qr">
+        <button type="button" class="quick glass-card glass-press" id="receive-qr-btn" data-testid="open-receive-qr">
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg></span>
           Receive
         </button>
-        <button type="button" class="quick" id="refer-btn" data-testid="refer-friend">
+        <button type="button" class="quick glass-card glass-press" id="refer-btn" data-testid="refer-friend">
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/></svg></span>
           Refer a Friend
         </button>
-        <button type="button" class="quick" id="bank-transfer-btn" data-testid="open-bank-transfer">
+        <button type="button" class="quick glass-card glass-press" id="bank-transfer-btn" data-testid="open-bank-transfer">
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
           Bank Transfer
         </button>
       </section>
 
-      <button type="button" class="promo" id="promo-banner" data-testid="promo-banner">
+      <button type="button" class="promo glass-card" id="promo-banner" data-testid="promo-banner">
         <svg class="promo-art" viewBox="0 0 120 96" aria-hidden="true">
           <ellipse cx="60" cy="88" rx="46" ry="6" fill="rgba(0,0,0,0.12)"/>
           <path d="M44 30c-14 10-22 26-20 40 2 12 14 18 36 18s34-6 36-18c2-14-6-30-20-40z" fill="#d4f5e4"/>
@@ -245,10 +245,15 @@
         <span class="promo-chevron" aria-hidden="true">›</span>
       </button>
 
-      <section class="activity" id="activity" aria-labelledby="activity-heading">
-        <h2 id="activity-heading" class="activity-head">Transaction History <span aria-hidden="true">›</span></h2>
+      <section class="activity glass-card" id="activity" aria-labelledby="activity-heading">
+        <h2 id="activity-heading" class="activity-head">
+          <button type="button" class="activity-head-btn" id="tx-open-all" data-testid="tx-open-all">
+            Transaction History <span aria-hidden="true">›</span>
+          </button>
+        </h2>
         <ul id="tx-list" class="tx-list" data-testid="tx-list"></ul>
         <p id="tx-empty" class="empty" hidden>No transactions yet. Ask a friend to send you money.</p>
+        <button type="button" class="see-all" id="tx-see-all" data-testid="tx-see-all" hidden>See all transactions <span aria-hidden="true">›</span></button>
       </section>
     </main>
 
@@ -288,7 +293,7 @@
     </main>
 
     <!-- ===== Bottom navigation ===== -->
-    <nav class="bottom-nav" aria-label="Main">
+    <nav class="bottom-nav glass-dock" aria-label="Main">
       <button type="button" class="nav-item active" data-tab-target="home" data-testid="nav-home" aria-current="page">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
         Home
@@ -367,6 +372,23 @@
         <button type="button" class="btn primary" id="loan-pay-full" data-testid="loan-pay-full">Pay in full</button>
       </div>
     </div>
+  </dialog>
+
+  <!-- ============ Full transaction history ============ -->
+  <dialog id="history-dialog" class="sheet history-sheet" aria-labelledby="history-title" data-testid="history-dialog">
+    <header class="sheet-head">
+      <h2 id="history-title">Transaction history</h2>
+      <button type="button" class="close" data-close aria-label="Close">×</button>
+    </header>
+    <div class="notif-filters" role="tablist" aria-label="Show" id="history-filters">
+      <button type="button" class="notif-chip" role="tab" data-direction="" aria-selected="true" data-testid="history-filter-all">All</button>
+      <button type="button" class="notif-chip" role="tab" data-direction="IN" aria-selected="false" data-testid="history-filter-in">Money in</button>
+      <button type="button" class="notif-chip" role="tab" data-direction="OUT" aria-selected="false" data-testid="history-filter-out">Money out</button>
+    </div>
+    <ul class="tx-list history-list" id="history-list" data-testid="history-list"></ul>
+    <p class="empty" id="history-empty" hidden>No transactions here yet.</p>
+    <p class="history-status" id="history-status" aria-live="polite"></p>
+    <button type="button" class="btn secondary" id="history-more" data-testid="history-more" hidden>Load more</button>
   </dialog>
 
   <!-- ============ Notifications ============ -->

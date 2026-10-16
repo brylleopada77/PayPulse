@@ -97,7 +97,8 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
 
 /* ---------- Wallet (mobile banking layout) ---------- */
-.app-shell { --green: #12b886; --green-soft: #e3f8f0; --blue: #2f6bff; }
+/* Shared accents: on :root so dialogs (outside .app-shell) get them too */
+:root { --green: #12b886; --green-soft: #e3f8f0; --blue: #2f6bff; }
 .app-shell svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 .topbar {
@@ -256,30 +257,58 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .tx.in .tx-amount { color: var(--green); }
 .empty { color: var(--muted); text-align: center; padding: 20px 0 14px; margin: 0; }
 
-/* Bottom navigation: a floating dark pill; the active tab gets a highlight, Scan & Pay is a gradient key */
+/* Bottom navigation: a floating dock. Frosted rounded pill, the active tab's icon sits on a soft
+   pill badge, Scan & Pay is a round gradient button that rises above the dock, taps press down. */
 .bottom-nav {
   position: fixed; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 8;
-  width: min(448px, calc(100% - 24px)); display: grid; grid-template-columns: repeat(5, 1fr); align-items: center; gap: 2px;
-  padding: 6px; border-radius: 24px; background: #fff; box-shadow: 0 10px 26px rgba(18, 120, 86, 0.14);
-  border: 1.5px solid #9fe3c3;
+  width: min(448px, calc(100% - 24px)); display: grid; grid-template-columns: repeat(5, 1fr); align-items: end; gap: 2px;
+  padding: 8px 6px 6px; border-radius: 28px;
+  background: rgba(255, 255, 255, 0.78);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6);
+  border: 1px solid rgba(159, 227, 195, 0.9);
+  box-shadow: 0 14px 34px rgba(11, 93, 67, 0.16), 0 2px 6px rgba(27, 29, 42, 0.06);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bottom-nav { background: #fff; }
 }
 .nav-item {
-  display: grid; justify-items: center; gap: 2px; padding: 7px 0 6px; border: 0; border-radius: 18px;
-  background: transparent; color: #4f7f6b; font: inherit; font-size: 0.7rem; font-weight: 600; cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  display: grid; justify-items: center; gap: 3px; padding: 2px 0 4px; border: 0; border-radius: 18px;
+  background: transparent; color: #5f8576; font: inherit; font-size: 0.7rem; font-weight: 600; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s, transform 0.12s ease;
 }
-.nav-item svg { width: 21px; height: 21px; }
+.nav-item svg {
+  width: 22px; height: 22px; padding: 4px 14px; box-sizing: content-box; border-radius: 999px;
+  transition: background 0.2s, stroke 0.2s;
+}
 .nav-item:hover { color: #0b5d43; }
-.nav-item.active { color: #0b5d43; background: #e3f8f0; }
-.nav-item.active svg { stroke: #12b886; }
-.nav-item:focus-visible { outline: 2px solid #0b5d43; outline-offset: -2px; }
-.nav-scan { color: #0b5d43; }
+.nav-item:hover svg { background: rgba(227, 248, 240, 0.6); }
+/* Active: soft badge pill behind the icon, vibrant accent */
+.nav-item.active { color: #0b5d43; }
+.nav-item.active svg { background: #d4f5e4; stroke: #0e9a70; stroke-width: 2.3; }
+.nav-item:focus-visible { outline: 2px solid #0b5d43; outline-offset: 2px; }
+/* Tap feedback (active:scale-95) */
+.nav-item:active { transform: scale(0.95); }
+
+/* Scan & Pay: round gradient button popping out above the dock, white ring + light green outline */
+.nav-scan { color: #0b5d43; padding-top: 0; }
+.nav-scan svg { padding: 0; background: none; }
+.nav-scan:hover svg, .nav-scan.active svg { background: none; }
 .scan-bubble {
-  width: 40px; height: 32px; display: grid; place-items: center; border-radius: 12px;
-  background: linear-gradient(135deg, #12b886, #0e9a70); color: #fff;
+  width: 58px; height: 58px; margin-top: -34px; margin-bottom: 1px; display: grid; place-items: center; border-radius: 50%;
+  background: linear-gradient(145deg, #2fd39f 0%, #12b886 45%, #0b7a57 100%); color: #fff;
+  border: 4px solid #fff;
+  box-shadow: 0 0 0 1.5px #9fe3c3, 0 10px 22px rgba(11, 122, 87, 0.38);
+  transition: transform 0.12s ease, box-shadow 0.2s, filter 0.2s;
 }
-.scan-bubble svg { width: 20px; height: 20px; }
-.nav-scan:hover .scan-bubble { filter: brightness(1.12); }
+.scan-bubble svg { width: 24px; height: 24px; stroke: #fff; }
+.nav-scan:hover .scan-bubble { filter: brightness(1.08); box-shadow: 0 0 0 1.5px #12b886, 0 12px 26px rgba(11, 122, 87, 0.45); }
+.nav-scan:active { transform: none; }
+.nav-scan:active .scan-bubble { transform: scale(0.95); }
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-item, .nav-item svg, .scan-bubble { transition: none; }
+}
 
 .assets-total { margin: 0; font-size: 1.9rem; font-weight: 700; color: var(--brand-dark); font-variant-numeric: tabular-nums; }
 
@@ -860,3 +889,167 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .unread-dot { width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: #12b886; }
 .btn.secondary.notif-action { justify-self: start; width: auto; margin-left: 50px; padding: 7px 14px; font-size: 0.84rem; }
 
+
+/* ---------- Transaction history: "See all" and the full list ---------- */
+.activity-head-btn {
+  display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 0;
+  border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left;
+}
+.activity-head-btn span { color: var(--muted); font-size: 1.3rem; font-weight: 400; }
+.activity-head-btn:hover span { color: var(--brand); }
+.activity-head-btn:focus-visible { outline: 2px solid var(--brand-dark); outline-offset: 4px; border-radius: 6px; }
+.see-all {
+  display: block; width: calc(100% + 32px); margin: 0 -16px; padding: 14px; border: 0; border-top: 1px solid var(--border);
+  border-radius: 0 0 12px 12px; background: transparent; color: var(--brand-dark); font: inherit; font-weight: 700; cursor: pointer;
+}
+.see-all:hover { background: var(--brand-soft); }
+.see-all:focus-visible { outline: 2px solid var(--brand-dark); outline-offset: -2px; }
+.history-sheet { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; display: none; gap: 12px; }
+.history-sheet[open] { display: grid; }
+.history-sheet .sheet-head h2 { margin-right: auto; }
+.history-list { margin: 0; }
+.history-list .day-head {
+  position: sticky; top: -24px; z-index: 1; padding: 8px 0 6px; background: #fff;
+  color: var(--muted); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+}
+.history-status { margin: 0; text-align: center; color: var(--muted); font-size: 0.82rem; min-height: 1.2em; }
+
+/* =====================================================================================
+   iOS glassmorphism (frosted glass)
+   .glass-card  cards and tiles (16px corners)      .glass-btn  pill buttons (9999px corners)
+   .glass-press hover:scale-105 + active:scale-95   .glass-dock the floating navigation bar
+   Glass only reads as glass when something is behind it, so the page gets a very soft
+   green / blue backdrop. Without backdrop-filter support, or with "reduce transparency"
+   turned on, everything falls back to solid white.
+   ===================================================================================== */
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-blur: blur(16px) saturate(180%);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.8);
+  --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+  --glass-ring: inset 0 0 0 1px rgba(18, 184, 134, 0.16); /* keeps the faint PayPulse green line */
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(18, 184, 134, 0.16), transparent 38%),
+    radial-gradient(circle at 92% 30%, rgba(47, 107, 255, 0.10), transparent 36%),
+    radial-gradient(circle at 18% 72%, rgba(159, 227, 195, 0.32), transparent 42%),
+    radial-gradient(circle at 85% 92%, rgba(18, 184, 134, 0.12), transparent 40%),
+    #f2f6f5;
+  background-attachment: fixed;
+}
+.topbar { background: transparent; }
+
+.glass-card, .glass-btn, .glass-dock {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-ring);
+}
+.glass-card { border-radius: 16px; }
+.glass-btn { border-radius: 9999px; }
+
+/* Brand-tinted glass for the few solid green controls */
+.glass-btn.tinted {
+  background: rgba(18, 184, 134, 0.82); color: #fff;
+  box-shadow: 0 8px 24px rgba(11, 122, 87, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.assets-pill.glass-btn { border-radius: 9999px 0 0 9999px; border-right: 0; }
+.assets-pill.glass-btn:hover { background: rgba(14, 154, 112, 0.9); }
+.mini-btn.glass-btn { color: var(--brand-dark); }
+.mini-btn.glass-btn:hover { background: rgba(255, 255, 255, 0.85); }
+.icon-btn.round.glass-btn:hover { background: rgba(255, 255, 255, 0.85); }
+
+/* The balance card keeps its soft green corner glow over the glass */
+.balance-card.glass-card {
+  background:
+    radial-gradient(circle at 105% -10%, rgba(227, 248, 240, 0.9) 0 30%, transparent 31%),
+    var(--glass-bg);
+}
+/* The promo banner keeps its corner curve */
+.promo.glass-card {
+  background: radial-gradient(circle at 92% 130%, rgba(227, 248, 240, 0.9) 0 38%, transparent 39%), var(--glass-bg);
+}
+
+/* Quick actions: glass tiles that grow on hover and press in on tap */
+.quick.glass-card { border-radius: 16px; }
+.glass-press { transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s, background 0.18s; }
+.glass-press:hover {
+  transform: scale(1.05);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 12px 32px rgba(31, 38, 135, 0.12), var(--glass-ring);
+}
+.glass-press:active { transform: scale(0.95); }
+
+/* Bottom dock: frosted glass; content blurs underneath while scrolling */
+.bottom-nav.glass-dock { border-radius: 28px; }
+/* Scan & Pay: tinted "liquid glass" disc with a bright top highlight */
+.glass-dock .scan-bubble {
+  background:
+    linear-gradient(165deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 48%),
+    rgba(18, 184, 134, 0.82);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(18, 184, 134, 0.35), 0 10px 26px rgba(11, 122, 87, 0.35), inset 0 -6px 12px rgba(11, 93, 67, 0.25);
+}
+.glass-dock .nav-item.active svg { background: rgba(212, 245, 228, 0.85); }
+
+/* No blur support, or the user asked for less transparency: solid surfaces */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-card, .glass-btn, .glass-dock { background: #fff; }
+  .glass-btn.tinted { background: #12b886; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-card, .glass-btn, .glass-dock, .balance-card.glass-card, .promo.glass-card { background: #fff; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .glass-btn.tinted, .glass-dock .scan-bubble { background: #12b886; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-press { transition: none; }
+  .glass-press:hover, .glass-press:active { transform: none; }
+}
+
+/* ---------- Dock buttons: liquid glass too ---------- */
+.bottom-nav.glass-dock {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.55) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),     /* bright top edge */
+    inset 0 -1px 0 rgba(18, 184, 134, 0.14),     /* faint green base line */
+    var(--glass-ring);
+}
+.glass-dock .nav-item {
+  border: 1px solid transparent;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.18s, border-color 0.18s, box-shadow 0.18s, color 0.15s;
+}
+/* Hover: the tab becomes a small glass pill and grows a little */
+.glass-dock .nav-item:not(.nav-scan):hover {
+  transform: scale(1.05);
+  background: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 6px 18px rgba(31, 38, 135, 0.08), var(--glass-ring);
+}
+.glass-dock .nav-item:hover svg { background: transparent; }
+.glass-dock .nav-item:not(.nav-scan):active { transform: scale(0.95); }
+/* Active tab: a glass icon pill with a light top highlight and a green rim */
+.glass-dock .nav-item.active svg,
+.glass-dock .nav-item.active:hover svg {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(212, 245, 228, 0.92) 100%);
+  box-shadow: inset 0 0 0 1px rgba(18, 184, 134, 0.28), 0 4px 10px rgba(18, 184, 134, 0.18);
+}
+.glass-dock .nav-scan:hover .scan-bubble { transform: scale(1.05); }
+.glass-dock .nav-scan:active .scan-bubble { transform: scale(0.95); }
+
+@media (prefers-reduced-transparency: reduce) {
+  .bottom-nav.glass-dock, .glass-dock .nav-item:not(.nav-scan):hover { background: #fff; -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-dock .nav-item, .glass-dock .nav-item:hover, .glass-dock .nav-item:active,
+  .glass-dock .nav-scan:hover .scan-bubble, .glass-dock .nav-scan:active .scan-bubble { transform: none; transition: none; }
+}

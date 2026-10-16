@@ -377,7 +377,7 @@
   async function loadWallet() {
     const [account, history] = await Promise.all([
       api('/api/accounts/me'),
-      api('/api/accounts/me/transactions'),
+      api(`/api/accounts/me/transactions?limit=${HOME_TX_LIMIT}`),
     ]);
     currency = account.currency;
     hasMpin = account.hasMpin;
@@ -392,61 +392,143 @@
     $('#frozen-badge').hidden = !account.frozen;
     $('#aml-badge').hidden = account.amlStatus !== 'UNDER_REVIEW';
     renderTransactions(history.transactions);
+    $('#tx-see-all').hidden = !history.hasMore;
     loadSavingsAndCards().catch(() => {});
     if (qaEnabled) refreshQaState().catch(() => {});
   }
 
+  const HOME_TX_LIMIT = 5; // Home shows the latest few; "See all transactions" opens the full history
+
+  /** One history row (Home and the full history use the same row). Opens the receipt on click. */
+  function buildTxItem(tx) {
+    const { title, icon } = describe(tx);
+    const incoming = tx.direction === 'CREDIT';
+
+    const li = document.createElement('li');
+    li.className = 'tx ' + (incoming ? 'in' : 'out');
+    li.dataset.testid = 'tx-item';
+    // Each row opens its receipt (click, Enter or Space).
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', title + ', ' + money(tx.amount) + '. View receipt');
+    li.addEventListener('click', () => openReceipt(tx.transactionId));
+    li.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openReceipt(tx.transactionId);
+      }
+    });
+
+    const iconEl = document.createElement('span');
+    iconEl.className = 'tx-icon';
+    iconEl.textContent = icon;
+
+    const info = document.createElement('div');
+    const titleEl = document.createElement('div');
+    titleEl.className = 'tx-title';
+    titleEl.textContent = title;
+    const meta = document.createElement('div');
+    meta.className = 'tx-date';
+    const bt = tx.bankTransfer;
+    const pending = bt?.status === 'QUEUED' ? ' · PESONet: pending cut-off' : '';
+    // Top-ups carry a long payment id in their description: the receipt shows it, the list doesn't.
+    const note = tx.type === 'DEPOSIT' ? 'Card top-up' : tx.description;
+    meta.textContent = bt
+      ? bt.accountName + ' ' + bt.accountNumber + ' · ' + money(bt.amount) + ' + ' + money(bt.fee) + ' fee' + pending + ' · ' + formatDate(tx.createdAt)
+      : note && note !== title
+        ? note + ' · ' + formatDate(tx.createdAt)
+        : formatDate(tx.createdAt);
+    info.append(titleEl, meta);
+
+    const amountEl = document.createElement('span');
+    amountEl.className = 'tx-amount';
+    amountEl.textContent = (incoming ? '+' : '−') + money(tx.amount);
+
+    li.append(iconEl, info, amountEl);
+    return li;
+  }
+
   function renderTransactions(transactions) {
-    const list = $('#tx-list');
-    list.replaceChildren();
+    $('#tx-list').replaceChildren(...transactions.map(buildTxItem));
     $('#tx-empty').hidden = transactions.length > 0;
+  }
 
-    for (const tx of transactions) {
-      const { title, icon } = describe(tx);
-      const incoming = tx.direction === 'CREDIT';
+  // ---------- Full transaction history: filters, grouped by day, "Load more" ----------
 
-      const li = document.createElement('li');
-      li.className = `tx ${incoming ? 'in' : 'out'}`;
-      li.dataset.testid = 'tx-item';
-      // Each row opens its receipt (click, Enter or Space).
-      li.tabIndex = 0;
-      li.setAttribute('role', 'button');
-      li.setAttribute('aria-label', `${title}, ${money(tx.amount)}. View receipt`);
-      li.addEventListener('click', () => openReceipt(tx.transactionId));
-      li.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          openReceipt(tx.transactionId);
+  const historyDialog = $('#history-dialog');
+  const HISTORY_PAGE = 30;
+  const DAY_KEY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' });
+  const DAY_LABEL = new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' });
+  let historyDirection = '';
+  let historyCursor = null;
+  let historyLastDay = null;
+  let historyLoading = false;
+
+  function dayLabel(iso) {
+    const key = DAY_KEY.format(new Date(iso));
+    const today = DAY_KEY.format(new Date());
+    const yesterday = DAY_KEY.format(new Date(Date.now() - 86_400_000));
+    if (key === today) return 'Today';
+    if (key === yesterday) return 'Yesterday';
+    return DAY_LABEL.format(new Date(iso));
+  }
+
+  async function loadHistoryPage({ reset = false } = {}) {
+    if (historyLoading) return;
+    historyLoading = true;
+    if (reset) {
+      historyCursor = null;
+      historyLastDay = null;
+      $('#history-list').replaceChildren();
+      $('#history-empty').hidden = true;
+    }
+    $('#history-more').hidden = true;
+    $('#history-status').textContent = 'Loading…';
+    try {
+      const params = new URLSearchParams({ limit: String(HISTORY_PAGE) });
+      if (historyCursor) params.set('before', String(historyCursor));
+      if (historyDirection) params.set('direction', historyDirection);
+      const page = await api('/api/accounts/me/transactions?' + params);
+      const rows = [];
+      for (const tx of page.transactions) {
+        const day = DAY_KEY.format(new Date(tx.createdAt));
+        if (day !== historyLastDay) {
+          historyLastDay = day;
+          rows.push(Object.assign(document.createElement('li'), { className: 'day-head', textContent: dayLabel(tx.createdAt) }));
         }
-      });
-
-      const iconEl = document.createElement('span');
-      iconEl.className = 'tx-icon';
-      iconEl.textContent = icon;
-
-      const info = document.createElement('div');
-      const titleEl = document.createElement('div');
-      titleEl.className = 'tx-title';
-      titleEl.textContent = title;
-      const meta = document.createElement('div');
-      meta.className = 'tx-date';
-      const bt = tx.bankTransfer;
-      const pending = bt?.status === 'QUEUED' ? ' · PESONet: pending cut-off' : '';
-      meta.textContent = bt
-        ? `${bt.accountName} ${bt.accountNumber} · ${money(bt.amount)} + ${money(bt.fee)} fee${pending} · ${formatDate(tx.createdAt)}`
-        : tx.description && tx.description !== title
-          ? `${tx.description} · ${formatDate(tx.createdAt)}`
-          : formatDate(tx.createdAt);
-      info.append(titleEl, meta);
-
-      const amountEl = document.createElement('span');
-      amountEl.className = 'tx-amount';
-      amountEl.textContent = `${incoming ? '+' : '−'}${money(tx.amount)}`;
-
-      li.append(iconEl, info, amountEl);
-      list.append(li);
+        rows.push(buildTxItem(tx));
+      }
+      $('#history-list').append(...rows);
+      historyCursor = page.nextBefore;
+      $('#history-more').hidden = !page.hasMore;
+      $('#history-empty').hidden = $('#history-list').children.length > 0;
+      const shown = $('#history-list').querySelectorAll('[data-testid="tx-item"]').length;
+      $('#history-status').textContent = page.hasMore ? 'Showing ' + shown + ' transactions' : shown ? 'All ' + shown + ' transactions shown' : '';
+    } catch (err) {
+      $('#history-status').textContent = describeError(err);
+      $('#history-more').hidden = false; // let the user try again
+    } finally {
+      historyLoading = false;
     }
   }
+
+  function openHistory() {
+    historyDirection = '';
+    historyDialog.querySelectorAll('[data-direction]').forEach((chip) => chip.setAttribute('aria-selected', String(chip.dataset.direction === '')));
+    historyDialog.showModal();
+    loadHistoryPage({ reset: true });
+  }
+
+  $('#tx-see-all').addEventListener('click', openHistory);
+  $('#tx-open-all').addEventListener('click', openHistory);
+  $('#history-more').addEventListener('click', () => loadHistoryPage());
+  historyDialog.querySelectorAll('[data-direction]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      historyDirection = chip.dataset.direction;
+      historyDialog.querySelectorAll('[data-direction]').forEach((c) => c.setAttribute('aria-selected', String(c === chip)));
+      loadHistoryPage({ reset: true });
+    });
+  });
 
   function startAutoRefresh() {
     stopAutoRefresh();
