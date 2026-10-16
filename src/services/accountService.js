@@ -10,7 +10,7 @@ async function getAccountForUser(userId) {
   const { rows } = await pool.query(
     `SELECT a.id, a.account_number, ab.balance_cents, a.currency, u.full_name, u.mobile_number,
             u.email, u.created_at AS member_since, u.frozen, u.aml_status, u.history_cleared_at, u.role,
-            u.mpin_hash IS NOT NULL AS has_mpin,
+            u.mpin_hash IS NOT NULL AS has_mpin, u.kyc_level,
             GREATEST(0, CEIL(EXTRACT(EPOCH FROM (u.mpin_expires_at - now()))))::int AS mpin_seconds_left
      FROM accounts a
      JOIN users u ON u.id = a.user_id
@@ -34,6 +34,8 @@ async function getBalance(userId) {
     memberSince: account.member_since,
     // CUSTOMER or ADMIN (admins can Add money and use the QA tools).
     role: account.role,
+    // 1 = Basic (₱50,000 a day), 2 = Fully Verified (₱100,000 a day).
+    kycLevel: account.kyc_level,
     // A frozen account cannot send money (423 ACCOUNT_FROZEN).
     frozen: account.frozen,
     // UNDER_REVIEW: an AML rule fired; outgoing transfers are held (403) until compliance clears it.

@@ -1,5 +1,6 @@
 const { pool } = require('../db/pool');
 const { findBank } = require('./banks');
+const { findBiller } = require('./billers');
 const { nextCutoff } = require('./pesonetService');
 const { notFound } = require('../utils/errors');
 const { fromCents } = require('../utils/money');
@@ -98,6 +99,77 @@ async function getReceipt(userId, transactionId) {
       sender: { name: 'Card payment', account: rows[0]?.payment_id ?? 'External funding' },
       recipient: party(mine),
       bankName: 'PayPulse',
+    };
+  }
+
+  if (type === 'BILL_PAYMENT' || type === 'CASHBACK') {
+    const isBill = type === 'BILL_PAYMENT';
+    const { rows } = await pool.query(
+      `SELECT bp.*, t.created_at AS paid_at FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id
+       WHERE ${isBill ? 'bp.transaction_id' : 'bp.cashback_transaction_id'} = $1`,
+      [id],
+    );
+    const bill = rows[0];
+    const billerName = findBiller(bill?.biller_code)?.name ?? bill?.biller_code ?? 'Biller';
+    const billRef = bill ? formatReference(bill.transaction_id, bill.paid_at).replace(/^REF-/, 'REF-BILL-') : null;
+    if (isBill) {
+      return {
+        ...receipt,
+        reference: billRef,
+        title: 'Bills Payment Successful',
+        amount: fromCents(Number(bill.amount_cents)),
+        fee: fromCents(Number(bill.fee_cents)),
+        total: fromCents(Number(bill.amount_cents) + Number(bill.fee_cents)),
+        sender: party(mine),
+        recipient: { name: billerName, account: bill.account_ref },
+        bankName: 'PayPulse Bills Payment',
+        biller: {
+          code: bill.biller_code,
+          name: billerName,
+          category: findBiller(bill.biller_code)?.category ?? null,
+          accountNumber: bill.account_ref,
+          accountName: bill.account_name,
+        },
+        cashback: Number(bill.cashback_cents) > 0 ? fromCents(Number(bill.cashback_cents)) : null,
+      };
+    }
+    return {
+      ...receipt,
+      title: 'Cashback Received',
+      amount: fromCents(mine.amount_cents),
+      fee: fromCents(0),
+      total: fromCents(mine.amount_cents),
+      sender: { name: 'PayPulse Rewards', account: 'Bills Payment Cashback' },
+      recipient: party(mine),
+      bankName: 'PayPulse',
+      note: billRef ? `For ${billerName} bill ${billRef}` : 'Bills Payment Cashback',
+    };
+  }
+
+  if (type === 'LOAN_DISBURSEMENT' || type === 'LOAN_REPAYMENT') {
+    const disbursed = type === 'LOAN_DISBURSEMENT';
+    const { rows } = await pool.query(
+      disbursed
+        ? `SELECT l.id, l.term_months, NULL::bigint AS principal_cents, NULL::bigint AS interest_cents
+           FROM loans l WHERE l.disbursement_transaction_id = $1`
+        : `SELECT l.id, l.term_months, p.principal_cents, p.interest_cents
+           FROM loan_payments p JOIN loans l ON l.id = p.loan_id WHERE p.transaction_id = $1`,
+      [id],
+    );
+    const loan = rows[0];
+    const lender = { name: 'PayPulse Instant Loan', account: loan ? `LOAN-${String(loan.id).padStart(6, '0')}` : 'Instant Loan' };
+    return {
+      ...receipt,
+      title: disbursed ? 'Loan Disbursed' : 'Loan Repayment Successful',
+      amount: fromCents(mine.amount_cents),
+      fee: fromCents(0),
+      total: fromCents(mine.amount_cents),
+      sender: disbursed ? lender : party(mine),
+      recipient: disbursed ? party(mine) : lender,
+      bankName: 'PayPulse',
+      note: disbursed
+        ? `${loan?.term_months ?? ''}-month Instant Loan`
+        : `Interest ₱${fromCents(Number(loan?.interest_cents ?? 0))} · principal ₱${fromCents(Number(loan?.principal_cents ?? 0))}`,
     };
   }
 

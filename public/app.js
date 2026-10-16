@@ -157,6 +157,10 @@
   function describe(tx) {
     if (tx.type === 'DEPOSIT') return { title: 'Added money', icon: '+' };
     if (tx.type === 'BANK_TRANSFER') return { title: tx.description, icon: '🏦' };
+    if (tx.type === 'LOAN_DISBURSEMENT') return { title: 'Loan Disbursement', icon: '💰' };
+    if (tx.type === 'BILL_PAYMENT') return { title: tx.description, icon: '🧾' };
+    if (tx.type === 'CASHBACK') return { title: 'Cashback Reward - Bills Payment', icon: '🎁' };
+    if (tx.type === 'LOAN_REPAYMENT') return { title: 'Loan Repayment', icon: '↩' };
     if (tx.type === 'SAVINGS_TRANSFER') {
       return { title: tx.direction === 'DEBIT' ? 'Moved to PayPulse Save' : 'From PayPulse Save', icon: '🐷' };
     }
@@ -315,6 +319,7 @@
 
   const HIDE_BALANCE_KEY = 'paypulse.hideBalance';
   let currentBalance = null;
+  let savings = null; // GET /api/v1/savings
   let balanceHidden = false;
   try { balanceHidden = localStorage.getItem(HIDE_BALANCE_KEY) === '1'; } catch { /* storage unavailable */ }
 
@@ -326,6 +331,12 @@
       el.textContent = balanceHidden ? '₱ ••••••' : money(currentBalance);
     }
     el.classList.toggle('masked', balanceHidden);
+
+    // The eye hides every amount on the balance card, like a banking app.
+    const savingsBalance = savings?.balance ?? '0.00';
+    const total = (Number(currentBalance ?? 0) + Number(savingsBalance)).toFixed(2);
+    $('#savings-balance').textContent = balanceHidden ? '₱ ••••' : money(savingsBalance);
+    $('#total-assets').textContent = balanceHidden ? '₱ ••••' : money(total);
 
     const button = $('#balance-toggle');
     button.innerHTML = balanceHidden ? EYE_ICON : EYE_OFF_ICON;
@@ -355,6 +366,8 @@
     authView.hidden = true;
     appView.hidden = false;
     await loadWallet();
+    loadLoans().catch(() => {});
+    startNotificationPolling();
     startAutoRefresh();
     initQaControls(); // shows the QA panel only when the server runs in QA sandbox mode
     loadFeatures(); // shows "Add money" only when the mock payment provider is on
@@ -421,7 +434,9 @@
       const pending = bt?.status === 'QUEUED' ? ' · PESONet: pending cut-off' : '';
       meta.textContent = bt
         ? `${bt.accountName} ${bt.accountNumber} · ${money(bt.amount)} + ${money(bt.fee)} fee${pending} · ${formatDate(tx.createdAt)}`
-        : `${tx.description} · ${formatDate(tx.createdAt)}`;
+        : tx.description && tx.description !== title
+          ? `${tx.description} · ${formatDate(tx.createdAt)}`
+          : formatDate(tx.createdAt);
       info.append(titleEl, meta);
 
       const amountEl = document.createElement('span');
@@ -452,6 +467,10 @@
     renderCard(null);
     $('#topup-btn').hidden = true;
     $('#role-chip').hidden = true;
+    $('#bell-dot').hidden = true;
+    clearInterval(notifTimer);
+    savings = null;
+    showTab('home');
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     hidePopover($('#sms'));
     showAuth();
@@ -507,7 +526,13 @@
     }
   });
 
-  $('#logout-btn').addEventListener('click', () => logout());
+  // Log out asks first; Cancel (or Esc) keeps you logged in.
+  $('#logout-btn').addEventListener('click', () => $('#logout-dialog').showModal());
+  $('#logout-confirm').addEventListener('click', () => {
+    $('#logout-dialog').close();
+    logout();
+    toast('You have been logged out');
+  });
 
   // ---------- Wallet actions ----------
 
@@ -579,6 +604,229 @@
   $('#copy-btn').addEventListener('click', async () => {
     if (await copyText($('#account-number').textContent)) toast('Account number copied');
     else toast('Could not copy. Select the number and copy it manually.', 'error');
+  });
+
+  // ---------- Bottom navigation (Home / Card tabs; the other items open dialogs) ----------
+
+  function showTab(name) {
+    $('#home-view').hidden = name !== 'home';
+    $('#card-tab').hidden = name !== 'card';
+    document.querySelectorAll('[data-tab-target]').forEach((item) => {
+      const active = item.dataset.tabTarget === name;
+      item.classList.toggle('active', active);
+      if (active) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    });
+    window.scrollTo({ top: 0 });
+  }
+
+  document.querySelectorAll('[data-tab-target]').forEach((item) => {
+    item.addEventListener('click', () => showTab(item.dataset.tabTarget));
+  });
+  $('#nav-transfer').addEventListener('click', () => openSendDialog());
+  $('#nav-me').addEventListener('click', () => $('#profile-btn').click());
+
+  $('#bank-transfer-btn').addEventListener('click', () => {
+    openSendDialog();
+    sendDialog.querySelector('[data-method="bank"]').click();
+  });
+
+  $('#refer-btn').addEventListener('click', async () => {
+    const text =
+      `Join me on PayPulse! Sign up at ${location.origin} and send money to my account ` +
+      `${lastAccount?.accountNumber ?? ''} in seconds.`;
+    if (await copyText(text)) toast('Invite message copied. Paste it to a friend!', 'success');
+    else toast('Could not copy the invite message.', 'error');
+  });
+
+  // ---------- Notifications: updates, features, upcoming events and your activity ----------
+
+  const notifDialog = $('#notif-dialog');
+  const NOTIF_POLL_MS = 60_000; // its own slow timer: the 10-second balance refresh stays lean
+  const NOTIF_FILTERS = [
+    ['ALL', 'All'],
+    ['UPDATE', 'Updates'],
+    ['FEATURE', 'Features'],
+    ['EVENT', 'Events'],
+    ['ACTIVITY', 'Activity'],
+  ];
+  const NOTIF_ICONS = {
+    UPDATE: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3"/>',
+    FEATURE: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
+    EVENT: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    ACTIVITY: '<path d="M12 2v20M17 6.5c-.8-1.5-2.6-2.5-5-2.5-3 0-5 1.5-5 3.7 0 4.8 10 2.6 10 7.6 0 2.2-2.2 3.7-5 3.7-2.6 0-4.5-1-5.3-2.6"/>',
+  };
+  const NOTIF_LABELS = { UPDATE: 'New update', FEATURE: 'Feature', EVENT: 'Upcoming event', ACTIVITY: 'Activity' };
+  const EVENT_DAY = new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'Asia/Manila' });
+  const EVENT_TIME = new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Manila' });
+  let notifications = null; // GET /api/v1/notifications
+  let notifFilter = 'ALL';
+  const notifExpanded = new Set(); // ids opened in this panel (kept across re-renders)
+  let notifTimer = null;
+
+  function timeAgo(iso) {
+    const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return minutes + ' min ago';
+    if (minutes < 24 * 60) return Math.round(minutes / 60) + ' h ago';
+    if (minutes < 7 * 24 * 60) return Math.round(minutes / (24 * 60)) + ' d ago';
+    return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function eventWhen(n) {
+    const startAt = new Date(n.eventDate);
+    let text = EVENT_DAY.format(startAt) + ' · ' + EVENT_TIME.format(startAt);
+    if (n.eventEnd) text += ' – ' + EVENT_TIME.format(new Date(n.eventEnd));
+    return text + ' (PH time)';
+  }
+
+  function renderBellCount(count) {
+    const badge = $('#bell-dot');
+    badge.hidden = !count;
+    badge.textContent = count > 9 ? '9+' : String(count || '');
+    $('#bell-btn').setAttribute('aria-label', count ? 'Notifications, ' + count + ' unread' : 'Notifications');
+  }
+
+  async function loadNotifications() {
+    notifications = await api('/api/v1/notifications');
+    renderBellCount(notifications.unreadCount);
+    if (notifDialog.open) renderNotifications();
+  }
+
+  function startNotificationPolling() {
+    clearInterval(notifTimer);
+    loadNotifications().catch(() => {});
+    notifTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') loadNotifications().catch(() => {});
+    }, NOTIF_POLL_MS);
+  }
+
+  function renderNotifications() {
+    const items = notifications?.items ?? [];
+    const unread = notifications?.unreadByCategory ?? {};
+    $('#notif-read-all').disabled = !notifications?.unreadCount;
+    $('#notif-filters').replaceChildren(
+      ...NOTIF_FILTERS.map(([code, label]) => {
+        const count = code === 'ALL' ? notifications?.unreadCount ?? 0 : unread[code] ?? 0;
+        const chip = Object.assign(document.createElement('button'), { type: 'button', className: 'notif-chip' });
+        chip.setAttribute('role', 'tab');
+        chip.setAttribute('aria-selected', String(code === notifFilter));
+        chip.dataset.testid = 'notif-filter-' + code;
+        chip.textContent = label;
+        if (count) chip.append(Object.assign(document.createElement('span'), { className: 'chip-count', textContent: String(count) }));
+        chip.addEventListener('click', () => {
+          notifFilter = code;
+          renderNotifications();
+        });
+        return chip;
+      }),
+    );
+
+    const shown = items.filter((n) => notifFilter === 'ALL' || n.category === notifFilter);
+    $('#notif-empty').hidden = shown.length > 0;
+    $('#notif-empty').textContent = notifFilter === 'EVENT' ? 'No upcoming events right now.' : "You're all caught up.";
+    $('#notif-list').replaceChildren(
+      ...shown.map((n) => {
+        const li = document.createElement('li');
+        li.className = 'notif cat-' + n.category.toLowerCase() + (n.read ? '' : ' unread') + (notifExpanded.has(n.id) ? ' expanded' : '');
+        li.dataset.testid = 'notif-item';
+        li.dataset.id = n.id;
+
+        const head = Object.assign(document.createElement('button'), { type: 'button', className: 'notif-head' });
+        head.setAttribute('aria-expanded', String(notifExpanded.has(n.id)));
+        const iconEl = Object.assign(document.createElement('span'), { className: 'notif-icon' });
+        iconEl.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + NOTIF_ICONS[n.category] + '</svg>';
+        const text = Object.assign(document.createElement('span'), { className: 'notif-text' });
+        text.append(
+          Object.assign(document.createElement('small'), {
+            className: 'notif-meta',
+            textContent: NOTIF_LABELS[n.category] + ' · ' + timeAgo(n.date),
+          }),
+          Object.assign(document.createElement('strong'), { textContent: n.title }),
+        );
+        if (n.eventDate) text.append(Object.assign(document.createElement('span'), { className: 'event-when', textContent: '📅 ' + eventWhen(n) }));
+        text.append(Object.assign(document.createElement('span'), { className: 'notif-body', textContent: n.body }));
+        head.append(iconEl, text);
+        if (!n.read) head.append(Object.assign(document.createElement('span'), { className: 'unread-dot', title: 'Unread' }));
+        head.addEventListener('click', () => {
+          const open = li.classList.toggle('expanded');
+          if (open) notifExpanded.add(n.id);
+          else notifExpanded.delete(n.id);
+          head.setAttribute('aria-expanded', String(open));
+          if (!n.read) markNotificationsRead([n.id]);
+        });
+        li.append(head);
+
+        if (n.action) {
+          const action = Object.assign(document.createElement('button'), {
+            type: 'button',
+            className: 'btn secondary notif-action',
+            textContent: n.action.label + ' ›',
+          });
+          action.dataset.testid = 'notif-action';
+          action.addEventListener('click', () => {
+            if (!n.read) markNotificationsRead([n.id]);
+            runNotificationAction(n.action);
+          });
+          li.append(action);
+        }
+        return li;
+      }),
+    );
+  }
+
+  async function markNotificationsRead(ids) {
+    // Optimistic: the dot disappears right away, the server keeps it for every device.
+    const unreadBefore = notifications.items.filter((n) => ids.includes(n.id) && !n.read).length;
+    notifications.items.forEach((n) => { if (ids.includes(n.id)) n.read = true; });
+    try {
+      const counts = await api('/api/v1/notifications/read', { method: 'POST', body: { ids } });
+      Object.assign(notifications, counts);
+    } catch {
+      notifications.unreadCount = Math.max(0, notifications.unreadCount - unreadBefore);
+    }
+    renderBellCount(notifications.unreadCount);
+    renderNotifications();
+  }
+
+  async function runNotificationAction(action) {
+    notifDialog.close();
+    if (action.target === 'receipt') return openReceipt(action.transactionId);
+    if (action.target === 'bills') return openBills();
+    if (action.target === 'loan') return openLoan();
+    if (action.target === 'savings') return openSavings('DEPOSIT');
+    if (action.target === 'card') return showTab('card');
+    await openProfile();
+    if (action.target === 'kyc') {
+      if (profile?.kyc.verified) toast("You're already Level 2 (Fully Verified)");
+      else $('#kyc-start').click();
+    } else if (action.target === 'security' || action.target === 'help') {
+      showProfilePanel(action.target);
+    }
+  }
+
+  $('#bell-btn').addEventListener('click', async () => {
+    notifFilter = 'ALL';
+    notifExpanded.clear();
+    try {
+      await loadNotifications();
+    } catch (err) {
+      return toast(err.message, 'error');
+    }
+    renderNotifications();
+    notifDialog.showModal();
+  });
+
+  $('#notif-read-all').addEventListener('click', async () => {
+    try {
+      const counts = await api('/api/v1/notifications/read', { method: 'POST', body: { all: true } });
+      notifications.items.forEach((n) => { n.read = true; });
+      Object.assign(notifications, counts);
+      renderBellCount(0);
+      renderNotifications();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
   });
 
   document.querySelectorAll('[data-amount]').forEach((chip) => {
@@ -1263,10 +1511,11 @@
     }
   });
 
-  // ---------- My profile: account, transfer limits (live), security ----------
+  // ---------- My profile: KYC, settings menu, help center, QA & sandbox rules ----------
 
   const profileDialog = $('#profile-dialog');
   let profileTimer = null;
+  let profile = null; // GET /api/v1/profile
 
   /** "Juan Dela Cruz" -> "JC" */
   function initials(name) {
@@ -1276,6 +1525,7 @@
 
   const MEMBER_SINCE = new Intl.DateTimeFormat('en-PH', { dateStyle: 'long', timeZone: 'Asia/Manila' });
   const RESET_TIME = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
+  const TICKET_TIME = new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' });
 
   function fillRows(listEl, rows) {
     listEl.replaceChildren(
@@ -1286,6 +1536,22 @@
     );
   }
 
+  function showProfilePanel(name) {
+    profileDialog.querySelectorAll('.profile-panel').forEach((panel) => {
+      panel.hidden = panel.dataset.panel !== name;
+    });
+    profileDialog.scrollTop = 0;
+    if (name === 'mpin') resetMpinChangeForm();
+    if (name === 'help') renderChatIntro();
+  }
+
+  profileDialog.querySelectorAll('[data-profile-panel]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = button.dataset.profilePanel;
+      showProfilePanel(target === 'main' ? 'main' : target);
+    });
+  });
+
   function renderProfileStatic() {
     const a = lastAccount;
     $('#profile-avatar').textContent = initials(a.accountHolder);
@@ -1295,22 +1561,101 @@
       ['Account no.', a.accountNumber],
       ...(a.mobileNumber ? [['Mobile no.', a.mobileNumber]] : []),
       ['Currency', a.currency],
+      ['Role', a.role === 'ADMIN' ? 'Admin' : 'Customer'],
       ['Member since', MEMBER_SINCE.format(new Date(a.memberSince))],
     ]);
   }
 
+  /** KYC badge, tier card, menu subtitles, linked accounts, security toggles, tickets. */
+  function renderProfile() {
+    if (!profile) return;
+    const { kyc } = profile;
+    const badge = $('#kyc-badge');
+    badge.textContent = kyc.verified ? '✓ Verified ' + kyc.label : kyc.label + ' · Not yet verified';
+    badge.classList.toggle('verified', kyc.verified);
+    $('#kyc-current').textContent = 'Level ' + kyc.level;
+    $('#kyc-tiers').replaceChildren(
+      ...kyc.tiers.map((t) => {
+        const li = document.createElement('li');
+        li.className = t.level === kyc.level ? 'current' : t.level < kyc.level ? 'done' : '';
+        li.append(
+          Object.assign(document.createElement('span'), { className: 'tier-dot', textContent: t.level <= kyc.level ? '✓' : String(t.level) }),
+          Object.assign(document.createElement('span'), { className: 'tier-text', innerHTML: '' }),
+        );
+        const text = li.lastChild;
+        text.append(
+          Object.assign(document.createElement('strong'), { textContent: t.label }),
+          Object.assign(document.createElement('small'), { textContent: t.requirements }),
+        );
+        li.append(Object.assign(document.createElement('span'), { className: 'tier-limit', textContent: money(t.dailyLimit) + '/day' }));
+        return li;
+      }),
+    );
+    $('#kyc-start').hidden = kyc.verified;
+    const next = kyc.tiers.find((t) => t.level === kyc.level + 1);
+    if (next) {
+      $('#kyc-start').textContent = 'Verify your ID to raise your limit to ' + money(next.dailyLimit);
+      $('#kyc-target-limit').textContent = money(next.dailyLimit);
+    }
+
+    const linked = profile.linkedAccounts;
+    $('#menu-linked-sub').textContent = linked.length
+      ? linked.map((l) => l.name + ' ' + l.maskedNumber).join(', ')
+      : 'None linked yet';
+    $('#linked-empty').hidden = linked.length > 0;
+    $('#linked-list').replaceChildren(
+      ...linked.map((l) => {
+        const li = document.createElement('li');
+        li.className = 'linked-item';
+        const logo = Object.assign(document.createElement('span'), {
+          className: 'linked-logo ' + (l.kind === 'CARD' ? 'card' : 'bank'),
+          textContent: l.kind === 'CARD' ? (l.institution === 'Visa' ? 'VISA' : 'MC') : l.institution.slice(0, 3),
+        });
+        const text = document.createElement('span');
+        text.className = 'menu-text';
+        text.append(
+          Object.assign(document.createElement('strong'), { textContent: l.name + ' ' + l.maskedNumber }),
+          Object.assign(document.createElement('small'), {
+            textContent: l.holderName + (l.expiry ? ' · Expires ' + l.expiry : ' · Bank account'),
+          }),
+        );
+        const remove = Object.assign(document.createElement('button'), {
+          type: 'button',
+          className: 'btn link unlink',
+          textContent: 'Remove',
+        });
+        remove.dataset.testid = 'linked-remove';
+        remove.addEventListener('click', () => unlinkAccount(l));
+        li.append(logo, text, remove);
+        return li;
+      }),
+    );
+
+    $('#sec-bio').checked = profile.security.biometricLogin;
+    $('#sec-sms').checked = profile.security.smsTwoFactor;
+    $('#menu-security-sub').textContent =
+      'Face ID / Touch ID ' + (profile.security.biometricLogin ? 'on' : 'off') +
+      ' · SMS 2FA ' + (profile.security.smsTwoFactor ? 'on every transfer' : 'above ₱1,000');
+    renderTickets();
+  }
+
+  async function loadProfile() {
+    profile = await api('/api/v1/profile');
+    renderProfile();
+  }
+
   function renderSecurity() {
     const left = mpinSecondsLeft();
-    const mpinStatus = !hasMpin ? 'Not set up' : left > 0 ? `Valid for ${formatCountdown(left)}` : 'Expired';
+    const mpinStatus = !hasMpin ? 'Not set up' : left > 0 ? 'Valid for ' + formatCountdown(left) : 'Expired';
     fillRows($('#profile-security'), [
-      ['Role', lastAccount?.role === 'ADMIN' ? 'Admin (can Add money and use QA tools)' : 'Customer'],
-      ['Compliance status', lastAccount?.amlStatus === 'UNDER_REVIEW' ? 'Under review: sending is on hold' : 'Clear'],
-      ['MPIN', mpinStatus],
-      ['MPIN lifetime', '5 minutes after you get it'],
+      ['MPIN status', mpinStatus],
+      ['MPIN lifetime', '5 minutes after you get or change it'],
       ['Wrong MPIN', '5 in a row locks transfers for 5 min'],
-      ['One-time code (OTP)', 'For transfers above ₱1,000'],
-      ['Bank transfer fee', `${money(15)} per transfer`],
-      ['AML review', 'Transfers above ₱500,000 or more than 5 a minute are held'],
+      ['One-time code (OTP)', profile?.security.smsTwoFactor ? 'On every transfer (SMS 2FA on)' : 'For transfers above ₱1,000'],
+      ['AML review threshold', 'One transfer above ₱500,000, or more than 5 transfers / bill payments a minute'],
+      ['Compliance status', lastAccount?.amlStatus === 'UNDER_REVIEW' ? 'Under review: sending is on hold' : 'Clear'],
+      ['Bank transfer fee', money(15) + ' per transfer'],
+      ['Role', lastAccount?.role === 'ADMIN' ? 'Admin (can Add money and use QA tools)' : 'Customer'],
     ]);
   }
 
@@ -1321,42 +1666,46 @@
     const sent = Number(daily.sentToday);
     const percent = Math.min(100, (sent / limit) * 100);
 
-    $('#daily-left').textContent = `${money(daily.remaining)} left`;
-    $('#daily-bar').style.width = `${percent}%`;
+    $('#daily-left').textContent = money(daily.remaining) + ' left';
+    $('#daily-bar').style.width = percent + '%';
     const meter = $('#daily-meter');
+    meter.setAttribute('aria-valuemax', String(limit));
     meter.setAttribute('aria-valuenow', String(sent));
-    meter.setAttribute('aria-valuetext', `${money(sent)} of ${money(limit)} sent today`);
+    meter.setAttribute('aria-valuetext', money(sent) + ' of ' + money(limit) + ' sent today');
+    const resets = RESET_TIME.format(new Date(daily.resetsAt));
     const dailyText = $('#daily-text');
     dailyText.textContent = Number(daily.remaining) > 0
-      ? `${money(sent)} of ${money(limit)} sent today · Resets at ${RESET_TIME.format(new Date(daily.resetsAt))} (PH time)`
-      : `Limit reached: ${money(limit)} sent today. Resets at ${RESET_TIME.format(new Date(daily.resetsAt))} (PH time).`;
+      ? money(sent) + ' of ' + money(limit) + ' sent today · Resets at ' + resets + ' (PH time)'
+      : 'Limit reached: ' + money(limit) + ' sent today. Resets at ' + resets + ' (PH time).';
     dailyText.classList.toggle('blocked', Number(daily.remaining) <= 0);
+    $('#kyc-usage').textContent = 'Today: ' + money(sent) + ' of your ' + money(limit) + ' daily limit used.';
 
     const used = Math.min(rateLimit.transfersInWindow, rateLimit.maxTransfers);
-    $('#spam-count').textContent = `${used} of ${rateLimit.maxTransfers} used`;
+    $('#spam-count').textContent = used + ' of ' + rateLimit.maxTransfers + ' used';
     $('#spam-slots').replaceChildren(
       ...Array.from({ length: rateLimit.maxTransfers }, (_, i) =>
-        Object.assign(document.createElement('span'), { className: `slot${i < used ? ' used' : ''}` }),
+        Object.assign(document.createElement('span'), { className: 'slot' + (i < used ? ' used' : '') }),
       ),
     );
     const spamText = $('#spam-text');
     const blocked = used >= rateLimit.maxTransfers;
     spamText.textContent = blocked
-      ? `Blocked: the next transfer is refused until the oldest one is more than ${rateLimit.windowSeconds} seconds old.`
-      : `At most ${rateLimit.maxTransfers} transfers in any ${rateLimit.windowSeconds} seconds. ` +
-        `Transfers in the last ${rateLimit.windowSeconds} seconds: ${rateLimit.transfersInWindow}.`;
+      ? 'Blocked: the next transfer is refused until the oldest one is more than ' + rateLimit.windowSeconds + ' seconds old.'
+      : 'At most ' + rateLimit.maxTransfers + ' transfers in any ' + rateLimit.windowSeconds + ' seconds. ' +
+        'Transfers in the last ' + rateLimit.windowSeconds + ' seconds: ' + rateLimit.transfersInWindow + '.';
     spamText.classList.toggle('blocked', blocked);
   }
 
   async function openProfile() {
     if (!lastAccount) await loadWallet();
     renderProfileStatic();
-    renderSecurity();
+    showProfilePanel('main');
     try {
-      await refreshLimits();
+      await Promise.all([loadProfile(), refreshLimits()]);
     } catch (err) {
       toast(err.message, 'error');
     }
+    renderSecurity();
     profileDialog.showModal();
     clearInterval(profileTimer);
     // Live while open, so you can watch the anti-spam window empty again.
@@ -1370,23 +1719,319 @@
   $('#profile-btn').addEventListener('click', openProfile);
   $('#profile-new-mpin').addEventListener('click', () => openMpinReset());
 
+  // --- KYC: verify ID (mock, approved instantly) ---
+  const kycForm = $('#kyc-form');
+  let selfieTaken = false;
+
+  function setSelfie(taken) {
+    selfieTaken = taken;
+    $('#kyc-selfie').setAttribute('aria-pressed', String(taken));
+    $('#kyc-selfie').classList.toggle('done', taken);
+    $('#kyc-selfie-title').textContent = taken ? 'Selfie captured' : 'Take a selfie with your ID';
+    $('#kyc-selfie-text').textContent = taken ? 'Tap to retake' : 'Simulated camera: tap to capture';
+  }
+
+  $('#kyc-start').addEventListener('click', () => {
+    kycForm.reset();
+    setFormError(kycForm);
+    setSelfie(false);
+    kycForm.elements.idType.replaceChildren(
+      ...profile.kyc.idTypes.map((t) => Object.assign(document.createElement('option'), { value: t.code, textContent: t.name })),
+    );
+    showProfilePanel('kyc');
+  });
+  $('#kyc-selfie').addEventListener('click', () => setSelfie(!selfieTaken));
+
+  kycForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setFormError(kycForm);
+    const { idType, idNumber, birthDate } = formData(kycForm);
+    if (!idNumber.trim()) return setFormError(kycForm, 'Enter your ID number.');
+    if (!birthDate) return setFormError(kycForm, 'Enter your date of birth.');
+    if (!selfieTaken) return setFormError(kycForm, 'Take a selfie with your ID first.');
+    try {
+      await api('/api/v1/profile/kyc', { method: 'POST', body: { idType, idNumber, birthDate, selfieConfirmed: true } });
+      await Promise.all([loadProfile(), refreshLimits(), loadWallet()]);
+      showProfilePanel('main');
+      toast("You're now Level 2 (Fully Verified). Daily limit: " + money(profile.kyc.dailyLimit), 'success');
+    } catch (err) {
+      setFormError(kycForm, err.message);
+    }
+  });
+
+  // --- Linked bank accounts / cards ---
+  const linkedForm = $('#linked-form');
+  const linkedMpin = createCodeInput($('#linked-mpin-input'));
+
+  function linkedKind() {
+    return linkedForm.elements.kind.value;
+  }
+  function syncLinkedKind() {
+    $('#linked-bank-fields').hidden = linkedKind() !== 'BANK';
+    $('#linked-card-fields').hidden = linkedKind() !== 'CARD';
+  }
+  linkedForm.querySelectorAll('[name="kind"]').forEach((r) => r.addEventListener('change', syncLinkedKind));
+  linkedForm.elements.expiry.addEventListener('input', (event) => {
+    const digits = event.target.value.replace(/\D/g, '').slice(0, 4);
+    event.target.value = digits.length > 2 ? digits.slice(0, 2) + '/' + digits.slice(2) : digits;
+  });
+
+  $('#linked-add-open').addEventListener('click', () => {
+    linkedForm.reset();
+    setFormError(linkedForm);
+    linkedMpin.clear();
+    linkedForm.elements.bankCode.replaceChildren(
+      ...profile.linkableBanks.map((b) => Object.assign(document.createElement('option'), { value: b.code, textContent: b.name })),
+    );
+    linkedForm.elements.holderName.value = lastAccount?.accountHolder ?? '';
+    syncLinkedKind();
+    linkedForm.hidden = false;
+    $('#linked-add-open').hidden = true;
+  });
+
+  linkedForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setFormError(linkedForm);
+    const mpin = linkedMpin.value();
+    if (!/^\d{6}$/.test(mpin)) return setFormError(linkedForm, 'Enter all 6 digits of your MPIN.');
+    const data = formData(linkedForm);
+    const body = data.kind === 'BANK'
+      ? { kind: 'BANK', bankCode: data.bankCode, accountNumber: data.accountNumber, holderName: data.holderName, mpin }
+      : { kind: 'CARD', cardNumber: data.cardNumber, expiry: data.expiry, holderName: data.holderName, mpin };
+    try {
+      const linked = await api('/api/v1/profile/linked-accounts', { method: 'POST', body });
+      linkedForm.hidden = true;
+      $('#linked-add-open').hidden = false;
+      await loadProfile();
+      toast(linked.name + ' ' + linked.maskedNumber + ' linked', 'success');
+    } catch (err) {
+      if (err.code === 'INVALID_MPIN') linkedMpin.clear();
+      setFormError(linkedForm, err.message);
+    }
+  });
+
+  async function unlinkAccount(l) {
+    if (!window.confirm('Remove ' + l.name + ' ' + l.maskedNumber + ' from PayPulse?')) return;
+    try {
+      await api('/api/v1/profile/linked-accounts/' + l.id, { method: 'DELETE' });
+      await loadProfile();
+      toast(l.name + ' ' + l.maskedNumber + ' removed');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  // --- Change MPIN: old -> new -> confirm ---
+  const mpinChangeForm = $('#mpin-change-form');
+  const mpinOld = createCodeInput($('#mpin-old-input'));
+  const mpinNew = createCodeInput($('#mpin-new-input'));
+  const mpinConfirm = createCodeInput($('#mpin-confirm-input'));
+
+  function resetMpinChangeForm() {
+    [mpinOld, mpinNew, mpinConfirm].forEach((input) => input.clear());
+    setFormError(mpinChangeForm);
+  }
+
+  mpinChangeForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setFormError(mpinChangeForm);
+    const currentMpin = mpinOld.value();
+    const newMpin = mpinNew.value();
+    const confirmMpin = mpinConfirm.value();
+    if (!/^\d{6}$/.test(currentMpin)) return setFormError(mpinChangeForm, 'Enter all 6 digits of your current MPIN.');
+    if (!/^\d{6}$/.test(newMpin)) return setFormError(mpinChangeForm, 'Your new MPIN must be 6 digits.');
+    if (newMpin !== confirmMpin) return setFormError(mpinChangeForm, 'The new MPINs do not match.');
+    try {
+      const result = await api('/api/accounts/me/mpin/change', { method: 'POST', body: { currentMpin, newMpin, confirmMpin } });
+      hasMpin = true;
+      setMpinExpiry(result.mpinExpiresInSeconds);
+      renderSecurity();
+      showProfilePanel('main');
+      toast('MPIN changed. Use your new MPIN for your next transfer.', 'success');
+    } catch (err) {
+      if (err.code === 'INVALID_MPIN') mpinOld.clear();
+      setFormError(mpinChangeForm, err.message);
+    }
+  });
+
+  // --- Security & biometrics ---
+  const secMpinForm = $('#sec-mpin-form');
+  const secMpin = createCodeInput($('#sec-mpin-input'));
+
+  async function saveSecurity(body) {
+    profile.security = await api('/api/v1/profile/security', { method: 'PATCH', body });
+    renderProfile();
+    renderSecurity();
+  }
+
+  $('#sec-bio').addEventListener('change', async (event) => {
+    const on = event.target.checked;
+    try {
+      await saveSecurity({ biometricLogin: on });
+      toast(on ? 'Face ID / Touch ID login turned on (simulated on the web)' : 'Face ID / Touch ID login turned off');
+    } catch (err) {
+      event.target.checked = !on;
+      toast(err.message, 'error');
+    }
+  });
+
+  $('#sec-sms').addEventListener('change', async (event) => {
+    const on = event.target.checked;
+    if (!on) {
+      // Weakening security: ask for the MPIN first; the switch stays on until it's confirmed.
+      event.target.checked = true;
+      setFormError(secMpinForm);
+      secMpin.clear();
+      secMpinForm.hidden = false;
+      return;
+    }
+    try {
+      await saveSecurity({ smsTwoFactor: true });
+      toast('SMS 2FA is on: every Send and Bank Transfer needs a code', 'success');
+    } catch (err) {
+      event.target.checked = false;
+      toast(err.message, 'error');
+    }
+  });
+  $('#sec-mpin-cancel').addEventListener('click', () => { secMpinForm.hidden = true; });
+  secMpinForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setFormError(secMpinForm);
+    const mpin = secMpin.value();
+    if (!/^\d{6}$/.test(mpin)) return setFormError(secMpinForm, 'Enter all 6 digits of your MPIN.');
+    try {
+      await saveSecurity({ smsTwoFactor: false, mpin });
+      secMpinForm.hidden = true;
+      toast('SMS 2FA turned off. A code is still required above ₱1,000.');
+    } catch (err) {
+      if (err.code === 'INVALID_MPIN') secMpin.clear();
+      setFormError(secMpinForm, err.message);
+    }
+  });
+
+  // --- Help center: FAQs, automated live chat, support tickets ---
+  const FAQS = [
+    ['Why does my MPIN expire?', 'For safety in this demo, an MPIN works for 5 minutes after you get or change it. Get a new one in Change MPIN (Forgot or expired MPIN).'],
+    ['How much can I send a day?', 'Level 1 (Basic): ₱50,000 a day. Level 2 (Fully Verified): ₱100,000 a day. Express Send, Bank Transfer and Pay Bills all count. The limit resets at midnight (PH time).'],
+    ['When do I need a one-time code (OTP)?', 'For every Send or Bank Transfer above ₱1,000. Turn on SMS 2FA in Security & Biometrics to get a code for every transfer.'],
+    ['How does the bills cashback work?', 'You get ₱5.00 back on bills of ₱100 or more, up to 3 cashbacks a day. It is credited instantly.'],
+    ['How do I repay my Instant Loan?', 'Open Instant Loan on Home and tap Pay installment or Pay in full. Payments cover interest first, then principal.'],
+    ['Why is my transfer on hold?', 'A single transfer above ₱500,000, or more than 5 transfers a minute, is held for compliance review. Our team clears it after checking.'],
+  ];
+  $('#faq-list').replaceChildren(
+    ...FAQS.map(([q, a]) => {
+      const d = document.createElement('details');
+      d.append(Object.assign(document.createElement('summary'), { textContent: q }), Object.assign(document.createElement('p'), { textContent: a }));
+      return d;
+    }),
+  );
+
+  const CHAT_ANSWERS = [
+    [/mpin|pin|passcode/i, 'Your MPIN is valid for 5 minutes. Change it under Change MPIN, or get a new one there if it expired.'],
+    [/limit|how much|maximum/i, 'Daily send limit: ₱50,000 for Level 1, ₱100,000 for Level 2 (Fully Verified). Verify your ID in My profile to raise it.'],
+    [/verif|kyc|level|id\b/i, 'Tap "Verify your ID" in My profile, choose a government ID, enter its number and your birthday, and take a selfie.'],
+    [/cashback|bill|meralco|pldt/i, 'Pay Bills gives ₱5.00 cashback on bills of ₱100 or more, up to 3 a day.'],
+    [/loan|borrow|repay/i, 'Instant Loan: up to ₱50,000 at 1.5% a month, 3 to 12 months. Repay from the Instant Loan tile.'],
+    [/hold|review|frozen|blocked/i, 'Large or very frequent transfers are held for compliance review. If it takes long, submit a ticket below.'],
+    [/card|visa/i, 'Get a virtual Visa in the Card tab. You can lock it any time with the Freeze / Lock Card switch.'],
+    [/hi|hello|hey|good (morning|afternoon|evening)/i, 'Hello! How can I help you today?'],
+  ];
+  let chatStarted = false;
+
+  function chatMessage(text, from) {
+    const li = Object.assign(document.createElement('li'), { className: 'chat-msg ' + from, textContent: text });
+    $('#chat-log').append(li);
+    $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
+  }
+  function renderChatIntro() {
+    if (chatStarted) return;
+    chatStarted = true;
+    chatMessage("Hi! I'm the PayPulse Assistant (automated). Ask me about MPIN, limits, bills, loans or cards.", 'bot');
+  }
+  $('#chat-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const input = event.currentTarget.elements.message;
+    const text = input.value.trim();
+    if (!text) return;
+    chatMessage(text, 'me');
+    input.value = '';
+    const answer = CHAT_ANSWERS.find(([pattern]) => pattern.test(text));
+    setTimeout(() => {
+      chatMessage(answer ? answer[1] : "I'm not sure about that one. Please submit a support ticket below and our team will get back to you.", 'bot');
+    }, 500);
+  });
+
+  function renderTickets() {
+    const list = $('#ticket-list');
+    list.replaceChildren(
+      ...(profile?.supportTickets ?? []).map((t) => {
+        const li = document.createElement('li');
+        li.className = 'ticket';
+        li.append(
+          Object.assign(document.createElement('strong'), { textContent: t.ticketNumber + ' · ' + t.subject }),
+          Object.assign(document.createElement('small'), { textContent: TICKET_TIME.format(new Date(t.createdAt)) }),
+          Object.assign(document.createElement('span'), { className: 'ticket-status ' + t.status.toLowerCase(), textContent: t.status.replace('_', ' ') }),
+        );
+        return li;
+      }),
+    );
+  }
+
+  $('#ticket-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    setFormError(form);
+    const { category, subject, message } = formData(form);
+    try {
+      const ticket = await api('/api/v1/profile/support/tickets', { method: 'POST', body: { category, subject, message } });
+      form.reset();
+      await loadProfile();
+      toast('Ticket ' + ticket.ticketNumber + ' submitted. We will reply by email.', 'success');
+    } catch (err) {
+      setFormError(form, err.message);
+    }
+  });
+
   // ---------- PayPulse Save ----------
 
   const savingsDialog = $('#savings-dialog');
   const savingsForm = $('#savings-form');
-  let savings = null; // GET /api/v1/savings
   let savingsDirection = 'DEPOSIT';
 
   async function loadSavingsAndCards() {
     const [vault, cards] = await Promise.all([api('/api/v1/savings'), api('/api/v1/cards')]);
     savings = vault;
-    $('#savings-balance').textContent = money(vault.balance);
+    renderBalance(); // savings balance + total assets on the balance card
     $('#savings-rate').textContent = `${vault.annualRate}% p.a.`;
     $('#savings-meta').textContent =
       `Interest earned ${money(vault.interestEarned)} · about ${money(vault.estimatedDailyInterest)} a day` +
       (vault.lastAccrualDate ? ` · last credited for ${vault.lastAccrualDate}` : '');
     renderCard(cards.cards[0] || null);
   }
+
+  $('#savings-open').addEventListener('click', () => openSavings('DEPOSIT'));
+  $('#promo-banner').addEventListener('click', () => openSavings('DEPOSIT'));
+
+  // ---------- Total assets ----------
+
+  $('#assets-open').addEventListener('click', () => {
+    const wallet = Number(currentBalance ?? 0);
+    const saved = Number(savings?.balance ?? 0);
+    $('#assets-total').textContent = money((wallet + saved).toFixed(2));
+    const rows = [
+      ['Wallet', money(wallet.toFixed(2))],
+      [`PayPulse Save (${savings?.annualRate ?? '6.00'}% p.a.)`, money(saved.toFixed(2))],
+      ['Interest earned so far', money(savings?.interestEarned ?? '0.00')],
+    ];
+    if (loanOverview?.activeLoan) rows.push(['Instant Loan you owe', `−${money(loanOverview.activeLoan.outstanding)}`]);
+    $('#assets-rows').replaceChildren(
+      ...rows.flatMap(([label, value]) => [
+        Object.assign(document.createElement('dt'), { textContent: label }),
+        Object.assign(document.createElement('dd'), { textContent: value }),
+      ]),
+    );
+    $('#assets-dialog').showModal();
+  });
 
   function openSavings(direction) {
     savingsDirection = direction;
@@ -1426,6 +2071,392 @@
     }
   });
 
+  // ---------- Pay Bills ----------
+
+  const billsDialog = $('#bills-dialog');
+  const billsForm = $('#bills-form');
+  const billsReview = $('#bills-review');
+  const billsMpin = createCodeInput($('#bills-mpin-input'));
+  let billsCatalog = null; // GET /api/v1/bills
+  let billsCategory = null; // selected category code, or null for the category grid
+  let billsBiller = null;
+  let billsPending = null; // { billerCode, accountNumber, accountName, amount }
+
+  const BILL_CATEGORY_ICONS = {
+    UTILITIES: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    TELECOMS: '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1"/><path d="M2 9a15 15 0 0 1 20 0"/>',
+    GOVERNMENT: '<path d="M3 21h18M5 21V10m4 11V10m6 11V10m4 11V10M2 10l10-6 10 6z"/>',
+    LOANS: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+    CABLE: '<rect x="2" y="6" width="20" height="13" rx="2"/><path d="m8 2 4 4 4-4"/>',
+  };
+  const svgIcon = (paths) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+  const initialsOf = (name) => name.replace(/\(.*?\)/g, '').split(/[\s-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
+  function showBillsStep(step) {
+    $('#bills-browse').hidden = step !== 'browse';
+    billsForm.hidden = step !== 'form';
+    billsReview.hidden = step !== 'review';
+  }
+
+  function cashbackHintText() {
+    const c = billsCatalog?.cashback;
+    if (!c) return '';
+    return c.remainingToday > 0
+      ? `🎁 Earn ${money(c.amount)} cashback on bills of ${money(c.minBill)} or more (${c.remainingToday} of ${c.dailyMax} left today)`
+      : `You've used today's ${c.dailyMax} bills cashbacks. More tomorrow!`;
+  }
+
+  function renderBillsBrowse() {
+    const query = $('#bills-search').value.trim().toLowerCase();
+    $('#bills-cashback-hint').textContent = cashbackHintText();
+    const category = billsCatalog.categories.find((c) => c.code === billsCategory);
+    const showList = Boolean(query || category);
+    $('#bills-categories').hidden = showList;
+    $('#bills-list').hidden = !showList;
+    $('#bills-list-title').hidden = !showList;
+    $('#bills-browse-back').hidden = !category || Boolean(query);
+    $('#bills-title').textContent = category && !query ? category.name : 'Pay Bills';
+
+    if (!showList) {
+      $('#bills-empty').hidden = true;
+      $('#bills-categories').replaceChildren(
+        ...billsCatalog.categories.map((c) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = `bill-category cat-${c.code.toLowerCase()}`;
+          button.dataset.testid = `bills-category-${c.code}`;
+          button.innerHTML = `<span class="bill-category-icon">${svgIcon(BILL_CATEGORY_ICONS[c.code] ?? '')}</span>`;
+          button.append(
+            Object.assign(document.createElement('strong'), { textContent: c.name }),
+            Object.assign(document.createElement('small'), { textContent: c.description }),
+          );
+          button.addEventListener('click', () => {
+            billsCategory = c.code;
+            renderBillsBrowse();
+          });
+          return button;
+        }),
+      );
+      return;
+    }
+
+    const billers = billsCatalog.billers.filter((b) =>
+      query ? b.name.toLowerCase().includes(query) : b.category === billsCategory,
+    );
+    $('#bills-list-title').textContent = query ? `Results for "${$('#bills-search').value.trim()}"` : `${billers.length} billers`;
+    $('#bills-empty').hidden = billers.length > 0;
+    $('#bills-list').replaceChildren(
+      ...billers.map((b) => {
+        const li = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'biller-row';
+        button.dataset.testid = `biller-${b.code}`;
+        const badge = Object.assign(document.createElement('span'), {
+          className: `biller-badge cat-${b.category.toLowerCase()}`,
+          textContent: initialsOf(b.name),
+        });
+        badge.setAttribute('aria-hidden', 'true');
+        const text = document.createElement('span');
+        text.className = 'biller-text';
+        text.append(
+          Object.assign(document.createElement('strong'), { textContent: b.name }),
+          Object.assign(document.createElement('small'), {
+            textContent: billsCatalog.categories.find((c) => c.code === b.category)?.name ?? '',
+          }),
+        );
+        button.append(badge, text, Object.assign(document.createElement('span'), { className: 'chev', textContent: '›' }));
+        button.addEventListener('click', () => chooseBiller(b));
+        li.append(button);
+        return li;
+      }),
+    );
+  }
+
+  function chooseBiller(b) {
+    billsBiller = b;
+    billsForm.reset();
+    setFormError(billsForm);
+    $('#bills-chosen').replaceChildren(
+      Object.assign(document.createElement('span'), {
+        className: `biller-badge cat-${b.category.toLowerCase()}`,
+        textContent: initialsOf(b.name),
+      }),
+      Object.assign(document.createElement('strong'), { textContent: b.name }),
+    );
+    $('#bills-account-label').textContent = b.accountLabel;
+    $('#bills-account-hint').textContent = b.sensitive
+      ? `${b.accountHint}. Only the last 4 digits are kept on your receipt.`
+      : b.accountHint;
+    billsForm.elements.accountNumber.inputMode = b.sensitive || b.accountHint.includes('digit') ? 'numeric' : 'text';
+    showBillsStep('form');
+    billsForm.elements.accountNumber.focus();
+  }
+
+  async function openBills() {
+    billsCategory = null;
+    billsBiller = null;
+    $('#bills-search').value = '';
+    try {
+      billsCatalog = await api('/api/v1/bills');
+    } catch (err) {
+      return toast(err.message, 'error');
+    }
+    renderBillsBrowse();
+    showBillsStep('browse');
+    billsDialog.showModal();
+  }
+
+  $('#bills-btn').addEventListener('click', openBills);
+  $('#bills-search').addEventListener('input', renderBillsBrowse);
+  $('#bills-browse-back').addEventListener('click', () => {
+    billsCategory = null;
+    renderBillsBrowse();
+  });
+  billsDialog.querySelectorAll('[data-bills-back]').forEach((button) => {
+    button.addEventListener('click', () => showBillsStep(button.dataset.billsBack));
+  });
+
+  billsForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    setFormError(billsForm);
+    const { accountNumber, accountName, amount } = formData(billsForm);
+    if (!accountNumber.trim()) return setFormError(billsForm, `Enter the ${billsBiller.accountLabel}.`);
+    if (accountName.trim().length < 2) return setFormError(billsForm, 'Enter the account name as it appears on the bill.');
+    if (!validAmount(amount.trim())) return setFormError(billsForm, 'Enter a valid amount, e.g. 1500 or 1499.50.');
+    if (Number(amount) > Number(billsCatalog.maxAmount)) {
+      return setFormError(billsForm, `A single bill payment can be up to ${money(billsCatalog.maxAmount)}.`);
+    }
+    if (currentBalance !== null && Number(amount) > Number(currentBalance)) {
+      return setFormError(billsForm, `Your Available Balance is ${money(currentBalance)}.`);
+    }
+
+    billsPending = {
+      billerCode: billsBiller.code,
+      accountNumber: accountNumber.trim(),
+      accountName: accountName.trim(),
+      amount: amount.trim(),
+    };
+    const shownAccount = billsBiller.sensitive ? `••••${billsPending.accountNumber.replace(/\s+/g, '').slice(-4)}` : billsPending.accountNumber;
+    setRows($('#bills-summary'), [
+      ['Biller', billsBiller.name],
+      [billsBiller.accountLabel, shownAccount],
+      ['Account Name', billsPending.accountName],
+      ['Amount Due', money(billsPending.amount)],
+      ['Convenience Fee', `${money(billsCatalog.convenienceFee)} (free)`],
+    ]);
+    $('#bills-total').textContent = money(Number(billsPending.amount) + Number(billsCatalog.convenienceFee));
+
+    const c = billsCatalog.cashback;
+    const banner = $('#bills-cashback-banner');
+    const eligible = Number(billsPending.amount) >= Number(c.minBill) && c.remainingToday > 0;
+    banner.classList.toggle('muted', !eligible);
+    banner.textContent = eligible
+      ? `🎁 PayPulse Bonus: Earn ${money(c.amount)} Cashback on this transaction!`
+      : c.remainingToday > 0
+        ? `Cashback applies to bills of ${money(c.minBill)} or more.`
+        : `No cashback on this one: you've earned today's ${c.dailyMax} bills cashbacks.`;
+
+    setFormError(billsReview);
+    billsMpin.clear();
+    showBillsStep('review');
+  });
+
+  billsReview.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const mpin = billsMpin.value();
+    setFormError(billsReview);
+    if (!/^\d{6}$/.test(mpin)) return setFormError(billsReview, 'Enter all 6 digits of your MPIN.');
+    const submit = billsReview.querySelector('[type="submit"]');
+    submit.disabled = true; // one tap = one payment
+    try {
+      const paid = await api('/api/v1/bills/pay', {
+        method: 'POST',
+        body: { ...billsPending, mpin },
+        idempotencyKey: newIdempotencyKey(),
+      });
+      billsDialog.close();
+      await loadWallet();
+      toast(
+        paid.cashback.earned
+          ? `${paid.biller.name} paid. ${money(paid.cashback.amount)} cashback added!`
+          : `${paid.biller.name} paid.`,
+        'success',
+      );
+      openReceipt(paid.transactionId);
+    } catch (err) {
+      if (err.code === 'INVALID_MPIN') {
+        toast('Invalid MPIN', 'error');
+        billsMpin.clear();
+      } else if (err.code === 'INVALID_BILLER_ACCOUNT' || err.code === 'INVALID_ACCOUNT_NAME') {
+        showBillsStep('form');
+        setFormError(billsForm, err.message);
+      } else {
+        setFormError(billsReview, describeError(err));
+        if (err.unconfirmed) loadWallet().catch(() => {});
+      }
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  // ---------- Instant Loan ----------
+
+  const loanDialog = $('#loan-dialog');
+  const loanForm = $('#loan-form');
+  const loanAmount = $('#loan-amount');
+  let loanOverview = null; // GET /api/v1/loans
+  let loanRequest = null; // { amount, termMonths } waiting for the MPIN
+
+  const shortDate = (iso) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  /**
+   * Loans change only when you apply, repay or reset, so they are loaded at login and after those
+   * actions, not on every balance refresh (keeps the dashboard to as few calls as possible).
+   */
+  async function loadLoans() {
+    renderLoan(await api('/api/v1/loans'));
+  }
+
+  function renderLoan(overview) {
+    loanOverview = overview;
+    const loan = overview.activeLoan;
+    $('#loan-tile-text').textContent = loan
+      ? `You owe ${money(loan.outstanding)}${loan.nextDue ? ` · next ${money(loan.nextDue.amount)} due ${shortDate(loan.nextDue.dueDate)}` : ''}`
+      : `Available: ${money(overview.available)}`;
+    if (loanDialog.open) showLoanView();
+  }
+
+  /** Same formula as the server (flat add-on interest); the server's numbers are what counts. */
+  function loanQuote(amount, termMonths) {
+    const principalCents = Math.round(Number(amount) * 100);
+    const rateBps = Math.round(Number(loanOverview?.monthlyRate ?? '1.50') * 100);
+    const interestCents = Math.round((principalCents * rateBps * termMonths) / 10_000);
+    const totalCents = principalCents + interestCents;
+    return { interestCents, totalCents, installmentCents: Math.ceil(totalCents / termMonths) };
+  }
+
+  function setRows(dl, rows) {
+    dl.replaceChildren(
+      ...rows.flatMap(([label, value]) => [
+        Object.assign(document.createElement('dt'), { textContent: label }),
+        Object.assign(document.createElement('dd'), { textContent: value }),
+      ]),
+    );
+  }
+
+  function updateLoanQuote() {
+    const amount = Number(loanAmount.value);
+    const termMonths = Number(loanForm.elements.term.value);
+    const q = loanQuote(amount, termMonths);
+    const pct = ((amount - loanAmount.min) / (loanAmount.max - loanAmount.min)) * 100;
+    loanAmount.style.setProperty('--fill', `${pct}%`);
+    $('#loan-amount-out').textContent = money(amount);
+    const firstDue = new Date();
+    firstDue.setMonth(firstDue.getMonth() + 1);
+    setRows($('#loan-quote'), [
+      ['Interest rate', `${loanOverview?.monthlyRate ?? '1.50'}% a month (flat)`],
+      ['Interest', money(q.interestCents / 100)],
+      ['Total to repay', money(q.totalCents / 100)],
+      ['Monthly installment', `${money(q.installmentCents / 100)} × ${termMonths}`],
+      ['First payment', firstDue.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })],
+    ]);
+  }
+
+  function showLoanView() {
+    const loan = loanOverview?.activeLoan;
+    loanForm.hidden = Boolean(loan);
+    $('#loan-active').hidden = !loan;
+    if (!loan) return updateLoanQuote();
+
+    $('#loan-outstanding').textContent = money(loan.outstanding);
+    const paidPct = Math.round((Number(loan.paid) / Number(loan.totalRepayable)) * 100);
+    $('#loan-progress-fill').style.width = `${paidPct}%`;
+    $('#loan-progress').setAttribute('aria-valuenow', String(paidPct));
+    $('#loan-progress-text').textContent = `${money(loan.paid)} of ${money(loan.totalRepayable)} repaid`;
+    setRows($('#loan-details'), [
+      ['Borrowed', money(loan.principal)],
+      ['Term', `${loan.termMonths} months at ${loan.monthlyRate}% a month`],
+      ['Monthly installment', money(loan.monthlyInstallment)],
+      ['Next payment', loan.nextDue ? `${money(loan.nextDue.amount)} on ${shortDate(loan.nextDue.dueDate)}` : '—'],
+    ]);
+    $('#loan-schedule').replaceChildren(
+      ...loan.schedule.map((item) => {
+        const li = document.createElement('li');
+        if (item.status === 'PAID') li.className = 'paid';
+        li.append(
+          Object.assign(document.createElement('span'), { textContent: `${item.number}. ${shortDate(item.dueDate)}` }),
+          Object.assign(document.createElement('span'), {
+            textContent: item.status === 'PAID' ? `${money(item.amount)} ✓` : money(item.remaining),
+          }),
+        );
+        return li;
+      }),
+    );
+    $('#loan-pay-next').textContent = loan.nextDue ? `Pay installment (${money(loan.nextDue.amount)})` : 'Pay installment';
+    $('#loan-pay-full').textContent = `Pay in full (${money(loan.outstanding)})`;
+  }
+
+  async function openLoan() {
+    setFormError(loanForm);
+    setFormError($('#loan-active'));
+    loanAmount.value = '10000';
+    loanForm.elements.term.value = '6';
+    try {
+      renderLoan(await api('/api/v1/loans'));
+    } catch {
+      /* show what we have */
+    }
+    showLoanView();
+    loanDialog.showModal();
+  }
+
+  $('#loan-open').addEventListener('click', openLoan);
+  loanAmount.addEventListener('input', updateLoanQuote);
+  loanForm.querySelectorAll('[name="term"]').forEach((r) => r.addEventListener('change', updateLoanQuote));
+
+  loanForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    setFormError(loanForm);
+    loanRequest = { amount: loanAmount.value, termMonths: Number(loanForm.elements.term.value) };
+    askCardMpin('loan');
+  });
+
+  async function repayLoan(amount, full) {
+    const loan = loanOverview?.activeLoan;
+    const box = $('#loan-active');
+    setFormError(box);
+    if (!loan) return;
+    if (full && !window.confirm(`Pay ${money(amount)} from your wallet and close this loan?`)) return;
+    try {
+      const result = await api(`/api/v1/loans/${loan.loanId}/repay`, {
+        method: 'POST',
+        body: { amount },
+        idempotencyKey: newIdempotencyKey(),
+      });
+      await Promise.all([loadWallet(), loadLoans()]);
+      if (result.status === 'PAID') {
+        loanDialog.close();
+        toast('Loan fully paid. Your ₱50,000 credit line is available again.', 'success');
+      } else {
+        toast(`Paid ${money(result.payment.amount)}. You owe ${money(result.outstanding)}.`, 'success');
+      }
+    } catch (err) {
+      setFormError(box, describeError(err));
+      if (err.unconfirmed) loadWallet().catch(() => {});
+    }
+  }
+
+  $('#loan-pay-next').addEventListener('click', () => {
+    const next = loanOverview?.activeLoan?.nextDue;
+    if (next) repayLoan(next.amount, false);
+  });
+  $('#loan-pay-full').addEventListener('click', () => {
+    const loan = loanOverview?.activeLoan;
+    if (loan) repayLoan(loan.outstanding, true);
+  });
+
   // ---------- Virtual card ----------
 
   const cardMpinDialog = $('#card-mpin-dialog');
@@ -1441,6 +2472,7 @@
     card = c;
     $('#card-empty').hidden = Boolean(c);
     $('#card-view').hidden = !c;
+    renderCardSummary(c);
     if (!c) return;
     if (!maskTimer) {
       $('#vcard-number').textContent = c.maskedPan;
@@ -1450,8 +2482,25 @@
     $('#vcard-expiry').textContent = c.expiry;
     $('#vcard-status').textContent = c.status === 'FROZEN' ? 'FROZEN' : 'ACTIVE';
     $('#vcard').classList.toggle('frozen', c.status === 'FROZEN');
-    $('#card-freeze').textContent = c.status === 'FROZEN' ? 'Unfreeze card' : 'Freeze card';
+    $('#card-freeze').checked = c.status === 'FROZEN';
+    $('#card-lock-hint').textContent =
+      c.status === 'FROZEN' ? 'Card is locked: every payment is declined' : 'Card is active: online payments are allowed';
   }
+
+  /** The "PayPulse Card" tile on the Home tab: masked number and status only. */
+  function renderCardSummary(c) {
+    $('#card-summary-number').textContent = c ? `•••• ${c.maskedPan.slice(-4)}` : 'No card yet';
+    $('#card-summary-status').textContent = c
+      ? `Virtual Visa · ${c.status === 'FROZEN' ? 'Frozen' : 'Active'}`
+      : 'Virtual Visa for online payments';
+    $('#card-summary-label').textContent = c ? `Expires ${c.expiry}` : 'Get yours free';
+    $('#card-summary-action').textContent = c ? 'Manage' : 'Get card';
+  }
+
+  $('#card-summary-open').addEventListener('click', () => {
+    showTab('card');
+    if (!card) askCardMpin('generate');
+  });
 
   function hideCardDetails() {
     clearTimeout(maskTimer);
@@ -1469,7 +2518,9 @@
     $('#card-mpin-purpose').textContent =
       action === 'generate'
         ? 'Confirm with your MPIN to create a virtual Visa card linked to your wallet.'
-        : 'Confirm with your MPIN to show the full card number and CVV.';
+        : action === 'loan'
+          ? `Confirm with your MPIN to borrow ${money(loanRequest.amount)} over ${loanRequest.termMonths} months.`
+          : 'Confirm with your MPIN to show the full card number and CVV.';
     setFormError(cardMpinForm);
     cardMpinDialog.showModal();
     cardMpinInput.clear();
@@ -1478,14 +2529,20 @@
   $('#card-generate').addEventListener('click', () => askCardMpin('generate'));
   $('#card-reveal').addEventListener('click', () => (maskTimer ? hideCardDetails() : askCardMpin('reveal')));
 
-  $('#card-freeze').addEventListener('click', async () => {
+  $('#card-freeze').addEventListener('change', async (event) => {
     if (!card) return;
+    const toggle = event.currentTarget;
+    const next = toggle.checked ? 'FROZEN' : 'ACTIVE';
+    toggle.disabled = true;
     try {
-      const next = card.status === 'FROZEN' ? 'ACTIVE' : 'FROZEN';
       renderCard(await api(`/api/v1/cards/${card.token}`, { method: 'PATCH', body: { status: next } }));
-      toast(next === 'FROZEN' ? 'Card frozen' : 'Card is active again', 'success');
+      if (next === 'FROZEN') hideCardDetails();
+      toast(next === 'FROZEN' ? 'Card locked' : 'Card unlocked', 'success');
     } catch (err) {
+      toggle.checked = !toggle.checked; // the server didn't change it
       toast(err.message, 'error');
+    } finally {
+      toggle.disabled = false;
     }
   });
 
@@ -1495,7 +2552,18 @@
     setFormError(cardMpinForm);
     if (!/^\d{6}$/.test(mpin)) return setFormError(cardMpinForm, 'Enter all 6 digits of your MPIN.');
     try {
-      if (cardMpinAction === 'generate') {
+      if (cardMpinAction === 'loan') {
+        const loan = await api('/api/v1/loans', {
+          method: 'POST',
+          body: { ...loanRequest, mpin },
+          idempotencyKey: newIdempotencyKey(),
+        });
+        cardMpinDialog.close();
+        loanDialog.close();
+        await Promise.all([loadWallet(), loadLoans()]);
+        toast(`${money(loan.principal)} added to your Available Balance`, 'success');
+        openReceipt(loan.transactionId);
+      } else if (cardMpinAction === 'generate') {
         const created = await api('/api/v1/cards/generate', {
           method: 'POST',
           body: { mpin },
@@ -1787,12 +2855,12 @@
   });
 
   $('#qa-reset').addEventListener('click', async () => {
-    if (!window.confirm('Reset your account? Balance becomes ₱1,000.00, recent history is cleared, limits restart and all QA switches turn off.')) return;
+    if (!window.confirm('Reset your account? Wallet becomes ₱100,000.00, PayPulse Save ₱0, an open loan is written off, recent activity is cleared, limits restart and all QA switches turn off.')) return;
     try {
       await api('/api/qa/reset', { method: 'POST' });
-      qaStatus('Account reset: ₱1,000.00, history cleared');
-      await loadWallet();
-      toast('Account reset to ₱1,000.00', 'success');
+      qaStatus('DB state reset: ₱100,000.00, activity cleared');
+      await Promise.all([loadWallet(), loadLoans()]);
+      toast('Account reset to ₱100,000.00', 'success');
     } catch (err) {
       qaStatus(err.message);
     }
@@ -1812,6 +2880,18 @@
   /** [label, value, isTotal?] rows shared by the modal and the downloaded image. */
   function receiptRows(r) {
     const hasFee = Number(r.fee) > 0;
+    if (r.type === 'BILL_PAYMENT' && r.biller) {
+      return [
+        ['Biller', r.biller.name],
+        ['Account Number', r.biller.accountNumber],
+        ['Account Name', r.biller.accountName],
+        ['Amount Due', money(r.amount)],
+        ['Convenience Fee', `${money(r.fee)} (free)`],
+        ['Total Paid', money(r.total), true],
+        ['Paid from', `${r.sender.name} · ${r.sender.account}`],
+        ...(r.cashback ? [['Cashback Earned', money(r.cashback)]] : []),
+      ];
+    }
     if (r.type === 'DEPOSIT') {
       return [
         ['Amount', money(r.amount)],
@@ -1865,6 +2945,8 @@
         ]),
       );
       $('#receipt-iso').hidden = !(r.iso20022 && r.direction === 'SENT');
+      $('#receipt-cashback').hidden = !r.cashback;
+      $('#receipt-cashback').textContent = r.cashback ? `🎁 Cashback Earned: ${money(r.cashback)}` : '';
       if (!receiptDialog.open) receiptDialog.showModal();
     } catch (err) {
       toast(err.message, 'error');
@@ -1930,11 +3012,11 @@
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, W, H);
 
-    // Purple header
+    // Light green header
     const gradient = ctx.createLinearGradient(0, 0, W, headH);
-    gradient.addColorStop(0, '#5b4cf0');
-    gradient.addColorStop(0.55, '#7a4cf0');
-    gradient.addColorStop(1, '#3fa9c9');
+    gradient.addColorStop(0, '#b9f0d3');
+    gradient.addColorStop(0.5, '#cdf5e0');
+    gradient.addColorStop(1, '#e3fbef');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, W, headH);
 
@@ -1943,7 +3025,7 @@
     ctx.beginPath();
     ctx.arc(W / 2, 46, 24, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#12996e';
+    ctx.strokeStyle = '#12b886';
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -1953,7 +3035,7 @@
     ctx.lineTo(W / 2 + 11, 39);
     ctx.stroke();
 
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#0b5d43';
     ctx.textAlign = 'center';
     ctx.font = font(18, 700);
     ctx.fillText(r.title, W / 2, 98);
@@ -1977,7 +3059,7 @@
       ctx.fillText(label, PAD, y);
       ctx.textAlign = 'right';
       ctx.font = font(isTotal ? 15 : 13, 600);
-      ctx.fillStyle = isTotal || label === 'Reference No.' ? '#4335d8' : '#1b1d2a';
+      ctx.fillStyle = isTotal || label === 'Reference No.' ? '#0b5d43' : '#1b1d2a';
       ctx.fillText(fit(value, W - PAD * 2 - 130), W - PAD, y);
       y += ROW;
     }
@@ -1993,7 +3075,7 @@
     ctx.setLineDash([]);
     ctx.textAlign = 'center';
     ctx.font = font(12, 700);
-    ctx.fillStyle = '#5b4cf0';
+    ctx.fillStyle = '#12b886';
     ctx.fillText('PayPulse', W / 2, y + 16);
     ctx.font = font(11);
     ctx.fillStyle = '#6b7086';

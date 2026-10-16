@@ -18,11 +18,11 @@ async function main() {
 
   line(report.totalBalanceCents === 0, `Sum of all balances is 0 (actual: ${cents(report.totalBalanceCents)})`);
   const expectedUsers =
-    report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents + report.interestCents;
+    report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents + report.interestCents + report.loanNetCents + report.billsNetCents;
   line(
     report.userBalanceCents === expectedUsers,
-    `Customer money (${cents(report.userBalanceCents)}) = top-ups - bank transfers and fees + QA adjustments + interest ` +
-      `(${cents(report.totalDepositsCents)} - ${cents(report.bankOutflowCents)} + ${cents(report.qaAdjustmentCents)} + ${cents(report.interestCents)} = ${cents(expectedUsers)})`,
+    `Customer money (${cents(report.userBalanceCents)}) = top-ups - bank transfers and fees + QA adjustments + interest + loans (net) + bills/cashback (net) ` +
+      `(${cents(report.totalDepositsCents)} - ${cents(report.bankOutflowCents)} + ${cents(report.qaAdjustmentCents)} + ${cents(report.interestCents)} + ${cents(report.loanNetCents)} + ${cents(report.billsNetCents)} = ${cents(expectedUsers)})`,
   );
   line(report.unbalancedTransactions.length === 0, `Unbalanced transactions: ${report.unbalancedTransactions.length}`);
   line(

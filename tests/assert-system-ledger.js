@@ -57,7 +57,11 @@ async function main() {
         COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE -amount_cents END)
                  FILTER (WHERE type = 'QA_ADJUSTMENT' AND NOT is_system), 0)                                   AS qa_net,
         COALESCE(SUM(amount_cents) FILTER (WHERE type = 'INTEREST' AND direction = 'CREDIT' AND NOT is_system), 0)
-                                                                                                               AS interest_paid
+                                                                                                               AS interest_paid,
+        COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE -amount_cents END)
+                 FILTER (WHERE type IN ('LOAN_DISBURSEMENT', 'LOAN_REPAYMENT') AND NOT is_system), 0)        AS loans_net,
+        COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE -amount_cents END)
+                 FILTER (WHERE type IN ('BILL_PAYMENT', 'CASHBACK') AND NOT is_system), 0)                    AS bills_net
       FROM flows`);
     const n = Object.fromEntries(Object.entries(rows[0]).map(([k, v]) => [k, Number(v)]));
 
@@ -69,7 +73,7 @@ async function main() {
       SELECT account_number, balance_cents FROM account_balances
       WHERE NOT is_system AND balance_cents < 0 ORDER BY balance_cents LIMIT 10`);
 
-    const totalInSystem = n.deposits_in - n.bank_payouts + n.qa_net + n.interest_paid;
+    const totalInSystem = n.deposits_in - n.bank_payouts + n.qa_net + n.interest_paid + n.loans_net + n.bills_net;
     const heldInside = n.user_balances + n.fees + n.pesonet_pending;
 
     const checks = [

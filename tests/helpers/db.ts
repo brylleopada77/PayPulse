@@ -26,6 +26,10 @@ export interface IntegrityReport {
   qaAdjustmentCents: number;
   /** Savings interest PayPulse paid into PayPulse Save vaults. */
   interestCents: number;
+  /** Instant Loan money paid into wallets minus repayments taken out of them. */
+  loanNetCents: number;
+  /** Cashback paid into wallets minus bill payments taken out of them. */
+  billsNetCents: number;
   /** Transactions whose debits do not equal their credits. */
   unbalancedTransactions: number[];
   /**
@@ -70,7 +74,13 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
                  FILTER (WHERE t.type = 'QA_ADJUSTMENT' AND NOT a.is_system), 0)
           AS qa_adjustments,
         COALESCE(SUM(le.amount_cents) FILTER (WHERE t.type = 'INTEREST' AND le.direction = 'CREDIT' AND NOT a.is_system), 0)
-          AS interest
+          AS interest,
+        COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents ELSE -le.amount_cents END)
+                 FILTER (WHERE t.type IN ('LOAN_DISBURSEMENT', 'LOAN_REPAYMENT') AND NOT a.is_system), 0)
+          AS loans,
+        COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents ELSE -le.amount_cents END)
+                 FILTER (WHERE t.type IN ('BILL_PAYMENT', 'CASHBACK') AND NOT a.is_system), 0)
+          AS bills
       FROM ledger_entries le
       JOIN transactions t ON t.id = le.transaction_id
       JOIN accounts a ON a.id = le.account_id`);
@@ -99,6 +109,8 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       bankOutflowCents: Number(flows.rows[0].bank_outflow),
       qaAdjustmentCents: Number(flows.rows[0].qa_adjustments),
       interestCents: Number(flows.rows[0].interest),
+      loanNetCents: Number(flows.rows[0].loans),
+      billsNetCents: Number(flows.rows[0].bills),
       unbalancedTransactions: unbalanced.rows.map((r) => r.transaction_id),
       mismatchedAccounts: [],
       negativeAccounts: negative.rows.map((r) => r.account_number),
@@ -109,7 +121,8 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
       ? true
       : report.totalBalanceCents === 0 &&
         report.userBalanceCents ===
-          report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents + report.interestCents;
+          report.totalDepositsCents - report.bankOutflowCents + report.qaAdjustmentCents + report.interestCents +
+            report.loanNetCents + report.billsNetCents;
 
     report.ok = totalsOk && report.unbalancedTransactions.length === 0 && report.negativeAccounts.length === 0;
     return report;

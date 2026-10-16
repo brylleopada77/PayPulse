@@ -40,4 +40,9 @@ router.post('/me/mpin/reset', async (req, res) => {
   res.json(await mpinService.resetMpin(req.user.id, (req.body || {}).password));
 });
 
+// POST /api/accounts/me/mpin/change  { currentMpin, newMpin, confirmMpin } -> { message, mpinExpiresInSeconds }
+router.post('/me/mpin/change', async (req, res) => {
+  res.json(await mpinService.changeMpin(req.user.id, req.body || {}));
+});
+
 module.exports = router;

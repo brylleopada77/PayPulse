@@ -260,10 +260,10 @@ test.describe('End-of-day reconciliation script', () => {
     expect(run.status, run.stderr).not.toBe(2); // 0 = balanced, 1 = exceptions (e.g. race-bug overdrafts)
     const report = JSON.parse(run.stdout);
 
-    expect(report.trialBalance.map((r: { code: string }) => r.code)).toEqual(['1010', '1020', '2010', '2020', '2030', '3900', '4010', '5010']);
+    expect(report.trialBalance.map((r: { code: string }) => r.code)).toEqual(['1010', '1020', '1030', '2010', '2020', '2030', '2040', '3900', '4010', '4020', '5010', '5020']);
     const status = Object.fromEntries(report.checks.map((c: { id: string; status: string }) => [c.id, c.status]));
     // These must reconcile even while other tests run (the script reads one consistent snapshot).
-    for (const id of ['TB-1', 'TB-2', 'LIAB-1', 'LIAB-2', 'EQ-1', 'CASH-1', 'OUT-1', 'PSN-1', 'FEE-1', 'SAV-1', 'SAV-2', 'INT-1', 'MSG-2']) {
+    for (const id of ['TB-1', 'TB-2', 'LIAB-1', 'LIAB-2', 'EQ-1', 'CASH-1', 'OUT-1', 'PSN-1', 'FEE-1', 'SAV-1', 'SAV-2', 'INT-1', 'LOAN-1', 'LOAN-2', 'BILL-1', 'CB-1', 'MSG-2']) {
       expect(status[id], id).toBe('MATCHED');
     }
     expect(report.auditLog).toMatch(/reports[\\/]eod[\\/]eod-\d{4}-\d{2}-\d{2}-.*\.log$/);

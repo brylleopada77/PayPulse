@@ -25,7 +25,7 @@ router.put('/settings', async (req, res) => {
   res.json(await qaService.updateSettings(req.user.id, req.body || {}));
 });
 
-// POST /api/qa/reset -> balance ₱1,000, history hidden, limits restarted, all switches off
+// POST /api/qa/reset -> balance ₱100,000, savings ₱0, open loan written off, history hidden, limits restarted, all switches off
 router.post('/reset', async (req, res) => {
   res.json(await qaService.reset(req.user.id));
 });

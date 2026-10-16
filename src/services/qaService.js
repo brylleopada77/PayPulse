@@ -3,9 +3,10 @@
 const { pool, withTransaction } = require('../db/pool');
 const { recordTransaction, getBalanceCents } = require('./ledgerService');
 const { fromCents } = require('../utils/money');
+const loanService = require('./loanService');
 
 const SLOW_NETWORK_MS = 3000;
-const RESET_BALANCE_CENTS = 100_000; // ₱1,000.00
+const RESET_BALANCE_CENTS = 10_000_000; // ₱100,000.00
 const QA_ACCOUNT = 'SYS-QA-ADJUSTMENT'; // GL 3900 Sandbox Adjustments (non-production)
 
 async function getState(userId) {
@@ -55,8 +56,9 @@ async function consumeFailNext(userId) {
 
 /**
  * Reset the user's own account to a clean test state:
- *   - balance becomes ₱1,000.00 through a QA_ADJUSTMENT journal against GL 3900 (debits =
+ *   - balance becomes ₱100,000.00 through a QA_ADJUSTMENT journal against GL 3900 (debits =
  *     credits); nothing is edited or deleted, so an overdrawn wallet is brought back too
+ *   - PayPulse Save goes back to ₱0 and an open Instant Loan is written off (also against GL 3900)
  *   - recent history is hidden and the daily / anti-spam / velocity limits restart (rows are kept)
  *   - freeze, slow network, forced error, compliance hold, MPIN lock and pending OTPs are cleared
  */
@@ -69,7 +71,9 @@ async function reset(userId) {
     const qa = await client.query('SELECT id FROM accounts WHERE account_number = $1', [QA_ACCOUNT]);
     const qaId = qa.rows[0].id;
 
-    // Wallet back to ₱1,000; PayPulse Save vault (if any) back to ₱0.
+    await loanService.writeOffForQa(client, userId, qaId);
+
+    // Wallet back to ₱100,000; PayPulse Save vault (if any) back to ₱0.
     for (const account of rows) {
       const target = account.user_id === userId ? RESET_BALANCE_CENTS : 0;
       const delta = target - (await getBalanceCents(client, account.id));

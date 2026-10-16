@@ -20,7 +20,7 @@ function heldError(details) {
   return new AppError(403, 'TRANSACTION_HELD_FOR_REVIEW', HELD_MESSAGE, { details });
 }
 
-/** Completed outgoing transfers in the velocity window (after any QA sandbox reset). */
+/** Completed outgoing transfers and bill payments in the velocity window (after any QA sandbox reset). */
 async function recentTransferCount(userId) {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS n
@@ -30,7 +30,7 @@ async function recentTransferCount(userId) {
      JOIN users u ON u.id = a.user_id
      WHERE a.user_id = $1
        AND le.direction = 'DEBIT'
-       AND t.type IN ('TRANSFER', 'BANK_TRANSFER')
+       AND t.type IN ('TRANSFER', 'BANK_TRANSFER', 'BILL_PAYMENT')
        AND t.created_at > now() - make_interval(secs => $2)
        AND t.created_at > COALESCE(u.history_cleared_at, '-infinity')`,
     [userId, VELOCITY_WINDOW_SECONDS],

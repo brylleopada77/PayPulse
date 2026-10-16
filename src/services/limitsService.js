@@ -2,9 +2,13 @@ const { pool } = require('../db/pool');
 const { badRequest, notFound, tooManyRequests } = require('../utils/errors');
 const { fromCents } = require('../utils/money');
 
-// ₱50,000 per account per calendar day (Philippine time). Counts the amounts you SEND with
-// Express Send and Bank Transfer; bank fees and money you receive don't count.
-const DAILY_LIMIT_CENTS = 5_000_000;
+// Daily send limit per calendar day (Philippine time), by KYC level: ₱50,000 for Level 1 (Basic),
+// ₱100,000 for Level 2 (Fully Verified). Counts the amounts you SEND with Express Send, Bank
+// Transfer and Pay Bills; bank fees and money you receive don't count.
+const DAILY_LIMIT_CENTS = 5_000_000; // Level 1
+const DAILY_LIMIT_BY_KYC = { 1: 5_000_000, 2: 10_000_000 };
+const dailyLimitFor = (kycLevel) => DAILY_LIMIT_BY_KYC[kycLevel] ?? DAILY_LIMIT_CENTS;
+const pesos = (cents) => `₱${(cents / 100).toLocaleString('en-PH')}`;
 // Simulated fraud prevention: at most 3 transfers in any 10 seconds.
 const MAX_TRANSFERS_PER_WINDOW = 3;
 const WINDOW_SECONDS = 10;
@@ -31,7 +35,7 @@ async function getUsage(accountId) {
      LEFT JOIN bank_transfers bt ON bt.transaction_id = t.id
      WHERE le.account_id = $1
        AND le.direction = 'DEBIT'
-       AND t.type IN ('TRANSFER', 'BANK_TRANSFER')
+       AND t.type IN ('TRANSFER', 'BANK_TRANSFER', 'BILL_PAYMENT')
        -- a QA sandbox reset restarts the limits
        AND t.created_at > COALESCE((SELECT u.history_cleared_at FROM users u
                                     JOIN accounts a ON a.user_id = u.id WHERE a.id = $1), '-infinity')
@@ -49,9 +53,17 @@ async function getUsage(accountId) {
 }
 
 async function accountIdFor(userId) {
-  const { rows } = await pool.query('SELECT id FROM accounts WHERE user_id = $1', [userId]);
+  return (await accountFor(userId)).id;
+}
+
+/** The wallet id and the owner's KYC level (which sets the daily limit). */
+async function accountFor(userId) {
+  const { rows } = await pool.query(
+    'SELECT a.id, u.kyc_level FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.user_id = $1',
+    [userId],
+  );
   if (!rows[0]) throw notFound('ACCOUNT_NOT_FOUND', 'Account not found');
-  return rows[0].id;
+  return rows[0];
 }
 
 /**
@@ -60,7 +72,9 @@ async function accountIdFor(userId) {
  *   400 DAILY_LIMIT_EXCEEDED - today's sent total + this amount would be over ₱50,000
  */
 async function assertWithinLimits(userId, amountCents) {
-  const usage = await getUsage(await accountIdFor(userId));
+  const account = await accountFor(userId);
+  const limitCents = dailyLimitFor(account.kyc_level);
+  const usage = await getUsage(account.id);
 
   if (usage.recentCount >= MAX_TRANSFERS_PER_WINDOW) {
     const freeAt = new Date(usage.oldestRecentAt).getTime() + WINDOW_SECONDS * 1000;
@@ -74,10 +88,10 @@ async function assertWithinLimits(userId, amountCents) {
       .withHeaders({ 'Retry-After': String(retryAfterSeconds) });
   }
 
-  if (usage.sentTodayCents + amountCents > DAILY_LIMIT_CENTS) {
-    const remainingCents = Math.max(0, DAILY_LIMIT_CENTS - usage.sentTodayCents);
-    throw badRequest('DAILY_LIMIT_EXCEEDED', 'Daily transaction limit of ₱50,000 exceeded.').withDetails({
-      dailyLimit: fromCents(DAILY_LIMIT_CENTS),
+  if (usage.sentTodayCents + amountCents > limitCents) {
+    const remainingCents = Math.max(0, limitCents - usage.sentTodayCents);
+    throw badRequest('DAILY_LIMIT_EXCEEDED', `Daily transaction limit of ${pesos(limitCents)} exceeded.`).withDetails({
+      dailyLimit: fromCents(limitCents),
       sentToday: fromCents(usage.sentTodayCents),
       remainingToday: fromCents(remainingCents),
       requested: fromCents(amountCents),
@@ -88,12 +102,15 @@ async function assertWithinLimits(userId, amountCents) {
 
 /** For GET /api/transfers/limits: the rules and how much of today's limit is left. */
 async function getLimits(userId) {
-  const usage = await getUsage(await accountIdFor(userId));
+  const account = await accountFor(userId);
+  const limitCents = dailyLimitFor(account.kyc_level);
+  const usage = await getUsage(account.id);
   return {
     daily: {
-      limit: fromCents(DAILY_LIMIT_CENTS),
+      kycLevel: account.kyc_level,
+      limit: fromCents(limitCents),
       sentToday: fromCents(usage.sentTodayCents),
-      remaining: fromCents(Math.max(0, DAILY_LIMIT_CENTS - usage.sentTodayCents)),
+      remaining: fromCents(Math.max(0, limitCents - usage.sentTodayCents)),
       resetsAt: usage.resetsAt,
     },
     rateLimit: {
@@ -108,6 +125,8 @@ module.exports = {
   assertWithinLimits,
   getLimits,
   DAILY_LIMIT_CENTS,
+  DAILY_LIMIT_BY_KYC,
+  dailyLimitFor,
   MAX_TRANSFERS_PER_WINDOW,
   WINDOW_SECONDS,
 };

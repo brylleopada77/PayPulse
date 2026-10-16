@@ -116,7 +116,7 @@ test.describe('QA sandbox: switches', () => {
 });
 
 test.describe('QA sandbox: reset account state', () => {
-  test('reset sets the balance to ₱1,000, clears history and turns all switches off', async ({ request }) => {
+  test('reset sets the balance to ₱100,000, clears history and turns all switches off', async ({ request }) => {
     const alice = await createFundedAdmin(request, 300);
     const bob = await createUser(request);
     await transfer(request, alice, { toAccountNumber: bob.accountNumber, amount: 25 });
@@ -125,8 +125,8 @@ test.describe('QA sandbox: reset account state', () => {
     const reset = await qa.reset(request, alice);
 
     expect(reset.status()).toBe(200);
-    expect(await reset.json()).toMatchObject({ balance: '1000.00', frozen: false, failNextTransaction: false, slowNetwork: false });
-    expect(await getBalanceCents(request, alice)).toBe(100000);
+    expect(await reset.json()).toMatchObject({ balance: '100000.00', frozen: false, failNextTransaction: false, slowNetwork: false });
+    expect(await getBalanceCents(request, alice)).toBe(10_000_000);
     const history = await (await request.get('/api/accounts/me/transactions', { headers: authHeader(alice.token) })).json();
     expect(history.transactions).toEqual([]);
     // Bob keeps his history: rows are hidden for Alice, never deleted.
@@ -135,9 +135,9 @@ test.describe('QA sandbox: reset account state', () => {
   });
 
   test('reset works down as well as up, and keeps the ledger balanced', async ({ request }) => {
-    const alice = await createFundedAdmin(request, 2500);
+    const alice = await createFundedAdmin(request, 150_000); // more than the reset amount: goes down
     expect((await qa.reset(request, alice)).status()).toBe(200);
-    expect(await getBalanceCents(request, alice)).toBe(100000);
+    expect(await getBalanceCents(request, alice)).toBe(10_000_000);
 
     const report = await checkLedgerIntegrity([alice.accountNumber, 'SYS-QA-ADJUSTMENT']);
     expect(report.unbalancedTransactions).toEqual([]);
@@ -155,7 +155,7 @@ test.describe('QA sandbox: reset account state', () => {
     expect((await transfer(request, alice, { toAccountNumber: bob.accountNumber, amount: 1 })).status()).toBe(201);
   });
 
-  test('after a reset, transfers work normally from ₱1,000', async ({ request }) => {
+  test('after a reset, transfers work normally from ₱100,000', async ({ request }) => {
     const alice = await createAdmin(request);
     const bob = await createUser(request);
     await qa.reset(request, alice);
@@ -163,6 +163,6 @@ test.describe('QA sandbox: reset account state', () => {
     const response = await transfer(request, alice, { toAccountNumber: bob.accountNumber, amount: 400 });
 
     expect(response.status()).toBe(201);
-    expect((await response.json()).balanceAfter).toBe('600.00');
+    expect((await response.json()).balanceAfter).toBe('99600.00');
   });
 });

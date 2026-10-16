@@ -13,6 +13,10 @@ const qrRoutes = require('./routes/qr');
 const qaRoutes = require('./routes/qa');
 const savingsV1Routes = require('./routes/v1/savings');
 const cardsV1Routes = require('./routes/v1/cards');
+const loansV1Routes = require('./routes/v1/loans');
+const billsV1Routes = require('./routes/v1/bills');
+const profileV1Routes = require('./routes/v1/profile');
+const notificationsV1Routes = require('./routes/v1/notifications');
 const { chaos } = require('./middleware/chaos');
 
 const app = express();
@@ -60,6 +64,10 @@ app.get('/api/config', (req, res) => {
 app.use('/api/qr', qrRoutes);
 app.use('/api/v1/savings', savingsV1Routes);
 app.use('/api/v1/cards', cardsV1Routes);
+app.use('/api/v1/loans', loansV1Routes);
+app.use('/api/v1/bills', billsV1Routes);
+app.use('/api/v1/profile', profileV1Routes);
+app.use('/api/v1/notifications', notificationsV1Routes);
 // QA Sandbox: dev/CI only. Without QA_SANDBOX=true these routes don't exist (404).
 if (config.qaSandbox) {
   app.use('/api/qa', qaRoutes);

@@ -158,10 +158,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS history_cleared_at TIMESTAMPTZ;
 -- QA_ADJUSTMENT: sandbox resets set a balance through the ledger, so debits still equal credits.
 -- PESONET_SETTLEMENT: a PESONet batch leaving the clearing account at a cut-off.
 -- SAVINGS_TRANSFER: wallet <-> PayPulse Save vault.  INTEREST: daily savings interest posting.
+-- LOAN_DISBURSEMENT / LOAN_REPAYMENT: Instant Loan money out to / back from the wallet.
+-- BILL_PAYMENT: Pay Bills (wallet -> biller settlement).  CASHBACK: bills cashback reward.
 ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
 ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
   CHECK (type IN ('TRANSFER', 'DEPOSIT', 'BANK_TRANSFER', 'QA_ADJUSTMENT', 'PESONET_SETTLEMENT',
-                  'SAVINGS_TRANSFER', 'INTEREST'));
+                  'SAVINGS_TRANSFER', 'INTEREST', 'LOAN_DISBURSEMENT', 'LOAN_REPAYMENT',
+                  'BILL_PAYMENT', 'CASHBACK'));
 
 INSERT INTO accounts (account_number, is_system)
 VALUES ('SYS-QA-ADJUSTMENT', true)
@@ -212,6 +215,10 @@ UPDATE accounts SET gl_code = CASE account_number
     WHEN 'SYS-QA-ADJUSTMENT'    THEN '3900'
     WHEN 'SYS-FEE-INCOME'       THEN '4010'
     WHEN 'SYS-INTEREST-EXPENSE' THEN '5010'
+    WHEN 'SYS-LOANS-RECEIVABLE' THEN '1030'
+    WHEN 'SYS-LOAN-INTEREST'    THEN '4020'
+    WHEN 'SYS-BILLER-SETTLEMENT' THEN '2040'
+    WHEN 'SYS-CASHBACK-EXPENSE' THEN '5020'
     ELSE '2010' END
   WHERE gl_code IS NULL OR is_system;
 ALTER TABLE accounts ALTER COLUMN gl_code SET NOT NULL;
@@ -484,3 +491,141 @@ ALTER TABLE compliance_alerts ADD CONSTRAINT compliance_alerts_rule_check
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'CUSTOMER';
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('CUSTOMER', 'ADMIN'));
+
+-- =====================================================================================
+-- Instant Loan: a ₱50,000 credit line per customer
+-- =====================================================================================
+
+INSERT INTO gl_accounts (code, name, category, normal_balance, description) VALUES
+  ('1030', 'Loans Receivable - Instant Loan', 'ASSET', 'DEBIT',
+   'Loan principal customers still owe PayPulse'),
+  ('4020', 'Interest Revenue - Instant Loan', 'REVENUE', 'CREDIT',
+   'Interest collected on Instant Loan repayments')
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name, category = EXCLUDED.category,
+  normal_balance = EXCLUDED.normal_balance, description = EXCLUDED.description;
+
+INSERT INTO accounts (account_number, is_system, gl_code)
+VALUES ('SYS-LOANS-RECEIVABLE', true, '1030'), ('SYS-LOAN-INTEREST', true, '4020')
+ON CONFLICT (account_number) DO NOTHING;
+
+-- One row per loan. Interest is a flat add-on: principal x monthly rate x months, fixed at
+-- disbursement. *_outstanding_cents go down with every repayment (interest first, then principal).
+CREATE TABLE IF NOT EXISTS loans (
+  id                            SERIAL PRIMARY KEY,
+  user_id                       INTEGER     NOT NULL REFERENCES users (id),
+  principal_cents               BIGINT      NOT NULL CHECK (principal_cents > 0),
+  term_months                   INTEGER     NOT NULL CHECK (term_months IN (3, 6, 12)),
+  monthly_rate_bps              INTEGER     NOT NULL,
+  interest_cents                BIGINT      NOT NULL CHECK (interest_cents >= 0),
+  installment_cents             BIGINT      NOT NULL CHECK (installment_cents > 0),
+  principal_outstanding_cents   BIGINT      NOT NULL CHECK (principal_outstanding_cents >= 0),
+  interest_outstanding_cents    BIGINT      NOT NULL CHECK (interest_outstanding_cents >= 0),
+  status                        TEXT        NOT NULL DEFAULT 'ACTIVE'
+                                            CHECK (status IN ('ACTIVE', 'PAID', 'WRITTEN_OFF')),
+  disbursement_transaction_id   INTEGER     NOT NULL REFERENCES transactions (id),
+  created_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  closed_at                     TIMESTAMPTZ
+);
+-- At most one open loan per customer, enforced by the database too (not only by the service).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_loans_one_active ON loans (user_id) WHERE status = 'ACTIVE';
+
+-- Every repayment, and every QA sandbox write-off, with its principal / interest split.
+CREATE TABLE IF NOT EXISTS loan_payments (
+  id               SERIAL PRIMARY KEY,
+  loan_id          INTEGER     NOT NULL REFERENCES loans (id),
+  kind             TEXT        NOT NULL CHECK (kind IN ('REPAYMENT', 'WRITE_OFF')),
+  principal_cents  BIGINT      NOT NULL CHECK (principal_cents >= 0),
+  interest_cents   BIGINT      NOT NULL CHECK (interest_cents >= 0),
+  transaction_id   INTEGER     NOT NULL REFERENCES transactions (id),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_loan_payments_loan ON loan_payments (loan_id);
+
+-- =====================================================================================
+-- Pay Bills with the ₱5.00 bills cashback
+-- =====================================================================================
+
+INSERT INTO gl_accounts (code, name, category, normal_balance, description) VALUES
+  ('2040', 'Biller Settlement - Payable to Billers', 'LIABILITY', 'CREDIT',
+   'Bill payments collected from customers, owed to the billers (Meralco, PLDT, SSS, ...)'),
+  ('5020', 'Marketing Expense - Cashback', 'EXPENSE', 'DEBIT',
+   'Cashback rewards PayPulse pays customers on bill payments')
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name, category = EXCLUDED.category,
+  normal_balance = EXCLUDED.normal_balance, description = EXCLUDED.description;
+
+INSERT INTO accounts (account_number, is_system, gl_code)
+VALUES ('SYS-BILLER-SETTLEMENT', true, '2040'), ('SYS-CASHBACK-EXPENSE', true, '5020')
+ON CONFLICT (account_number) DO NOTHING;
+
+-- One row per bill payment. account_ref is what the receipt shows: masked for card billers
+-- (only the last 4 digits of a credit card number are ever stored).
+CREATE TABLE IF NOT EXISTS bill_payments (
+  id                        SERIAL PRIMARY KEY,
+  user_id                   INTEGER     NOT NULL REFERENCES users (id),
+  biller_code               TEXT        NOT NULL,
+  account_ref               TEXT        NOT NULL,
+  account_name              TEXT        NOT NULL,
+  amount_cents              BIGINT      NOT NULL CHECK (amount_cents > 0),
+  fee_cents                 BIGINT      NOT NULL DEFAULT 0,
+  cashback_cents            BIGINT      NOT NULL DEFAULT 0 CHECK (cashback_cents >= 0),
+  transaction_id            INTEGER     NOT NULL UNIQUE REFERENCES transactions (id),
+  cashback_transaction_id   INTEGER     UNIQUE REFERENCES transactions (id),
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_bill_payments_user ON bill_payments (user_id, created_at);
+
+-- =====================================================================================
+-- My Profile: KYC level, security preferences, linked accounts, support tickets
+-- =====================================================================================
+
+-- KYC tier: 1 = Basic (email + mobile), 2 = Fully Verified (government ID + selfie, mock check).
+-- The tier sets the daily send limit (limitsService). Only the last 4 characters of the ID are kept.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_level INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_kyc_level_check;
+ALTER TABLE users ADD CONSTRAINT users_kyc_level_check CHECK (kyc_level IN (1, 2));
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_id_type TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_id_last4 TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_verified_at TIMESTAMPTZ;
+
+-- Security preferences. sms_2fa_all: ask for an SMS code on EVERY Send / Bank Transfer (the code
+-- above ₱1,000 is always required). biometric_login: preference only (simulated on the web).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sms_2fa_all BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS biometric_login BOOLEAN NOT NULL DEFAULT false;
+
+-- Linked bank accounts and cards (mock: nothing is debited from them). Only the last 4 digits are
+-- stored; card CVVs are never asked for.
+CREATE TABLE IF NOT EXISTS linked_accounts (
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER     NOT NULL REFERENCES users (id),
+  kind           TEXT        NOT NULL CHECK (kind IN ('BANK', 'CARD')),
+  institution    TEXT        NOT NULL,
+  last4          TEXT        NOT NULL CHECK (last4 ~ '^[0-9]{4}$'),
+  holder_name    TEXT        NOT NULL,
+  expiry         TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, kind, institution, last4)
+);
+
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER     NOT NULL REFERENCES users (id),
+  category    TEXT        NOT NULL CHECK (category IN ('TRANSFER', 'BILLS', 'LOAN', 'CARD', 'ACCOUNT', 'OTHER')),
+  subject     TEXT        NOT NULL,
+  message     TEXT        NOT NULL,
+  status      TEXT        NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'IN_PROGRESS', 'RESOLVED')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets (user_id, created_at DESC);
+
+-- =====================================================================================
+-- Notifications: which announcements / activity items each customer has read
+-- =====================================================================================
+
+CREATE TABLE IF NOT EXISTS notification_reads (
+  user_id          INTEGER     NOT NULL REFERENCES users (id),
+  notification_id  TEXT        NOT NULL,
+  read_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, notification_id)
+);

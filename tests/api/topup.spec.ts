@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { authHeader, createAdmin, createFundedAdmin, createUser, getBalanceCents, transfer, type TestUser } from '../helpers/api';
+import { authHeader, createAdmin, createFundedAdmin, createUser, fundAccount, getBalanceCents, transfer, type TestUser } from '../helpers/api';
 
 // "Add money" goes through the MOCK payment provider (no real charge), so it must not be a free
 // money printer: only ADMIN accounts can use it (customers get 403 ADMIN_ONLY), with operator
-// limits of ₱100,000/day and ₱1,000,000 held (wallet + savings), AML screening, and only on
+// limits of ₱1,000,000/day and ₱10,000,000 held (wallet + savings), AML screening, and only on
 // servers started with MOCK_PAYMENTS=true.
 
 const topUp = (request: APIRequestContext, user: TestUser, amount: unknown, outcome = 'approve') =>
@@ -65,21 +65,21 @@ test.describe('Add money (mock checkout) limits for admins', () => {
     expect(body.features).toMatchObject({ mockPayments: true });
   });
 
-  test('₱100,000 per day: up to the limit works, one centavo more is refused', async ({ request }) => {
+  test('₱1,000,000 per day: up to the limit works, one centavo more is refused', async ({ request }) => {
     const alice = await createAdmin(request);
-    expect((await topUp(request, alice, 60_000)).status()).toBe(201);
-    expect((await topUp(request, alice, 40_000)).status()).toBe(201);
+    expect((await topUp(request, alice, 600_000)).status()).toBe(201);
+    expect((await topUp(request, alice, 400_000)).status()).toBe(201);
 
     const over = await topUp(request, alice, 0.01);
     expect(over.status()).toBe(400);
     expect(await over.json()).toEqual({
       error: {
         code: 'TOPUP_DAILY_LIMIT_EXCEEDED',
-        message: 'Daily top-up limit of ₱100,000.00 exceeded.',
-        details: { dailyLimit: '100000.00', addedToday: '100000.00', remainingToday: '0.00', requested: '0.01' },
+        message: 'Daily top-up limit of ₱1,000,000.00 exceeded.',
+        details: { dailyLimit: '1000000.00', addedToday: '1000000.00', remainingToday: '0.00', requested: '0.01' },
       },
     });
-    expect(await getBalanceCents(request, alice)).toBe(10_000_000);
+    expect(await getBalanceCents(request, alice)).toBe(100_000_000);
   });
 
   test('declined payments do not use up the daily limit', async ({ request }) => {
@@ -88,29 +88,31 @@ test.describe('Add money (mock checkout) limits for admins', () => {
     expect((await topUp(request, alice, 100_000)).status()).toBe(201);
   });
 
-  test('₱1,000,000 maximum held, counting PayPulse Save too', async ({ request }) => {
-    const alice = await createFundedAdmin(request, 960_000); // e.g. via a real (signed) provider payment
+  test('₱10,000,000 maximum held, counting PayPulse Save too', async ({ request }) => {
+    // ₱9,960,000 via real (signed) provider payments, at most ₱1,000,000 each
+    const alice = await createFundedAdmin(request, 960_000);
+    for (let i = 0; i < 9; i++) await fundAccount(request, alice.accountNumber, 1_000_000);
     await request.post('/api/v1/savings/deposit', { data: { amount: 900_000 }, headers: authHeader(alice.token) });
 
-    expect((await topUp(request, alice, 40_000)).status()).toBe(201); // holds exactly ₱1,000,000
+    expect((await topUp(request, alice, 40_000)).status()).toBe(201); // holds exactly ₱10,000,000
     const over = await topUp(request, alice, 0.01);
 
     expect(over.status()).toBe(400);
     const { error } = await over.json();
     expect(error).toMatchObject({
       code: 'WALLET_LIMIT_EXCEEDED',
-      message: 'Wallet limit of ₱1,000,000.00 exceeded.',
-      details: { walletLimit: '1000000.00', currentHoldings: '1000000.00', roomLeft: '0.00' },
+      message: 'Wallet limit of ₱10,000,000.00 exceeded.',
+      details: { walletLimit: '10000000.00', currentHoldings: '10000000.00', roomLeft: '0.00' },
     });
   });
 
   test('parallel top-ups cannot get past the limit (per-user lock)', async ({ request }) => {
     const alice = await createAdmin(request);
-    const results = await Promise.all(Array.from({ length: 10 }, () => topUp(request, alice, 20_000)));
+    const results = await Promise.all(Array.from({ length: 10 }, () => topUp(request, alice, 200_000)));
     const credited = results.filter((r) => r.status() === 201).length;
 
     expect(credited).toBe(5);
-    expect(await getBalanceCents(request, alice)).toBe(10_000_000);
+    expect(await getBalanceCents(request, alice)).toBe(100_000_000);
   });
 
   test('more than 5 top-ups in a minute: held for compliance review, and sends are held too', async ({ request }) => {
@@ -133,12 +135,12 @@ test.describe('Add money (mock checkout) limits for admins', () => {
     const alice = await createAdmin(request);
     await topUp(request, alice, 1200);
     expect(await (await request.get('/api/payments/limits', { headers: authHeader(alice.token) })).json()).toEqual({
-      dailyLimit: '100000.00',
+      dailyLimit: '1000000.00',
       addedToday: '1200.00',
-      remainingToday: '98800.00',
-      walletLimit: '1000000.00',
+      remainingToday: '998800.00',
+      walletLimit: '10000000.00',
       currentHoldings: '1200.00',
-      roomLeft: '998800.00',
+      roomLeft: '9998800.00',
     });
   });
 });

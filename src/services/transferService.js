@@ -93,7 +93,9 @@ async function loadSender(db, userId, totalCents, insufficientMessage) {
 async function runSecured(userId, { destinationKey, amountCents, mpin, otpChallengeId, otp }, { preflight, execute }) {
   await mpinService.verifyMpin(userId, mpin);
 
-  const needsOtp = amountCents > OTP_THRESHOLD_CENTS;
+  // Above ₱1,000 always; for every amount when the user turned on "SMS 2FA on every transfer".
+  const { rows: [prefs] } = await pool.query('SELECT sms_2fa_all FROM users WHERE id = $1', [userId]);
+  const needsOtp = amountCents > OTP_THRESHOLD_CENTS || prefs?.sms_2fa_all === true;
   if (needsOtp && !otpChallengeId) {
     await preflight(pool); // fail fast (unknown receiver, insufficient funds, ...) before sending a code
     const challenge = await otpService.issue(userId, { toAccountNumber: destinationKey, amountCents });

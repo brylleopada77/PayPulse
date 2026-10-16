@@ -112,4 +112,35 @@ async function resetMpin(userId, password) {
   return { mpin, mpinExpiresInSeconds: expiresInSeconds };
 }
 
-module.exports = { verifyMpin, resetMpin, newMpin, MPIN_TTL_SECONDS };
+/** Easy-to-guess PINs: one digit repeated (111111) or a straight run (123456, 987654). */
+function isWeakMpin(pin) {
+  if (/^(\d)\1{5}$/.test(pin)) return true;
+  const steps = [...pin].slice(1).map((d, i) => Number(d) - Number(pin[i]));
+  return steps.every((s) => s === 1) || steps.every((s) => s === -1);
+}
+
+/**
+ * Change MPIN: the current MPIN (same checks as a transfer: wrong / expired / locked), then a new
+ * user-chosen 6-digit MPIN typed twice. The new MPIN follows the same 5-minute lifetime rule.
+ */
+async function changeMpin(userId, { currentMpin, newMpin: next, confirmMpin } = {}) {
+  await verifyMpin(userId, currentMpin);
+  if (typeof next !== 'string' || !MPIN_PATTERN.test(next)) {
+    throw badRequest('INVALID_NEW_MPIN', 'Your new MPIN must be exactly 6 digits');
+  }
+  if (next !== confirmMpin) throw badRequest('MPIN_MISMATCH', 'The new MPINs do not match');
+  if (next === currentMpin) throw badRequest('MPIN_SAME_AS_OLD', 'Choose an MPIN different from your current one');
+  if (isWeakMpin(next)) {
+    throw badRequest('WEAK_MPIN', 'This MPIN is too easy to guess. Avoid repeated digits (111111) and runs (123456).');
+  }
+  await pool.query(
+    `UPDATE users
+     SET mpin_hash = $1, mpin_failed_attempts = 0, mpin_locked_until = NULL,
+         mpin_expires_at = now() + make_interval(secs => $3)
+     WHERE id = $2`,
+    [await bcrypt.hash(next, 10), userId, MPIN_TTL_SECONDS],
+  );
+  return { message: 'Your MPIN has been changed', mpinExpiresInSeconds: MPIN_TTL_SECONDS };
+}
+
+module.exports = { verifyMpin, resetMpin, changeMpin, isWeakMpin, newMpin, MPIN_TTL_SECONDS };

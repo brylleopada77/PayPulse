@@ -15,6 +15,10 @@
  *   8. Fee revenue               GL 4010 = fees on bank transfers
  *      Savings deposits          GL 2030 = sum of PayPulse Save vaults (all mapped to 2030)
  *      Interest expense          GL 5010 = interest posted by the daily interest job
+ *      Loans receivable          GL 1030 = Instant Loan principal not yet repaid (loan sub-ledger)
+ *      Loan interest revenue     GL 4020 = interest collected on loan repayments
+ *      Biller settlement         GL 2040 = bill payments collected for billers
+ *      Cashback expense          GL 5020 = cashback credited on bill payments
  *   9. Payment messages          every bank transfer has an ISO 20022 pacs.008 with the same status
  *  10. Overdrafts                no customer wallet below zero
  *
@@ -86,6 +90,20 @@ async function reconcile(client, businessDate) {
     SELECT COALESCE(SUM(i.posted_cents), 0) AS v FROM savings_interest_accruals i
     LEFT JOIN transactions t ON t.id = i.transaction_id
     WHERE i.posted_cents > 0 AND t.created_at <= $1`);
+  const loanPrincipalOpen = await one(`
+    SELECT (SELECT COALESCE(SUM(l.principal_cents), 0) FROM loans l
+            JOIN transactions t ON t.id = l.disbursement_transaction_id WHERE t.created_at <= $1)
+         - (SELECT COALESCE(SUM(p.principal_cents), 0) FROM loan_payments p
+            JOIN transactions t ON t.id = p.transaction_id WHERE t.created_at <= $1) AS v`);
+  const loanInterestCollected = await one(`
+    SELECT COALESCE(SUM(p.interest_cents), 0) AS v FROM loan_payments p
+    JOIN transactions t ON t.id = p.transaction_id WHERE p.kind = 'REPAYMENT' AND t.created_at <= $1`);
+  const billsCollected = await one(`
+    SELECT COALESCE(SUM(bp.amount_cents), 0) AS v FROM bill_payments bp
+    JOIN transactions t ON t.id = bp.transaction_id WHERE t.created_at <= $1`);
+  const cashbackPaid = await one(`
+    SELECT COALESCE(SUM(bp.cashback_cents), 0) AS v FROM bill_payments bp
+    JOIN transactions t ON t.id = bp.cashback_transaction_id WHERE t.created_at <= $1`);
   const unmappedWallets = await one(`
     SELECT COUNT(*) AS v FROM accounts WHERE user_id IS NOT NULL AND gl_code <> '2010' AND created_at <= $1`);
   const unbalancedJournals = await one(`
@@ -155,6 +173,10 @@ async function reconcile(client, businessDate) {
     check('SAV-1', 'Savings deposits: GL 2030 = sum of PayPulse Save vaults', savingsSubledger, gl['2030'].balance),
     check('SAV-2', 'Savings vaults not mapped to GL 2030', 0, unmappedVaults, { money: false }),
     check('INT-1', 'Interest expense: GL 5010 = interest posted by the daily job', interestPosted, gl['5010'].balance),
+    check('LOAN-1', 'Loans receivable: GL 1030 = unpaid Instant Loan principal', loanPrincipalOpen, gl['1030'].balance),
+    check('LOAN-2', 'Loan interest revenue: GL 4020 = interest collected on repayments', loanInterestCollected, gl['4020'].balance),
+    check('BILL-1', 'Biller settlement: GL 2040 = bill payments collected', billsCollected, gl['2040'].balance),
+    check('CB-1', 'Cashback expense: GL 5020 = cashback paid on bill payments', cashbackPaid, gl['5020'].balance),
     check('MSG-1', 'Bank transfers without an ISO 20022 message (since the switch went live)', 0, missingMessages, { money: false }),
     check('MSG-2', 'Bank transfer vs pacs.008 status mismatches', 0, statusMismatches, { money: false }),
     check('OD-1', 'Overdrawn customer wallets (balance < 0)', 0, overdrawn.length, {
@@ -177,6 +199,10 @@ async function reconcile(client, businessDate) {
       customerWalletsSubledger: peso(walletSubledger),
       pesonetPending: peso(gl['2020'].balance),
       feeRevenue: peso(gl['4010'].balance),
+      loansReceivable: peso(gl['1030'].balance),
+      loanInterestRevenue: peso(gl['4020'].balance),
+      billerSettlement: peso(gl['2040'].balance),
+      cashbackExpense: peso(gl['5020'].balance),
       cashAtBank: peso(gl['1010'].balance),
       settledOutbound: peso(-gl['1020'].balance),
     },

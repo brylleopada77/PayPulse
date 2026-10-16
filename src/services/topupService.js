@@ -4,8 +4,8 @@
 //
 // Nothing is charged here, so even for admins this channel must never be an unlimited money
 // printer. Before any money is credited, every top-up passes these checks:
-//   400 TOPUP_DAILY_LIMIT_EXCEEDED  more than ₱100,000 added today (Asia/Manila)
-//   400 WALLET_LIMIT_EXCEEDED       wallet + PayPulse Save would hold more than ₱1,000,000
+//   400 TOPUP_DAILY_LIMIT_EXCEEDED  more than ₱1,000,000 added today (Asia/Manila)
+//   400 WALLET_LIMIT_EXCEEDED       wallet + PayPulse Save would hold more than ₱10,000,000
 //   403 TRANSACTION_HELD_FOR_REVIEW account under compliance review, or a 6th top-up within a
 //                                   minute (opens a TOPUP_VELOCITY alert)
 // The checks and the credit run under a per-user advisory lock, so parallel requests can't slip
@@ -19,8 +19,8 @@ const { AppError, badRequest } = require('../utils/errors');
 const { toCents, fromCents } = require('../utils/money');
 
 // Operator (admin) limits for funding a demo.
-const DAILY_TOPUP_LIMIT_CENTS = 10_000_000; // ₱100,000 per day
-const MAX_HOLDINGS_CENTS = 100_000_000; // ₱1,000,000 wallet + savings
+const DAILY_TOPUP_LIMIT_CENTS = 100_000_000; // ₱1,000,000 per day
+const MAX_HOLDINGS_CENTS = 1_000_000_000; // ₱10,000,000 wallet + savings (room for the daily ₱1,000,000)
 const TOPUP_VELOCITY_MAX = 5; // per minute
 const TIME_ZONE = 'Asia/Manila';
 const OUTCOMES = { approve: 'SUCCESS', decline: 'FAILED' };
@@ -31,7 +31,7 @@ const peso = (cents) => `₱${(cents / 100).toLocaleString('en-PH', { minimumFra
  * Today's mock top-ups, mock top-ups in the last minute, and what the customer holds now.
  * Only the MOCK channel counts towards the daily/velocity limits: money from a real provider
  * (signed webhook) was actually paid, and providers apply their own limits before charging.
- * The ₱50,000 holding limit counts everything the customer holds.
+ * The holding limit counts everything the customer holds (wallet + PayPulse Save).
  */
 async function getUsage(db, userId) {
   const { rows } = await db.query(

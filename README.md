@@ -207,14 +207,15 @@ with the recipient and amount filled in.
 Start the server with `QA_SANDBOX=true` (set in `.env`, Docker Compose and CI; **never in
 production**; Render doesn't set it). Then a **🧪 QA** button appears in the web app **for admin
 accounts**, and these endpoints exist (otherwise they return 404; customers get `403 ADMIN_ONLY`).
-Every action affects **only the caller's own account**.
+Every action affects **only the caller's own account**. The panel floats at the bottom right; the
+three main controls are at the top, everything else is under *More tools*.
 
 | Control | API | Effect |
 |---------|-----|--------|
-| Slow network | `PUT /api/qa/settings { slowNetwork }` | Every authenticated API call waits 3 s (not the QA calls themselves) |
-| Fail next transaction | `PUT /api/qa/settings { failNextTransaction }` | The next transfer or top-up returns `500 INTERNAL_ERROR` (`details.simulated: true`), no money moves, the switch turns itself off |
-| Freeze account | `PUT /api/qa/settings { frozen }` | Sending money returns `423 ACCOUNT_FROZEN`; receiving still works |
-| Reset account state | `POST /api/qa/reset` | Balance becomes ₱1,000.00 via a `QA_ADJUSTMENT` ledger transaction, history is hidden from now on (rows are kept, so other users' history and the ledger stay intact), limits restart, all switches off |
+| Reset DB State | `POST /api/qa/reset` | Wallet becomes ₱100,000.00 and PayPulse Save ₱0 via `QA_ADJUSTMENT` ledger transactions; an open Instant Loan is written off (its unpaid principal leaves GL 1030 against GL 3900); history is hidden from now on (rows are kept, so other users' history and the ledger stay intact), limits restart, all switches off |
+| Simulate 3s Network Latency | `PUT /api/qa/settings { slowNetwork }` | Every authenticated API call waits 3 s, Express Send included (not the QA calls themselves) |
+| Trigger HTTP 500 Error | `PUT /api/qa/settings { failNextTransaction }` | The next transfer, top-up, savings move or loan application/repayment returns `500 INTERNAL_ERROR` (`details.simulated: true`), no money moves, the switch turns itself off |
+| Freeze account | `PUT /api/qa/settings { frozen }` | Sending money and new loans return `423 ACCOUNT_FROZEN`; receiving still works |
 | State | `GET /api/qa/state` | Current switches and balance |
 
 ### Transfer limits (negative-scenario rules)
@@ -224,7 +225,7 @@ the OTP step of large transfers):
 
 | Rule | Response |
 |------|----------|
-| **Daily limit:** at most ₱50,000 sent per account per calendar day (Philippine time). Counts the amounts sent; bank fees and money received don't count. | **400** `DAILY_LIMIT_EXCEEDED`, message `Daily transaction limit of ₱50,000 exceeded.`, `details`: `dailyLimit`, `sentToday`, `remainingToday`, `requested`, `resetsAt` |
+| **Daily limit:** at most ₱50,000 (KYC Level 1) or ₱100,000 (Level 2, Fully Verified) sent per account per calendar day (Philippine time). Counts the amounts sent (Express Send, Bank Transfer and Pay Bills); bank fees and money received don't count. | **400** `DAILY_LIMIT_EXCEEDED`, message `Daily transaction limit of ₱50,000 exceeded.`, `details`: `dailyLimit`, `sentToday`, `remainingToday`, `requested`, `resetsAt` |
 | **Anti-spam:** at most 3 completed transfers in any 10 seconds (simulated fraud prevention). Failed transfers don't count. | **429** `TOO_MANY_TRANSFERS`, `Retry-After` header, `details`: `maxTransfers`, `windowSeconds`, `retryAfterSeconds` |
 
 `GET /api/transfers/limits` shows how much of today's limit is left. Both rules have the same
@@ -265,6 +266,97 @@ node jobs/daily-interest.js --date 2026-10-14 --account SV5000000001   # one vau
 
 The API server also runs it automatically for yesterday (`INTEREST_JOB=false` to disable). QA
 sandbox: `POST /api/qa/savings/accrue { days }` simulates N days of interest on your own vault.
+
+### Notifications (`/api/v1/notifications`)
+
+The bell on Home shows an unread count and opens the **Notifications** panel, filtered by
+**All · Updates · Features · Events · Activity**. Tap an item to read it all (and mark it read);
+items with a button jump straight to the feature (Pay Bills, Instant Loan, Verify ID, a receipt…).
+
+- **Updates, features and upcoming events** come from `src/services/announcements.js`: edit that
+  list to publish news (each item: `id`, `category`, `title`, `body`, `publishedAt`, optional
+  `eventDate` / `eventEnd` and `action`). An item appears once `publishedAt` has passed.
+- **Activity** is personal: money received (with the sender), top-ups, cashback (last 30 days) and an
+  Instant Loan installment due within 7 days.
+- Read state is stored per user (`notification_reads`), so it is the same on every device.
+  `GET /api/v1/notifications` → `{ unreadCount, unreadByCategory, items }`;
+  `POST /api/v1/notifications/read` with `{ ids: [...] }` or `{ all: true }`.
+- The unread count refreshes every 60 seconds on its own timer (not on every balance refresh).
+
+### My Profile: KYC, linked accounts, MPIN, security, help (`/api/v1/profile`)
+
+The avatar (or **Me**) opens My Profile: the KYC badge, an *Account level & limits* card, a settings
+menu, and a collapsible **QA & Sandbox Rules** section (live daily-limit tracker, anti-spam slots,
+AML thresholds, MPIN expiry status).
+
+| Feature | API | Rules |
+|---------|-----|-------|
+| KYC level | `GET /api/v1/profile`, `POST /api/v1/profile/kyc` `{ idType, idNumber, birthDate, selfieConfirmed }` | Level 1 (Basic) = **₱50,000/day**, Level 2 (Fully Verified) = **₱100,000/day**, enforced by the transfer limits. Mock check, approved instantly; 18+ only; only the last 4 ID characters are kept |
+| Linked bank accounts / cards | `POST /api/v1/profile/linked-accounts`, `DELETE …/:id` | MPIN required; banks: 10-16 digit account; cards: Visa / Mastercard, Luhn-valid, not expired, **no CVV asked**; only the last 4 digits stored; max 5; duplicates `409` |
+| Change MPIN | `POST /api/accounts/me/mpin/change` `{ currentMpin, newMpin, confirmMpin }` | Current MPIN checked like a transfer; new one must match its confirmation, differ from the old one and not be weak (`111111`, `123456`, `987654` → `400 WEAK_MPIN`); valid 5 minutes like every MPIN |
+| Security & Biometrics | `PATCH /api/v1/profile/security` `{ smsTwoFactor?, biometricLogin?, mpin? }` | **SMS 2FA on** = an OTP for *every* Send / Bank Transfer (above ₱1,000 it's always required); turning it off needs the MPIN. Face ID / Touch ID is a saved preference (simulated on the web) |
+| Help Center | `POST /api/v1/profile/support/tickets` `{ category, subject, message }` | FAQs, an automated chat assistant (keyword answers, clearly labelled), and tickets `PP-TKT-000123` (max 10 a day) |
+
+### Pay Bills with ₱5.00 cashback (`/api/v1/bills`)
+
+**Pay Bills** (Home → quick actions) lists 23 billers in 5 categories, the kind Philippine
+e-wallets and payment centers offer (mock: no money really reaches the biller):
+
+| Category | Billers |
+|----------|---------|
+| Utilities | Meralco, Manila Water, Maynilad, Visayan Electric (VECO), Davao Light |
+| Telecoms & Internet | PLDT Home, Globe Postpaid, Smart Postpaid, Converge ICT, DITO Telecommunity |
+| Government | NBI Clearance, SSS (PRN), Pag-IBIG Fund, LTO, BIR |
+| Credit Cards & Loans | Home Credit, Maya Credit, BDO / BPI / UnionBank Credit Card |
+| Cable & TV | Cignal TV, Sky Cable, Cablelink |
+
+Flow: category grid or search → biller → account number, account name and amount → summary
+(amount due, ₱0.00 convenience fee, cashback banner) → **MPIN** → receipt with reference
+`REF-BILL-<date>-<id>` and a "Cashback Earned" stamp.
+
+| API | |
+|-----|---|
+| `GET /api/v1/bills` | Categories, billers (account label + format hint), fee and today's cashback status |
+| `POST /api/v1/bills/pay` `{ billerCode, accountNumber, accountName, amount, mpin }` | Pay → `201` with reference, cashback and new balance |
+
+- **Ledger:** one database transaction writes two journals: `BILL_PAYMENT` (DEBIT wallet, CREDIT
+  GL 2040 Biller Settlement) and `CASHBACK` (DEBIT GL 5020 Marketing Expense - Cashback, CREDIT
+  wallet ₱5.00). History shows "Bill Payment - Meralco" and "Cashback Reward - Bills Payment".
+- **Cashback rules:** ₱5.00 on bills of **₱100 or more**, at most **3 cashbacks per customer per
+  day** (Manila). Without these, paying ₱1 "bills" would earn ₱4 each time.
+- **Guards (same as a transfer):** the wallet is locked during the payment (no overdraft, unlike
+  Send), frozen accounts get `423`, AML screening, and bill payments count toward the ₱50,000
+  daily send limit and the 3-per-10-seconds anti-spam rule. The QA "Trigger HTTP 500" switch applies.
+- **Card billers:** only the last 4 digits of a credit card number are stored and shown.
+- **Errors:** `400 UNKNOWN_BILLER`, `400 INVALID_BILLER_ACCOUNT` (names the biller's account label,
+  e.g. Meralco's 10-digit CAN), `400 INVALID_ACCOUNT_NAME`, `400 INVALID_AMOUNT`,
+  `403 INVALID_MPIN`, `422 INSUFFICIENT_FUNDS`, `400 DAILY_LIMIT_EXCEEDED`, `429 TOO_MANY_TRANSFERS`.
+
+### Instant Loan (`/api/v1/loans`)
+
+Every customer has a **pre-approved ₱50,000 credit line**. On the Home tab the *Instant Loan* tile
+opens a dialog with a slider (₱1,000 to ₱50,000), a 3 / 6 / 12-month term and a live quote;
+**Apply & Disburse** asks for the MPIN and credits the wallet immediately ("Loan Disbursement" in the
+history, with a receipt). While a loan is open, the same dialog shows the balance, the installment
+schedule, and *Pay installment* / *Pay in full*.
+
+| API | |
+|-----|---|
+| `GET /api/v1/loans` | Credit line, rate, terms and your open loan with its schedule |
+| `POST /api/v1/loans/quote` `{ amount, termMonths }` | Interest, total and monthly installment (nothing is booked) |
+| `POST /api/v1/loans` `{ amount, termMonths, mpin }` | Apply & Disburse → `201`, wallet credited |
+| `POST /api/v1/loans/:id/repay` `{ amount }` | Repay from the wallet: interest first, then principal |
+
+- **Pricing:** 1.50% a month, flat add-on fixed at disbursement (₱10,000 over 6 months = ₱900
+  interest, ₱1,816.67 a month; the last installment absorbs the rounding).
+- **Guardrails:** MPIN required; **one open loan per customer** (the user row is locked while
+  applying and a partial unique index backs it up, so parallel applications can't both win);
+  frozen accounts get `423`, accounts under compliance review `403 TRANSACTION_HELD_FOR_REVIEW`.
+- **Errors:** `400 LOAN_AMOUNT_OUT_OF_RANGE`, `400 INVALID_LOAN_TERM`, `409 LOAN_ALREADY_ACTIVE`,
+  `400 AMOUNT_EXCEEDS_BALANCE_DUE`, `422 INSUFFICIENT_FUNDS`, `404 LOAN_NOT_FOUND` (also for
+  someone else's loan), `409 LOAN_NOT_ACTIVE`.
+- **Demo risk:** loans are play money, but borrowed money can be sent on before it is repaid, and
+  one person can open several accounts (no KYC yet). The credit line caps that at ₱50,000 per account.
 
 ### Virtual cards (`/api/v1/cards`)
 
@@ -368,8 +460,8 @@ can't slip through):
 | Rule | Response |
 |------|----------|
 | caller is not an admin | `403 ADMIN_ONLY` "This feature is only available to PayPulse admins" |
-| at most **₱100,000 of mock top-ups per day** (Manila) | `400 TOPUP_DAILY_LIMIT_EXCEEDED` "Daily top-up limit of ₱100,000.00 exceeded." |
-| at most **₱1,000,000 held** (wallet + PayPulse Save) | `400 WALLET_LIMIT_EXCEEDED` "Wallet limit of ₱1,000,000.00 exceeded." |
+| at most **₱1,000,000 of mock top-ups per day** (Manila) | `400 TOPUP_DAILY_LIMIT_EXCEEDED` "Daily top-up limit of ₱1,000,000.00 exceeded." |
+| at most **₱10,000,000 held** (wallet + PayPulse Save) | `400 WALLET_LIMIT_EXCEEDED` "Wallet limit of ₱10,000,000.00 exceeded." |
 | account under compliance review | `403 TRANSACTION_HELD_FOR_REVIEW` (`ACCOUNT_UNDER_REVIEW`) |
 | more than **5 top-ups within a minute** | `403 TRANSACTION_HELD_FOR_REVIEW` (`TOPUP_VELOCITY`), opens an alert and puts the account under review |
 
@@ -410,7 +502,7 @@ Open **http://localhost:3000**. The UI is plain HTML/CSS/JS in `public/` (no bui
 uses the same API as the tests:
 
 - **Create account / Log in**: register a user and open their wallet.
-- **Add money** (admins only, with `MOCK_PAYMENTS=true`; limited to ₱100,000/day and ₱1,000,000 held):
+- **Add money** (admins only, with `MOCK_PAYMENTS=true`; limited to ₱1,000,000/day and ₱10,000,000 held):
   a mock checkout in TEST MODE. Choose *Approve* or *Decline* to simulate the card
   result. It calls `/api/payments/mock-checkout`, which signs a provider callback and runs it
   through the real webhook handler.
@@ -463,6 +555,10 @@ The MPIN, OTP, password reset and bank transfer codes are listed in their own se
 | 2020 | PESONet Clearing - Pending Outbound | Liability | `SYS-PESONET-CLEARING` | PESONet transfers waiting for the cut-off |
 | 3900 | Sandbox Adjustments (non-production) | Equity | `SYS-QA-ADJUSTMENT` | QA sandbox resets |
 | 4010 | Fee Revenue - Bank Transfers | Revenue | `SYS-FEE-INCOME` | ₱15 bank transfer fees |
+| 1030 | Loans Receivable - Instant Loan | Asset | `SYS-LOANS-RECEIVABLE` | loan principal customers still owe |
+| 4020 | Interest Revenue - Instant Loan | Revenue | `SYS-LOAN-INTEREST` | interest collected on repayments |
+| 2040 | Biller Settlement - Payable to Billers | Liability | `SYS-BILLER-SETTLEMENT` | bill payments owed to billers |
+| 5020 | Marketing Expense - Cashback | Expense | `SYS-CASHBACK-EXPENSE` | ₱5.00 bills cashback |
 
 | Event | Debit | Credit |
 |-------|-------|--------|
@@ -471,6 +567,11 @@ The MPIN, OTP, password reset and bank transfer codes are listed in their own se
 | Bank Transfer, InstaPay | 2010 sender (amount + fee) | 1020 amount, 4010 fee |
 | Bank Transfer, PESONet | 2010 sender (amount + fee) | 2020 amount, 4010 fee |
 | PESONet batch cut-off | 2020 batch total | 1020 batch total |
+| Instant Loan disbursement | 1030 Loans Receivable | 2010 customer wallet |
+| Instant Loan repayment | 2010 customer wallet | 4020 interest part, 1030 principal part |
+| QA reset: loan write-off | 3900 Sandbox Adjustments | 1030 unpaid principal |
+| Bill payment | 2010 customer wallet | 2040 Biller Settlement |
+| Bills cashback | 5020 Cashback Expense | 2010 customer wallet (₱5.00) |
 
 Money is stored as integer cents. No floating point.
 
@@ -525,7 +626,9 @@ amounts between ₱50,000 and ₱500,000 are rejected by the limit (`400`), abov
 the end of the Manila business day: debits = credits, **total customer liability (GL 2010) = sum of
 customer wallets**, Assets = Liabilities + Equity + Revenue, GL 1010 = successful top-ups,
 GL 1020 = settled bank transfers, GL 2020 = PESONet transfers still queued, GL 4010 = fees,
-every bank transfer has a matching pacs.008, and no wallet is overdrawn. It writes an **audit log**
+GL 2030 / 5010 = savings and savings interest, **GL 1030 = unpaid Instant Loan principal** and
+**GL 4020 = interest collected on loan repayments** (checks `LOAN-1`, `LOAN-2`), GL 2040 = bill
+payments collected and GL 5020 = cashback paid (`BILL-1`, `CB-1`), every bank transfer has a matching pacs.008, and no wallet is overdrawn. It writes an **audit log**
 (`reports/eod/eod-<date>-<time>.log` and `.json`) listing every mismatch, records the run in
 `eod_reconciliations`, and exits `0` balanced / `1` exceptions / `2` error, so it can run from cron
 or CI unattended.

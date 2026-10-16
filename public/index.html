@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PayPulse Wallet</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%235b4cf0'/><path d='M6 17h5l3-7 4 13 3-6h5' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2312b886'/><path d='M6 17h5l3-7 4 13 3-6h5' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -92,71 +92,168 @@
   </dialog>
 
   <!-- ============ Wallet ============ -->
-  <div id="app-view" hidden>
+  <div id="app-view" class="app-shell" hidden>
     <header class="topbar">
-      <div class="brand small">
-        <span class="logo" aria-hidden="true"></span>
-        <span class="brand-name">PayPulse</span>
-      </div>
-      <div class="user">
-        <button type="button" id="profile-btn" class="profile-btn" data-testid="open-profile" aria-label="Open my profile">
-          <span class="avatar" id="avatar" aria-hidden="true"></span>
+      <button type="button" id="profile-btn" class="profile-btn" data-testid="open-profile" aria-label="Open my profile">
+        <span class="avatar" id="avatar" aria-hidden="true"></span>
+      </button>
+      <div class="who">
+        <p class="who-name">
           <span id="user-name" data-testid="user-name"></span>
           <span class="role-chip" id="role-chip" data-testid="role-chip" hidden>Admin</span>
-        </button>
-        <button type="button" id="logout-btn" class="btn ghost" data-testid="logout">Log out</button>
+        </p>
+        <p class="who-account">
+          Account No: <code id="account-number" data-testid="account-number">—</code>
+          <button type="button" id="copy-btn" class="icon-btn tiny" data-testid="copy-account" aria-label="Copy account number" title="Copy account number">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
+          </button>
+        </p>
       </div>
+      <button type="button" id="bell-btn" class="icon-btn round" data-testid="notifications" aria-label="Notifications" title="Notifications">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span class="bell-dot" id="bell-dot" data-testid="bell-dot" hidden></span>
+      </button>
+      <button type="button" id="logout-btn" class="icon-btn round" data-testid="logout" aria-label="Log out" title="Log out">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+      </button>
     </header>
 
-    <main class="wallet">
+    <!-- ===== Home tab ===== -->
+    <main class="wallet" id="home-view" data-testid="home-view">
       <section class="balance-card" aria-label="Wallet balance">
-        <p class="label">
-          Available balance
-          <button type="button" id="balance-toggle" class="balance-toggle" data-testid="balance-toggle"></button>
+        <div class="balance-top">
+          <p class="label">
+            Available Balance
+            <button type="button" id="balance-toggle" class="balance-toggle" data-testid="balance-toggle"></button>
+          </p>
+          <button type="button" class="assets-pill" id="refresh-btn" data-testid="refresh" title="Refresh balance">
+            Refresh
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>
+          </button>
+        </div>
+        <p class="badges">
           <span class="frozen-badge" id="frozen-badge" data-testid="frozen-badge" hidden>❄ Frozen</span>
           <span class="frozen-badge aml-badge" id="aml-badge" data-testid="aml-badge" hidden>⚠ Under review</span>
         </p>
         <p class="balance"><span id="balance" data-testid="balance">—</span></p>
-        <div class="account-row">
-          <span>Account no.</span>
-          <code id="account-number" data-testid="account-number">—</code>
-          <button type="button" id="copy-btn" class="chip" data-testid="copy-account">Copy</button>
-        </div>
-        <div class="actions">
-          <button type="button" class="action" data-open="send-dialog" data-testid="open-send">
-            <span class="icon" aria-hidden="true">↗</span>Send
+        <div class="sub-accounts">
+          <button type="button" class="sub-account" id="savings-open" data-testid="savings-open">
+            <span class="sub-label">PayPulse Save <span aria-hidden="true">›</span></span>
+            <span class="sub-amount" id="savings-balance" data-testid="savings-balance">₱0.00</span>
           </button>
-          <!-- Admins only, and only when the server has the mock payment provider on (MOCK_PAYMENTS=true). -->
-          <button type="button" class="action" id="topup-btn" data-open="topup-dialog" data-testid="open-topup" hidden>
-            <span class="icon" aria-hidden="true">＋</span>Add money
-          </button>
-          <button type="button" class="action" id="receive-qr-btn" data-testid="open-receive-qr">
-            <span class="icon" aria-hidden="true">▦</span>Receive QR
-          </button>
-          <button type="button" class="action" id="scan-qr-btn" data-testid="open-scan-qr">
-            <span class="icon" aria-hidden="true">⌖</span>Scan QR
-          </button>
-          <button type="button" class="action" id="refresh-btn" data-testid="refresh">
-            <span class="icon" aria-hidden="true">⟳</span>Refresh
+          <button type="button" class="sub-account" id="assets-open" data-testid="assets-open">
+            <span class="sub-label">Total Assets <span aria-hidden="true">›</span></span>
+            <span class="sub-amount" id="total-assets" data-testid="total-assets">₱0.00</span>
           </button>
         </div>
       </section>
 
-      <section class="vault-card" aria-label="PayPulse Save" data-testid="savings-card">
-        <div class="vault-head">
-          <div>
-            <p class="vault-label">🐷 PayPulse Save</p>
-            <p class="vault-balance" id="savings-balance" data-testid="savings-balance">₱0.00</p>
-          </div>
-          <span class="rate-badge" id="savings-rate" data-testid="savings-rate">6.00% p.a.</span>
+      <div class="product-grid">
+        <!-- Left: the real virtual Visa card (summary; full controls live in the Card tab) -->
+        <section class="product product-card" aria-label="PayPulse Card" data-testid="card-summary">
+          <p class="product-title">
+            <span class="product-icon card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+            </span>
+            PayPulse Card
+          </p>
+          <p class="product-amount" id="card-summary-number" data-testid="card-summary-number">No card yet</p>
+          <p class="product-sub" id="card-summary-status">Virtual Visa for online payments</p>
+          <button type="button" class="product-badge" id="card-summary-open" data-testid="card-summary-open">
+            <span class="badge-label" id="card-summary-label">Get yours free</span>
+            <span class="badge-action"><span id="card-summary-action">Get card</span> <span aria-hidden="true">›</span></span>
+          </button>
+        </section>
+
+        <div class="product-stack">
+          <!-- Right top: PayPulse Save (6% p.a.) -->
+          <section class="product" aria-label="PayPulse Save" data-testid="savings-card">
+            <p class="product-title">
+              <span class="product-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
+              </span>
+              PayPulse Save
+            </p>
+            <p class="product-amount"><span class="rate-badge" id="savings-rate" data-testid="savings-rate">6.00% p.a.</span></p>
+            <p class="product-sub" id="savings-meta" data-testid="savings-meta"></p>
+            <div class="mini-actions">
+              <button type="button" class="mini-btn" id="savings-add" data-testid="savings-add">Add</button>
+              <button type="button" class="mini-btn" id="savings-withdraw" data-testid="savings-withdraw">Withdraw</button>
+            </div>
+          </section>
+
+          <!-- Right bottom: Instant Loan (₱50,000 credit line) -->
+          <button type="button" class="product product-button" id="loan-open" aria-label="Instant Loan" data-testid="loan-open">
+            <span class="product-title">
+              <span class="product-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5c-.5-1-1.5-1.5-2.5-1.5-1.4 0-2.5.8-2.5 2s1.1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-2-.5-2.5-1.5M12 6.5V8m0 8v1.5"/></svg>
+              </span>
+              Instant Loan
+              <span class="product-chevron" aria-hidden="true">›</span>
+            </span>
+            <span class="product-sub" id="loan-tile-text" data-testid="loan-tile-text">Available: ₱50,000.00</span>
+          </button>
         </div>
-        <p class="vault-meta" id="savings-meta" data-testid="savings-meta"></p>
-        <div class="vault-actions">
-          <button type="button" class="btn secondary" id="savings-add" data-testid="savings-add">Add to Savings</button>
-          <button type="button" class="btn secondary" id="savings-withdraw" data-testid="savings-withdraw">Withdraw to Wallet</button>
-        </div>
+      </div>
+
+      <section class="quick-actions" aria-label="Quick actions">
+        <button type="button" class="quick" data-open="send-dialog" data-testid="open-send">
+          <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/></svg></span>
+          Transfer
+        </button>
+        <button type="button" class="quick" id="bills-btn" data-testid="open-bills">
+          <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></span>
+          Pay Bills
+        </button>
+        <!-- Admins only, and only when the server has the mock payment provider on (MOCK_PAYMENTS=true). -->
+        <button type="button" class="quick" id="topup-btn" data-open="topup-dialog" data-testid="open-topup" hidden>
+          <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg></span>
+          Top Up
+        </button>
+        <button type="button" class="quick" id="receive-qr-btn" data-testid="open-receive-qr">
+          <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg></span>
+          Receive
+        </button>
+        <button type="button" class="quick" id="refer-btn" data-testid="refer-friend">
+          <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/></svg></span>
+          Refer a Friend
+        </button>
+        <button type="button" class="quick" id="bank-transfer-btn" data-testid="open-bank-transfer">
+          <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
+          Bank Transfer
+        </button>
       </section>
 
+      <button type="button" class="promo" id="promo-banner" data-testid="promo-banner">
+        <svg class="promo-art" viewBox="0 0 120 96" aria-hidden="true">
+          <ellipse cx="60" cy="88" rx="46" ry="6" fill="rgba(0,0,0,0.12)"/>
+          <path d="M44 30c-14 10-22 26-20 40 2 12 14 18 36 18s34-6 36-18c2-14-6-30-20-40z" fill="#d4f5e4"/>
+          <path d="M46 30h28l-6-10c-2-3 0-6 3-7l-3-5H52l-3 5c3 1 5 4 3 7z" fill="#bdebd4"/>
+          <rect x="44" y="27" width="32" height="6" rx="3" fill="#ffd0a8"/>
+          <circle cx="60" cy="60" r="14" fill="#12b886"/>
+          <path d="M53 61h4l2-5 3 9 2-4h4" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="84" y="56" width="30" height="18" rx="3" fill="#0e9a70" transform="rotate(-14 99 65)"/>
+          <circle cx="99" cy="65" r="4" fill="#d6f7f1" transform="rotate(-14 99 65)"/>
+          <ellipse cx="18" cy="80" rx="12" ry="4" fill="#f7b500"/>
+          <ellipse cx="18" cy="75" rx="12" ry="4" fill="#ffc933"/>
+          <ellipse cx="18" cy="70" rx="12" ry="4" fill="#ffd95e"/>
+        </svg>
+        <span class="promo-text">
+          <strong>Let's Bank, PayPulse</strong>
+          <span>Simple, Reliable, Rewarding</span>
+        </span>
+        <span class="promo-chevron" aria-hidden="true">›</span>
+      </button>
+
+      <section class="activity" id="activity" aria-labelledby="activity-heading">
+        <h2 id="activity-heading" class="activity-head">Transaction History <span aria-hidden="true">›</span></h2>
+        <ul id="tx-list" class="tx-list" data-testid="tx-list"></ul>
+        <p id="tx-empty" class="empty" hidden>No transactions yet. Ask a friend to send you money.</p>
+      </section>
+    </main>
+
+    <!-- ===== Card tab ===== -->
+    <main class="wallet" id="card-tab" data-testid="card-tab" hidden>
       <section class="cards-section" aria-label="Virtual card" data-testid="cards-section">
         <h2>Virtual Card</h2>
         <div id="card-empty" data-testid="card-empty">
@@ -177,21 +274,200 @@
               <span class="visa" aria-label="Visa">VISA</span>
             </div>
           </div>
-          <div class="vault-actions">
-            <button type="button" class="btn secondary" id="card-reveal" data-testid="card-reveal">Show card details</button>
-            <button type="button" class="btn secondary" id="card-freeze" data-testid="card-freeze">Freeze card</button>
-          </div>
+          <button type="button" class="btn secondary" id="card-reveal" data-testid="card-reveal">Show card details</button>
+          <label class="card-lock">
+            <span>
+              <strong>Freeze / Lock Card</strong>
+              <small id="card-lock-hint" data-testid="card-lock-hint">Card is active: online payments are allowed</small>
+            </span>
+            <input type="checkbox" role="switch" class="toggle" id="card-freeze" data-testid="card-freeze">
+          </label>
           <p class="hint" id="card-hint" data-testid="card-hint">Card details are hidden. They are shown for 30 seconds after you enter your MPIN.</p>
         </div>
       </section>
-
-      <section class="activity">
-        <h2>Recent activity</h2>
-        <ul id="tx-list" class="tx-list" data-testid="tx-list"></ul>
-        <p id="tx-empty" class="empty" hidden>No transactions yet. Add money to get started.</p>
-      </section>
     </main>
+
+    <!-- ===== Bottom navigation ===== -->
+    <nav class="bottom-nav" aria-label="Main">
+      <button type="button" class="nav-item active" data-tab-target="home" data-testid="nav-home" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+        Home
+      </button>
+      <button type="button" class="nav-item" id="nav-transfer" data-testid="nav-transfer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/></svg>
+        Transfer
+      </button>
+      <button type="button" class="nav-item nav-scan" id="scan-qr-btn" data-testid="open-scan-qr">
+        <span class="scan-bubble" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="4" height="4" rx="0.5"/><rect x="13" y="13" width="4" height="4" rx="0.5"/><path d="M13 7h4v3M7 17v-3h3"/></svg>
+        </span>
+        Scan &amp; Pay
+      </button>
+      <button type="button" class="nav-item" data-tab-target="card" data-testid="nav-card">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>
+        Card
+      </button>
+      <button type="button" class="nav-item" id="nav-me" data-testid="nav-me">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+        Me
+      </button>
+    </nav>
   </div>
+
+  <!-- ============ Instant Loan ============ -->
+  <dialog id="loan-dialog" class="sheet loan-sheet" aria-labelledby="loan-title" data-testid="loan-dialog">
+    <!-- Offer: choose amount and term, then Apply & Disburse (MPIN) -->
+    <form id="loan-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2 id="loan-title">Instant Loan</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <div class="loan-line">
+        <span>Approved credit line</span>
+        <strong id="loan-limit" data-testid="loan-limit">₱50,000.00</strong>
+        <span class="approved-chip">✓ Pre-approved</span>
+      </div>
+      <label class="loan-amount-label" for="loan-amount">
+        How much do you need?
+        <output id="loan-amount-out" for="loan-amount" data-testid="loan-amount-out">₱10,000.00</output>
+      </label>
+      <input type="range" id="loan-amount" name="amount" min="1000" max="50000" step="500" value="10000" data-testid="loan-amount">
+      <div class="range-ends" aria-hidden="true"><span>₱1,000</span><span>₱50,000</span></div>
+      <fieldset class="term-picker">
+        <legend>Pay back in</legend>
+        <label><input type="radio" name="term" value="3" data-testid="loan-term-3"><span>3 months</span></label>
+        <label><input type="radio" name="term" value="6" checked data-testid="loan-term-6"><span>6 months</span></label>
+        <label><input type="radio" name="term" value="12" data-testid="loan-term-12"><span>12 months</span></label>
+      </fieldset>
+      <dl class="review loan-quote" id="loan-quote" data-testid="loan-quote"></dl>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="loan-submit">Apply &amp; Disburse</button>
+      <p class="hint center">The money goes to your Available Balance right away. One loan at a time.</p>
+    </form>
+
+    <!-- Open loan: balance, schedule, repay -->
+    <div id="loan-active" class="form" hidden>
+      <header class="sheet-head">
+        <h2>Your Instant Loan</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <div class="loan-owed">
+        <span>Outstanding</span>
+        <strong id="loan-outstanding" data-testid="loan-outstanding">₱0.00</strong>
+        <div class="meter" role="progressbar" aria-label="Repaid" id="loan-progress" aria-valuemin="0" aria-valuemax="100">
+          <span class="meter-fill" id="loan-progress-fill"></span>
+        </div>
+        <small id="loan-progress-text"></small>
+      </div>
+      <dl class="review" id="loan-details"></dl>
+      <ol class="schedule" id="loan-schedule" data-testid="loan-schedule"></ol>
+      <p class="form-error" role="alert"></p>
+      <div class="vault-actions">
+        <button type="button" class="btn secondary" id="loan-pay-next" data-testid="loan-pay-next">Pay installment</button>
+        <button type="button" class="btn primary" id="loan-pay-full" data-testid="loan-pay-full">Pay in full</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ============ Notifications ============ -->
+  <dialog id="notif-dialog" class="sheet notif-sheet" aria-labelledby="notif-title" data-testid="notif-dialog">
+    <header class="sheet-head">
+      <h2 id="notif-title">Notifications</h2>
+      <button type="button" class="btn link" id="notif-read-all" data-testid="notif-read-all">Mark all as read</button>
+      <button type="button" class="close" data-close aria-label="Close">×</button>
+    </header>
+    <div class="notif-filters" role="tablist" aria-label="Show" id="notif-filters"></div>
+    <ul class="notif-list" id="notif-list" data-testid="notif-list"></ul>
+    <p class="empty" id="notif-empty" hidden>You're all caught up.</p>
+  </dialog>
+
+  <!-- ============ Pay Bills ============ -->
+  <dialog id="bills-dialog" class="sheet bills-sheet" aria-labelledby="bills-title" data-testid="bills-dialog">
+    <!-- Step 1: categories, search, billers -->
+    <div id="bills-browse" class="form">
+      <header class="sheet-head">
+        <button type="button" class="back" id="bills-browse-back" aria-label="All categories" hidden>‹</button>
+        <h2 id="bills-title">Pay Bills</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="cashback-hint" id="bills-cashback-hint" data-testid="bills-cashback-hint"></p>
+      <label class="search-field">
+        <span class="visually-hidden">Search billers</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" id="bills-search" placeholder="Search billers, e.g. Meralco" autocomplete="off" data-testid="bills-search">
+      </label>
+      <div class="bill-categories" id="bills-categories" data-testid="bills-categories"></div>
+      <p class="list-title" id="bills-list-title" hidden></p>
+      <ul class="biller-list" id="bills-list" data-testid="bills-list" hidden></ul>
+      <p class="empty" id="bills-empty" hidden>No billers match your search.</p>
+    </div>
+
+    <!-- Step 2: account details and amount -->
+    <form id="bills-form" class="form" novalidate hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-bills-back="browse" aria-label="Back">‹</button>
+        <h2>Bill details</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <div class="biller-chosen" id="bills-chosen"></div>
+      <label><span id="bills-account-label">Account Number</span>
+        <input name="accountNumber" autocomplete="off" required data-testid="bills-account">
+        <span class="hint" id="bills-account-hint"></span>
+      </label>
+      <label>Account Name
+        <input name="accountName" autocomplete="name" required placeholder="As shown on the bill" data-testid="bills-account-name">
+      </label>
+      <label>Amount to Pay
+        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="bills-amount">
+      </label>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="bills-continue">Continue</button>
+    </form>
+
+    <!-- Step 3: summary + MPIN -->
+    <form id="bills-review" class="form" novalidate hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-bills-back="form" aria-label="Back">‹</button>
+        <h2>Payment summary</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <dl class="review" id="bills-summary" data-testid="bills-summary"></dl>
+      <div class="review-total"><span>Total</span><strong id="bills-total" data-testid="bills-total"></strong></div>
+      <p class="cashback-banner" id="bills-cashback-banner" data-testid="bills-cashback-banner"></p>
+      <p class="summary">Enter your 6-digit MPIN to pay</p>
+      <div class="code-input" id="bills-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="bills-mpin-input"></div>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="bills-pay">Pay Bill</button>
+    </form>
+  </dialog>
+
+  <!-- ============ Log out confirmation ============ -->
+  <dialog id="logout-dialog" class="sheet confirm-sheet" aria-labelledby="logout-title" aria-describedby="logout-text" data-testid="logout-dialog">
+    <div class="form">
+      <span class="confirm-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+      </span>
+      <h2 id="logout-title">Log out of PayPulse?</h2>
+      <p class="summary" id="logout-text">You'll need your email and password to log in again.</p>
+      <div class="confirm-actions">
+        <button type="button" class="btn secondary" data-close data-testid="logout-cancel">Cancel</button>
+        <button type="button" class="btn danger" id="logout-confirm" data-testid="logout-confirm">Log out</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ============ Total assets ============ -->
+  <dialog id="assets-dialog" class="sheet" aria-labelledby="assets-title" data-testid="assets-dialog">
+    <div class="form">
+      <header class="sheet-head">
+        <h2 id="assets-title">Total Assets</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="assets-total" id="assets-total" data-testid="assets-total">₱0.00</p>
+      <dl class="review" id="assets-rows"></dl>
+      <p class="hint">Assets are the money you hold in PayPulse: your wallet plus PayPulse Save.</p>
+    </div>
+  </dialog>
 
   <!-- ============ Send money ============ -->
   <dialog id="send-dialog" class="sheet" data-testid="send-dialog">
@@ -317,57 +593,257 @@
 
   <!-- ============ My profile (account, transfer limits, security) ============ -->
   <dialog id="profile-dialog" class="sheet profile-sheet" aria-labelledby="profile-title" data-testid="profile-dialog">
-    <header class="sheet-head">
-      <h2 id="profile-title">My profile</h2>
-      <button type="button" class="close" data-close aria-label="Close">×</button>
-    </header>
+    <!-- ===== Main ===== -->
+    <div class="profile-panel" data-panel="main">
+      <header class="sheet-head">
+        <h2 id="profile-title">My profile</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
 
-    <div class="profile-id">
-      <span class="avatar large" id="profile-avatar" aria-hidden="true"></span>
-      <div>
-        <p class="profile-name" id="profile-name" data-testid="profile-name"></p>
-        <p class="profile-email" id="profile-email" data-testid="profile-email"></p>
+      <div class="profile-id">
+        <span class="avatar large" id="profile-avatar" aria-hidden="true"></span>
+        <div class="profile-id-text">
+          <p class="profile-name"><span id="profile-name" data-testid="profile-name"></span></p>
+          <span class="kyc-badge" id="kyc-badge" data-testid="kyc-badge"></span>
+          <p class="profile-email" id="profile-email" data-testid="profile-email"></p>
+        </div>
       </div>
+
+      <section class="kyc-card" aria-labelledby="kyc-heading" data-testid="kyc-card">
+        <div class="section-head">
+          <h3 id="kyc-heading">Account level &amp; limits</h3>
+          <span class="kyc-current" id="kyc-current"></span>
+        </div>
+        <ol class="kyc-tiers" id="kyc-tiers"></ol>
+        <p class="limit-text" id="kyc-usage" data-testid="kyc-usage"></p>
+        <button type="button" class="btn primary" id="kyc-start" data-testid="kyc-start" hidden>Verify your ID to raise your limit</button>
+      </section>
+
+      <nav class="menu-list" aria-label="Profile settings">
+        <button type="button" class="menu-row" data-profile-panel="linked" data-testid="menu-linked">
+          <span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg></span>
+          <span class="menu-text"><strong>Linked Bank Accounts / Cards</strong><small id="menu-linked-sub">None linked yet</small></span><span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-row" data-profile-panel="mpin" data-testid="menu-mpin">
+          <span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
+          <span class="menu-text"><strong>Change MPIN / Passcode</strong><small>Old MPIN, then a new one twice</small></span><span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-row" data-profile-panel="security" data-testid="menu-security">
+          <span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <span class="menu-text"><strong>Security &amp; Biometrics</strong><small id="menu-security-sub">Face ID / Touch ID, SMS 2FA</small></span><span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-row" data-profile-panel="help" data-testid="menu-help">
+          <span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14"/><path d="M12 17.5v.01"/></svg></span>
+          <span class="menu-text"><strong>Help Center &amp; FAQs</strong><small>FAQs, live chat, support tickets</small></span><span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-row" data-profile-panel="account" data-testid="menu-account">
+          <span class="menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
+          <span class="menu-text"><strong>Account details</strong><small>Account no., mobile, member since</small></span><span class="chev" aria-hidden="true">›</span>
+        </button>
+      </nav>
+
+      <details class="qa-rules" id="qa-rules" data-testid="qa-rules">
+        <summary>
+          <span><strong>QA &amp; Sandbox Rules</strong><small>Daily limit tracker, anti-spam, AML, MPIN status</small></span>
+          <span class="live-badge" title="Updates every 2 seconds while this screen is open">● Live</span>
+        </summary>
+        <div class="qa-rules-body">
+          <div class="limit-card" data-testid="daily-limit">
+            <div class="limit-head">
+              <span>Daily transfer limit</span>
+              <strong id="daily-left" data-testid="daily-left"></strong>
+            </div>
+            <div class="meter" role="progressbar" id="daily-meter" aria-label="Daily transfer limit used"
+                 aria-valuemin="0" aria-valuemax="50000">
+              <span class="meter-fill" id="daily-bar"></span>
+            </div>
+            <p class="limit-text" id="daily-text" data-testid="daily-text"></p>
+          </div>
+
+          <div class="limit-card" data-testid="spam-limit">
+            <div class="limit-head">
+              <span>Anti-spam protection</span>
+              <strong id="spam-count" data-testid="spam-count"></strong>
+            </div>
+            <div class="slots" id="spam-slots" aria-hidden="true"></div>
+            <p class="limit-text" id="spam-text" data-testid="spam-text"></p>
+          </div>
+
+          <dl class="review" id="profile-security" data-testid="profile-security"></dl>
+        </div>
+      </details>
     </div>
 
-    <section class="profile-section" aria-labelledby="limits-heading">
-      <div class="section-head">
-        <h3 id="limits-heading">Transfer limits</h3>
-        <span class="live-badge" title="Updates every 2 seconds while this screen is open">● Live</span>
-      </div>
+    <!-- ===== KYC: verify ID ===== -->
+    <form class="profile-panel form" data-panel="kyc" id="kyc-form" novalidate hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-profile-panel="main" aria-label="Back to profile">‹</button>
+        <h2>Verify your identity</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary left">Become <strong>Level 2 (Fully Verified)</strong> and send up to <strong id="kyc-target-limit">₱100,000.00</strong> a day. Only the last 4 characters of your ID are kept.</p>
+      <label>Government ID
+        <select name="idType" required data-testid="kyc-id-type"></select>
+      </label>
+      <label>ID number
+        <input name="idNumber" autocomplete="off" required data-testid="kyc-id-number">
+      </label>
+      <label>Date of birth
+        <input name="birthDate" type="date" required data-testid="kyc-birth-date">
+      </label>
+      <button type="button" class="selfie-box" id="kyc-selfie" aria-pressed="false" data-testid="kyc-selfie">
+        <span class="selfie-icon" aria-hidden="true">📷</span>
+        <span><strong id="kyc-selfie-title">Take a selfie with your ID</strong><small id="kyc-selfie-text">Simulated camera: tap to capture</small></span>
+      </button>
+      <p class="hint">Demo verification: approved instantly, no document is uploaded.</p>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="kyc-submit">Submit for verification</button>
+    </form>
 
-      <div class="limit-card" data-testid="daily-limit">
-        <div class="limit-head">
-          <span>Daily transfer limit</span>
-          <strong id="daily-left" data-testid="daily-left"></strong>
-        </div>
-        <div class="meter" role="progressbar" id="daily-meter" aria-label="Daily transfer limit used"
-             aria-valuemin="0" aria-valuemax="50000">
-          <span class="meter-fill" id="daily-bar"></span>
-        </div>
-        <p class="limit-text" id="daily-text" data-testid="daily-text"></p>
-      </div>
+    <!-- ===== Linked accounts ===== -->
+    <div class="profile-panel form" data-panel="linked" hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-profile-panel="main" aria-label="Back to profile">‹</button>
+        <h2>Linked accounts</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <ul class="linked-list" id="linked-list" data-testid="linked-list"></ul>
+      <p class="empty" id="linked-empty">No bank account or card linked yet.</p>
+      <button type="button" class="btn secondary" id="linked-add-open" data-testid="linked-add-open">+ Add New Bank / Card</button>
 
-      <div class="limit-card" data-testid="spam-limit">
-        <div class="limit-head">
-          <span>Anti-spam protection</span>
-          <strong id="spam-count" data-testid="spam-count"></strong>
+      <form id="linked-form" class="form linked-form" novalidate hidden>
+        <div class="segmented" role="radiogroup" aria-label="What to link">
+          <label><input type="radio" name="kind" value="BANK" checked data-testid="linked-kind-bank"><span>Bank account</span></label>
+          <label><input type="radio" name="kind" value="CARD" data-testid="linked-kind-card"><span>Visa / Mastercard</span></label>
         </div>
-        <div class="slots" id="spam-slots" aria-hidden="true"></div>
-        <p class="limit-text" id="spam-text" data-testid="spam-text"></p>
-      </div>
-    </section>
+        <div id="linked-bank-fields" class="form">
+          <label>Bank
+            <select name="bankCode" data-testid="linked-bank"></select>
+          </label>
+          <label>Account number
+            <input name="accountNumber" inputmode="numeric" autocomplete="off" placeholder="10 to 16 digits" data-testid="linked-account-number">
+          </label>
+        </div>
+        <div id="linked-card-fields" class="form" hidden>
+          <label>Card number
+            <input name="cardNumber" inputmode="numeric" autocomplete="off" placeholder="16 digits" data-testid="linked-card-number">
+          </label>
+          <label>Expiry (MM/YY)
+            <input name="expiry" inputmode="numeric" autocomplete="off" placeholder="08/29" maxlength="5" data-testid="linked-card-expiry">
+          </label>
+          <p class="hint">We never ask for your CVV. Only the last 4 digits are kept.</p>
+        </div>
+        <label>Account holder name
+          <input name="holderName" autocomplete="name" data-testid="linked-holder">
+        </label>
+        <p class="summary">Confirm with your MPIN</p>
+        <div class="code-input" id="linked-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="linked-mpin-input"></div>
+        <p class="form-error" role="alert"></p>
+        <button type="submit" class="btn primary" data-testid="linked-submit">Link account</button>
+      </form>
+    </div>
 
-    <section class="profile-section" aria-labelledby="account-heading">
-      <h3 id="account-heading">Account</h3>
+    <!-- ===== Change MPIN ===== -->
+    <form class="profile-panel form" data-panel="mpin" id="mpin-change-form" novalidate hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-profile-panel="main" aria-label="Back to profile">‹</button>
+        <h2>Change MPIN</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="summary">Current MPIN</p>
+      <div class="code-input" id="mpin-old-input" data-length="6" data-secret aria-label="Current MPIN" data-testid="mpin-old-input"></div>
+      <p class="summary">New MPIN</p>
+      <div class="code-input" id="mpin-new-input" data-length="6" data-secret aria-label="New MPIN" data-testid="mpin-new-input"></div>
+      <p class="summary">Confirm new MPIN</p>
+      <div class="code-input" id="mpin-confirm-input" data-length="6" data-secret aria-label="Confirm new MPIN" data-testid="mpin-confirm-input"></div>
+      <p class="hint center">Avoid repeated digits (111111) and runs (123456). Like every MPIN, it's valid for 5 minutes.</p>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="mpin-change-submit">Change MPIN</button>
+      <button type="button" class="btn link" id="profile-new-mpin" data-testid="profile-new-mpin">Forgot or expired MPIN? Get a new one</button>
+    </form>
+
+    <!-- ===== Security & biometrics ===== -->
+    <div class="profile-panel form" data-panel="security" hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-profile-panel="main" aria-label="Back to profile">‹</button>
+        <h2>Security &amp; Biometrics</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <label class="card-lock">
+        <span><strong>Biometric Face ID / Touch ID Login</strong><small>Simulated in the web demo: saved as a preference</small></span>
+        <input type="checkbox" role="switch" class="toggle on-green" id="sec-bio" data-testid="sec-bio">
+      </label>
+      <label class="card-lock">
+        <span><strong>SMS 2FA Verification</strong><small>A code for EVERY Send and Bank Transfer. Above ₱1,000 a code is always required.</small></span>
+        <input type="checkbox" role="switch" class="toggle on-green" id="sec-sms" data-testid="sec-sms">
+      </label>
+      <form id="sec-mpin-form" class="form" novalidate hidden>
+        <p class="summary">Turning SMS 2FA off makes your account less safe. Confirm with your MPIN.</p>
+        <div class="code-input" id="sec-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="sec-mpin-input"></div>
+        <p class="form-error" role="alert"></p>
+        <div class="vault-actions">
+          <button type="button" class="btn secondary" id="sec-mpin-cancel">Keep it on</button>
+          <button type="submit" class="btn primary" data-testid="sec-mpin-submit">Turn off</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ===== Help center ===== -->
+    <div class="profile-panel form" data-panel="help" hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-profile-panel="main" aria-label="Back to profile">‹</button>
+        <h2>Help Center</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <section class="help-block" aria-labelledby="faq-heading">
+        <h3 id="faq-heading">Frequently asked questions</h3>
+        <div class="faq" id="faq-list"></div>
+      </section>
+
+      <section class="help-block chat" aria-labelledby="chat-heading" data-testid="live-chat">
+        <h3 id="chat-heading">Live chat <small>PayPulse Assistant · automated</small></h3>
+        <ol class="chat-log" id="chat-log" aria-live="polite"></ol>
+        <form id="chat-form" class="chat-input" novalidate>
+          <input name="message" autocomplete="off" placeholder="Ask about MPIN, limits, bills…" aria-label="Message" data-testid="chat-input">
+          <button type="submit" class="btn primary" data-testid="chat-send">Send</button>
+        </form>
+      </section>
+
+      <section class="help-block" aria-labelledby="ticket-heading">
+        <h3 id="ticket-heading">Submit a support ticket</h3>
+        <form id="ticket-form" class="form" novalidate>
+          <label>Topic
+            <select name="category" data-testid="ticket-category">
+              <option value="TRANSFER">Send / Bank Transfer</option>
+              <option value="BILLS">Pay Bills / Cashback</option>
+              <option value="LOAN">Instant Loan</option>
+              <option value="CARD">Virtual card</option>
+              <option value="ACCOUNT">Account &amp; MPIN</option>
+              <option value="OTHER">Something else</option>
+            </select>
+          </label>
+          <label>Subject
+            <input name="subject" maxlength="100" data-testid="ticket-subject">
+          </label>
+          <label>Message
+            <textarea name="message" rows="3" maxlength="1000" data-testid="ticket-message"></textarea>
+          </label>
+          <p class="form-error" role="alert"></p>
+          <button type="submit" class="btn primary" data-testid="ticket-submit">Submit ticket</button>
+        </form>
+        <ul class="ticket-list" id="ticket-list" data-testid="ticket-list"></ul>
+      </section>
+    </div>
+
+    <!-- ===== Account details ===== -->
+    <div class="profile-panel form" data-panel="account" hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" data-profile-panel="main" aria-label="Back to profile">‹</button>
+        <h2>Account details</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
       <dl class="review" id="profile-account" data-testid="profile-account"></dl>
-    </section>
-
-    <section class="profile-section" aria-labelledby="security-heading">
-      <h3 id="security-heading">Security &amp; rules</h3>
-      <dl class="review" id="profile-security" data-testid="profile-security"></dl>
-      <button type="button" class="btn secondary" id="profile-new-mpin" data-testid="profile-new-mpin">Get a new MPIN</button>
-    </section>
+    </div>
   </dialog>
 
   <!-- ============ Transaction receipt ============ -->
@@ -385,6 +861,7 @@
         <span>Reference No.</span>
         <strong id="receipt-ref" data-testid="receipt-ref"></strong>
       </div>
+      <p class="cashback-stamp" id="receipt-cashback" data-testid="receipt-cashback" hidden></p>
       <dl class="review receipt-rows" id="receipt-rows" data-testid="receipt-rows"></dl>
       <p class="receipt-note">PayPulse demo receipt. Amounts are play money.</p>
       <button type="button" class="btn link" id="receipt-iso" data-testid="receipt-iso" hidden>View ISO 20022 message (pacs.008)</button>
@@ -551,34 +1028,40 @@
       <span class="qa-badge">DEV ONLY</span>
       <button type="button" class="close" id="qa-close" aria-label="Close QA panel">×</button>
     </header>
-    <p class="qa-note">Affects only your own account.</p>
+    <p class="qa-note">Admins only. Affects only your own account.</p>
+    <button type="button" class="btn qa-primary" id="qa-reset" data-testid="qa-reset">
+      Reset DB State
+      <small>Wallet ₱100,000 · savings ₱0 · open loan written off · activity cleared</small>
+    </button>
     <label class="switch">
       <input type="checkbox" id="qa-slow" data-testid="qa-slow">
-      <span><strong>Slow network</strong><small>Every API call waits 3 seconds</small></span>
+      <span><strong>Simulate 3s Network Latency</strong><small>Every API call (Express Send included) waits 3 seconds</small></span>
     </label>
     <label class="switch">
       <input type="checkbox" id="qa-fail" data-testid="qa-fail">
-      <span><strong>Fail next transaction</strong><small>Next transfer or top-up returns HTTP 500, then turns off</small></span>
+      <span><strong>Trigger HTTP 500 Error</strong><small>The next transfer, top-up, savings move or loan fails with 500 and no money moves</small></span>
     </label>
-    <label class="switch">
-      <input type="checkbox" id="qa-freeze" data-testid="qa-freeze">
-      <span><strong>Freeze account</strong><small>Sending money is blocked (423 ACCOUNT_FROZEN)</small></span>
-    </label>
-    <label class="qa-select">
-      <span><strong>Chaos mode</strong><small>Sends x-chaos-* headers with every API call</small></span>
-      <select id="qa-chaos" data-testid="qa-chaos">
-        <option value="off">Off</option>
-        <option value="db-lock">DB lock: 2 s per call</option>
-        <option value="drop">503 drops (50%, request not run)</option>
-        <option value="drop-after">503 after success (50%, answer lost)</option>
-      </select>
-    </label>
-    <button type="button" class="btn secondary" id="qa-interest" data-testid="qa-interest">Simulate 30 days of savings interest</button>
-    <div class="qa-actions">
-      <button type="button" class="btn secondary" id="qa-pesonet" data-testid="qa-pesonet">Run PESONet cut-off now</button>
-      <button type="button" class="btn secondary" id="qa-clear-aml" data-testid="qa-clear-aml">Clear compliance hold</button>
-    </div>
-    <button type="button" class="btn secondary" id="qa-reset" data-testid="qa-reset">Reset account state</button>
+    <details class="qa-more">
+      <summary>More tools</summary>
+      <label class="switch">
+        <input type="checkbox" id="qa-freeze" data-testid="qa-freeze">
+        <span><strong>Freeze account</strong><small>Sending money is blocked (423 ACCOUNT_FROZEN)</small></span>
+      </label>
+      <label class="qa-select">
+        <span><strong>Chaos mode</strong><small>Sends x-chaos-* headers with every API call</small></span>
+        <select id="qa-chaos" data-testid="qa-chaos">
+          <option value="off">Off</option>
+          <option value="db-lock">DB lock: 2 s per call</option>
+          <option value="drop">503 drops (50%, request not run)</option>
+          <option value="drop-after">503 after success (50%, answer lost)</option>
+        </select>
+      </label>
+      <button type="button" class="btn secondary" id="qa-interest" data-testid="qa-interest">Simulate 30 days of savings interest</button>
+      <div class="qa-actions">
+        <button type="button" class="btn secondary" id="qa-pesonet" data-testid="qa-pesonet">Run PESONet cut-off now</button>
+        <button type="button" class="btn secondary" id="qa-clear-aml" data-testid="qa-clear-aml">Clear compliance hold</button>
+      </div>
+    </details>
     <p class="qa-status" id="qa-status" data-testid="qa-status" aria-live="polite"></p>
   </aside>
 
