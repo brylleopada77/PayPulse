@@ -165,13 +165,29 @@ jobs:
           path: reports/
           retention-days: 30
 
-      - name: Upload new Linux visual baselines (commit them to enable the comparison on CI)
+      # Only baselines this run CREATED (not yet in git), e.g. after adding a viewport or a new
+      # visual test. Commit them to make CI compare against them. Nothing new: nothing uploaded.
+      - name: Collect new visual baselines
+        id: newbaselines
         if: always()
+        run: |
+          mkdir -p new-visual-baselines
+          git ls-files --others --exclude-standard -- 'tests/visual/**/*.png' > new-baselines.txt
+          if [ -s new-baselines.txt ]; then
+            xargs -a new-baselines.txt cp --parents -t new-visual-baselines
+            echo "count=$(wc -l < new-baselines.txt)" >> "$GITHUB_OUTPUT"
+            echo "### New visual baselines: $(wc -l < new-baselines.txt) (artifact visual-baselines-new)" >> "$GITHUB_STEP_SUMMARY"
+            sed 's/^/- /' new-baselines.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "count=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload new visual baselines
+        if: always() && steps.newbaselines.outputs.count != '0'
         uses: actions/upload-artifact@v5
         with:
-          name: visual-baselines-linux
-          path: tests/visual/**/*-linux.png
-          if-no-files-found: ignore
+          name: visual-baselines-new
+          path: new-visual-baselines/
           retention-days: 14
 
   docker:
