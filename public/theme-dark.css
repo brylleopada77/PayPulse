@@ -355,6 +355,9 @@
 :root[data-theme="dark"] .assets-pill.glass-btn:hover {
   background: rgba(24, 26, 29, 0.4);
 }
+:root[data-theme="dark"] .telco-detect.warn {
+  color: #ffb36b;
+}
 
 /* ===== Designed: Obsidian & Emerald dark glass. Brand colours are theme tokens (top of styles.css), never literals here. ===== */
 :root[data-theme="dark"] {

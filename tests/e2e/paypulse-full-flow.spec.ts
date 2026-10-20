@@ -97,11 +97,17 @@ test.describe('PayPulse full flow', () => {
     await expect(page.locator('#card-pay-form .form-error')).toContainText('this card is locked');
     expect(await getBalanceCents(request, carol)).toBe(100_000);
 
-    // Unlocked again, the purchase goes through
-    await page.getByTestId('card-freeze').uncheck({ force: true });
+    // Unlocking needs the MPIN; then the purchase (also MPIN-confirmed) goes through
+    await page.getByTestId('card-freeze').click({ force: true }); // stays locked until the MPIN is confirmed
+    await expect(page.getByTestId('card-mpin-dialog')).toBeVisible();
+    await expect(page.getByTestId('card-freeze')).toBeChecked();
+    await typeCode(page, 'card-mpin-input', carol.mpin);
+    await page.locator('#card-mpin-form [type="submit"]').click();
     await expect(page.getByTestId('card-lock-hint')).toHaveText('Card is active: online payments are allowed');
     await page.getByTestId('card-pay-amount').fill('250');
     await page.getByTestId('card-pay-submit').click();
+    await typeCode(page, 'card-mpin-input', carol.mpin);
+    await page.locator('#card-mpin-form [type="submit"]').click();
     await expect(page.getByTestId('receipt-title')).toHaveText('Card Payment Approved');
     expect(await getBalanceCents(request, carol)).toBe(75_000);
   });

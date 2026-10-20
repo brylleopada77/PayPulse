@@ -28,12 +28,13 @@ router.get('/:token', async (req, res) => {
   res.json(await cardService.getCard(req.user.id, req.params.token));
 });
 
-// PATCH /api/v1/cards/:token  { status: "ACTIVE" | "FROZEN" }
+// PATCH /api/v1/cards/:token  { status: "ACTIVE" | "FROZEN", mpin (to unlock) }
 router.patch('/:token', async (req, res) => {
-  res.json(await cardService.setStatus(req.user.id, req.params.token, (req.body || {}).status));
+  const { status, mpin } = req.body || {};
+  res.json(await cardService.setStatus(req.user.id, req.params.token, status, mpin));
 });
 
-// POST /api/v1/cards/:token/payments  { amount, merchant? }  -> online purchase with the virtual card
+// POST /api/v1/cards/:token/payments  { amount, merchant?, mpin }  -> online purchase with the virtual card
 //   201 APPROVED (wallet debited) | 403 CARD_FROZEN / CARD_EXPIRED (declined) | 422 INSUFFICIENT_FUNDS
 // Same guards as a transfer: frozen account, QA forced errors, AML, daily limit / anti-spam.
 router.post('/:token/payments', idempotency, blockFrozenAccounts, simulateServerError, amlMonitor, enforceTransferLimits, async (req, res) => {

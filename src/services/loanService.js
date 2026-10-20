@@ -189,8 +189,9 @@ function activeLoanError(loanId) {
 }
 
 /** Repay part or all of a loan from the wallet. Interest is paid first, then principal. */
-async function repay(userId, loanId, { amount } = {}) {
+async function repay(userId, loanId, { amount, mpin } = {}) {
   const amountCents = toCents(amount);
+  await mpinService.verifyMpin(userId, mpin); // money leaves the wallet
 
   return withTransaction(async (client) => {
     const wallet = await client.query('SELECT id FROM accounts WHERE user_id = $1 FOR UPDATE', [userId]);

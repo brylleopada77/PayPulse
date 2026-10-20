@@ -11,9 +11,9 @@ async function newCard(request: APIRequestContext, user: TestUser): Promise<stri
   return (await response.json()).token;
 }
 const pay = (request: APIRequestContext, user: TestUser, token: string, data: Record<string, unknown>) =>
-  request.post(`/api/v1/cards/${token}/payments`, { data, headers: authHeader(user.token) });
+  request.post(`/api/v1/cards/${token}/payments`, { data: { mpin: user.mpin, ...data }, headers: authHeader(user.token) });
 const setStatus = (request: APIRequestContext, user: TestUser, token: string, status: string) =>
-  request.patch(`/api/v1/cards/${token}`, { data: { status }, headers: authHeader(user.token) });
+  request.patch(`/api/v1/cards/${token}`, { data: { status, mpin: user.mpin }, headers: authHeader(user.token) });
 
 test.describe('Virtual card payments', () => {
   test('an active card pays: wallet debited, receipt and history entry, ledger balanced', async ({ request }) => {
@@ -112,5 +112,30 @@ test.describe('Virtual card payments', () => {
     expect(approved).toBeLessThanOrEqual(3);
     for (const r of results.filter((x) => x.status() !== 201)) expect([422, 429]).toContain(r.status());
     expect(await getBalanceCents(request, alice)).toBe(100_000 - approved * 30_000);
+  });
+});
+
+test.describe('MPIN on card payments and unlocking', () => {
+  test('a purchase needs the MPIN; a wrong one moves no money', async ({ request }) => {
+    const alice = await createFundedUser(request, 500);
+    const token = await newCard(request, alice);
+    const missing = await pay(request, alice, token, { amount: 10, mpin: undefined });
+    expect(missing.status()).toBe(400);
+    expect((await missing.json()).error.code).toBe('MPIN_REQUIRED');
+    const wrong = await pay(request, alice, token, { amount: 10, mpin: alice.mpin === '000000' ? '111111' : '000000' });
+    expect(wrong.status()).toBe(403);
+    expect((await wrong.json()).error.code).toBe('INVALID_MPIN');
+    expect(await getBalanceCents(request, alice)).toBe(50_000);
+  });
+
+  test('locking is one tap; unlocking needs the MPIN', async ({ request }) => {
+    const alice = await createFundedUser(request, 500);
+    const token = await newCard(request, alice);
+    const lock = await request.patch(`/api/v1/cards/${token}`, { data: { status: 'FROZEN' }, headers: authHeader(alice.token) });
+    expect(lock.status()).toBe(200);
+    const unlockNoMpin = await request.patch(`/api/v1/cards/${token}`, { data: { status: 'ACTIVE' }, headers: authHeader(alice.token) });
+    expect(unlockNoMpin.status()).toBe(400);
+    expect((await unlockNoMpin.json()).error.code).toBe('MPIN_REQUIRED');
+    expect((await setStatus(request, alice, token, 'ACTIVE')).status()).toBe(200);
   });
 });

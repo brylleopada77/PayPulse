@@ -218,6 +218,10 @@
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></span>
           Pay Bills
         </button>
+        <button type="button" class="quick glass-card glass-press" id="load-btn" data-testid="open-load">
+          <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/><path d="m12.5 6-2 4h3l-2 4"/></svg></span>
+          Buy Load
+        </button>
         <!-- Admins only, and only when the server has the mock payment provider on (MOCK_PAYMENTS=true). -->
         <button type="button" class="quick glass-card glass-press" id="topup-btn" data-open="topup-dialog" data-testid="open-topup" hidden>
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg></span>
@@ -433,6 +437,61 @@
     <p class="empty" id="notif-empty" hidden>You're all caught up.</p>
   </dialog>
 
+  <!-- ============ Buy Load ============ -->
+  <dialog id="load-dialog" class="sheet load-sheet" aria-labelledby="load-title" data-testid="load-dialog">
+    <!-- Step 1: number, network, product -->
+    <form id="load-form" class="form" novalidate>
+      <header class="sheet-head">
+        <h2 id="load-title">Buy Load</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="cashback-hint" id="load-cashback-hint" data-testid="load-cashback-hint"></p>
+      <label>Mobile number
+        <input name="mobileNumber" type="tel" inputmode="numeric" autocomplete="tel" placeholder="09171234567" maxlength="13" required data-testid="load-mobile">
+      </label>
+      <p class="telco-detect" id="load-detect" aria-live="polite" data-testid="load-detect"></p>
+      <div class="brand-chips" id="load-brands" role="radiogroup" aria-label="Network brand" data-testid="load-brands" hidden></div>
+      <details class="telco-override" id="load-override" hidden>
+        <summary>Ported number? Choose the network</summary>
+        <div class="brand-chips" id="load-all-brands" role="radiogroup" aria-label="All brands"></div>
+      </details>
+
+      <div class="segmented" role="tablist" aria-label="Product type" id="load-tabs">
+        <label><input type="radio" name="productType" value="REGULAR" checked data-testid="load-tab-regular"><span>Regular Load</span></label>
+        <label><input type="radio" name="productType" value="PROMO" data-testid="load-tab-promo"><span>Data &amp; Promo Packages</span></label>
+      </div>
+
+      <div id="load-regular" class="form">
+        <div class="amount-grid" id="load-amounts" data-testid="load-amounts"></div>
+        <label>Or enter an amount
+          <input name="amount" inputmode="numeric" placeholder="₱10 to ₱1,000" data-testid="load-custom-amount">
+        </label>
+      </div>
+      <div id="load-promos" class="promo-list" data-testid="load-promos" hidden></div>
+
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="load-continue">Continue</button>
+    </form>
+
+    <!-- Step 2: summary + MPIN -->
+    <form id="load-review" class="form" novalidate hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" id="load-back" aria-label="Back">‹</button>
+        <h2>Payment summary</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <dl class="review" id="load-summary" data-testid="load-summary"></dl>
+      <div class="review-total"><span>Total</span><strong id="load-total" data-testid="load-total"></strong></div>
+      <p class="cashback-banner" id="load-cashback-banner" data-testid="load-cashback-banner"></p>
+      <p class="summary">Enter your 6-digit MPIN to buy</p>
+      <div class="code-input" id="load-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="load-mpin-input"></div>
+      <p class="countdown mpin-status" data-mpin-status data-testid="load-mpin-input-status" aria-live="polite"></p>
+      <button type="button" class="btn link" data-mpin-forgot data-testid="load-mpin-input-forgot">Forgot or didn't get your MPIN?</button>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="load-pay">Buy Load</button>
+    </form>
+  </dialog>
+
   <!-- ============ Pay Bills ============ -->
   <dialog id="bills-dialog" class="sheet bills-sheet" aria-labelledby="bills-title" data-testid="bills-dialog">
     <!-- Step 1: categories, search, billers -->
@@ -488,6 +547,8 @@
       <p class="cashback-banner" id="bills-cashback-banner" data-testid="bills-cashback-banner"></p>
       <p class="summary">Enter your 6-digit MPIN to pay</p>
       <div class="code-input" id="bills-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="bills-mpin-input"></div>
+      <p class="countdown mpin-status" data-mpin-status data-testid="bills-mpin-input-status" aria-live="polite"></p>
+      <button type="button" class="btn link" data-mpin-forgot data-testid="bills-mpin-input-forgot">Forgot or didn't get your MPIN?</button>
       <p class="form-error" role="alert"></p>
       <button type="submit" class="btn primary" data-testid="bills-pay">Pay Bill</button>
     </form>
@@ -638,6 +699,8 @@
       </header>
       <p class="summary" id="card-mpin-purpose"></p>
       <div class="code-input" id="card-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="card-mpin-input"></div>
+      <p class="countdown mpin-status" data-mpin-status data-testid="card-mpin-input-status" aria-live="polite"></p>
+      <button type="button" class="btn link" data-mpin-forgot data-testid="card-mpin-input-forgot">Forgot or didn't get your MPIN?</button>
       <p class="form-error" role="alert"></p>
       <button type="submit" class="btn primary" data-testid="card-mpin-submit">Confirm</button>
     </form>
@@ -799,6 +862,8 @@
         </label>
         <p class="summary">Confirm with your MPIN</p>
         <div class="code-input" id="linked-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="linked-mpin-input"></div>
+      <p class="countdown mpin-status" data-mpin-status data-testid="linked-mpin-input-status" aria-live="polite"></p>
+      <button type="button" class="btn link" data-mpin-forgot data-testid="linked-mpin-input-forgot">Forgot or didn't get your MPIN?</button>
         <p class="form-error" role="alert"></p>
         <button type="submit" class="btn primary" data-testid="linked-submit">Link account</button>
       </form>
@@ -813,6 +878,7 @@
       </header>
       <p class="summary">Current MPIN</p>
       <div class="code-input" id="mpin-old-input" data-length="6" data-secret aria-label="Current MPIN" data-testid="mpin-old-input"></div>
+      <p class="countdown mpin-status" data-mpin-status data-testid="mpin-old-input-status" aria-live="polite"></p>
       <p class="summary">New MPIN</p>
       <div class="code-input" id="mpin-new-input" data-length="6" data-secret aria-label="New MPIN" data-testid="mpin-new-input"></div>
       <p class="summary">Confirm new MPIN</p>
@@ -841,6 +907,8 @@
       <form id="sec-mpin-form" class="form" novalidate hidden>
         <p class="summary">Turning SMS 2FA off makes your account less safe. Confirm with your MPIN.</p>
         <div class="code-input" id="sec-mpin-input" data-length="6" data-secret aria-label="6-digit MPIN" data-testid="sec-mpin-input"></div>
+      <p class="countdown mpin-status" data-mpin-status data-testid="sec-mpin-input-status" aria-live="polite"></p>
+      <button type="button" class="btn link" data-mpin-forgot data-testid="sec-mpin-input-forgot">Forgot or didn't get your MPIN?</button>
         <p class="form-error" role="alert"></p>
         <div class="vault-actions">
           <button type="button" class="btn secondary" id="sec-mpin-cancel">Keep it on</button>

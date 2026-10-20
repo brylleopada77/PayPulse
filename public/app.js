@@ -159,7 +159,8 @@
     if (tx.type === 'BANK_TRANSFER') return { title: tx.description, icon: '🏦' };
     if (tx.type === 'LOAN_DISBURSEMENT') return { title: 'Loan Disbursement', icon: '💰' };
     if (tx.type === 'BILL_PAYMENT') return { title: tx.description, icon: '🧾' };
-    if (tx.type === 'CASHBACK') return { title: 'Cashback Reward - Bills Payment', icon: '🎁' };
+    if (tx.type === 'CASHBACK') return { title: tx.description || 'Cashback Reward', icon: '🎁' };
+    if (tx.type === 'LOAD_PURCHASE') return { title: tx.description, icon: '📱' };
     if (tx.type === 'CARD_PAYMENT') return { title: tx.description, icon: '💳' };
     if (tx.type === 'INTEREST') return { title: 'Savings interest earned', icon: '🌱' };
     if (tx.type === 'LOAN_REPAYMENT') return { title: 'Loan Repayment', icon: '↩' };
@@ -1530,8 +1531,13 @@
   $('#mpin-saved').addEventListener('click', () => {
     revealDialog.close();
     $('#mpin-reveal').textContent = '';
+    const waiting = [...document.querySelectorAll('dialog[open]')].find((d) => d !== revealDialog);
     if (mpinDialog.open) mpinInput.clear();
-    else if (pending && !otpDialog.open) openMpinPad(); // continue the transfer that needed an MPIN
+    else if (waiting) {
+      // Another MPIN screen (Buy Load, Pay Bills, card, loan…) is still open underneath: back to it.
+      waiting.querySelector('.code-input input')?.focus();
+      updateMpinStatuses();
+    } else if (pending && !otpDialog.open) openMpinPad(); // continue the transfer that needed an MPIN
   });
 
   const RESET_MODES = {
@@ -1564,6 +1570,49 @@
   }
 
   $('#forgot-mpin').addEventListener('click', () => openMpinReset());
+
+  // Every other screen that asks for the MPIN (Buy Load, Pay Bills, Instant Loan, virtual card,
+  // linked accounts, security, Change MPIN) shows the same live status and "get a new MPIN" link.
+  document.querySelectorAll('[data-mpin-forgot]').forEach((btn) => {
+    btn.addEventListener('click', () => openMpinReset(!hasMpin ? 'setup' : mpinSecondsLeft() === 0 ? 'expired' : 'forgot'));
+  });
+
+  function updateMpinStatuses() {
+    const left = mpinSecondsLeft();
+    document.querySelectorAll('[data-mpin-status]').forEach((el) => {
+      if (!el.closest('dialog[open]') || el.closest('[hidden]')) return;
+      el.textContent = !hasMpin
+        ? "You don't have an MPIN yet. Tap below to get one."
+        : left > 0
+          ? `MPIN expires in ${formatCountdown(left)}`
+          : 'Your MPIN has expired. Tap below to get a new one.';
+      el.classList.toggle('expired', !hasMpin || left === 0);
+      el.classList.toggle('warn', hasMpin && left > 0 && left <= 60);
+    });
+  }
+  setInterval(updateMpinStatuses, 500);
+  // Fill it in as soon as an MPIN screen opens (they open from a click, a submit or a switch).
+  for (const type of ['click', 'submit', 'change']) {
+    document.addEventListener(type, () => requestAnimationFrame(updateMpinStatuses), true);
+  }
+
+  /**
+   * For any MPIN-protected action: an expired or missing MPIN opens "get a new MPIN" right away
+   * (the screen underneath stays open, so the user continues where they were). Returns true if handled.
+   */
+  function handleMpinError(err) {
+    if (err.code === 'MPIN_EXPIRED') {
+      setMpinExpiry(0);
+      openMpinReset('expired');
+      return true;
+    }
+    if (err.code === 'MPIN_NOT_SET') {
+      hasMpin = false;
+      openMpinReset('setup');
+      return true;
+    }
+    return false;
+  }
 
   resetForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2006,6 +2055,7 @@
       await loadProfile();
       toast(linked.name + ' ' + linked.maskedNumber + ' linked', 'success');
     } catch (err) {
+      if (handleMpinError(err)) return linkedMpin.clear();
       if (err.code === 'INVALID_MPIN') linkedMpin.clear();
       setFormError(linkedForm, err.message);
     }
@@ -2050,6 +2100,7 @@
       showProfilePanel('main');
       toast('MPIN changed. Use your new MPIN for your next transfer.', 'success');
     } catch (err) {
+      if (handleMpinError(err)) return mpinOld.clear();
       if (err.code === 'INVALID_MPIN') mpinOld.clear();
       setFormError(mpinChangeForm, err.message);
     }
@@ -2105,6 +2156,7 @@
       secMpinForm.hidden = true;
       toast('SMS 2FA turned off. A code is still required above ₱1,000.');
     } catch (err) {
+      if (handleMpinError(err)) return secMpin.clear();
       if (err.code === 'INVALID_MPIN') secMpin.clear();
       setFormError(secMpinForm, err.message);
     }
@@ -2272,7 +2324,247 @@
     }
   });
 
-  // ---------- Pay Bills ----------
+  // ---------- Buy Load ----------
+
+  const loadDialog = $('#load-dialog');
+  const loadForm = $('#load-form');
+  const loadReview = $('#load-review');
+  const loadMpin = createCodeInput($('#load-mpin-input'));
+  let loadCatalog = null; // GET /api/v1/load
+  let loadBrand = null; // selected brand code
+  let loadDetected = null; // detected network code
+  let loadAmount = null; // regular amount (pesos)
+  let loadPromo = null; // selected promo code
+  let loadPending = null;
+
+  /** Same normalisation as the server: +63 / 63 / spaces -> 09XXXXXXXXX */
+  const normalizeLoadMobile = (v) => {
+    const d = String(v || '').replace(/[\s()-]/g, '').replace(/^\+?63/, '0');
+    return /^09\d{9}$/.test(d) ? d : null;
+  };
+  const brandName = (code) => loadCatalog?.brands.find((b) => b.code === code)?.name ?? code;
+  const loadProductType = () => loadForm.elements.productType.value;
+
+  function brandChip(code, group) {
+    const label = document.createElement('label');
+    label.className = 'brand-chip brand-' + code.toLowerCase();
+    const input = Object.assign(document.createElement('input'), { type: 'radio', name: group, value: code, checked: code === loadBrand });
+    input.dataset.testid = (group === 'load-brand' ? 'load-brand-' : 'load-brand-any-') + code;
+    input.addEventListener('change', () => selectBrand(code));
+    label.append(input, Object.assign(document.createElement('span'), { textContent: brandName(code) }));
+    return label;
+  }
+
+  function selectBrand(code) {
+    loadBrand = code;
+    if (loadPromo && loadCatalog.promos.find((p) => p.code === loadPromo)?.brand !== code) loadPromo = null;
+    renderLoadBrands();
+    renderLoadProducts();
+  }
+
+  function renderLoadBrands() {
+    const network = loadCatalog.networks.find((n) => n.code === loadDetected);
+    $('#load-brands').hidden = !network;
+    $('#load-brands').replaceChildren(...(network ? network.brands.map((b) => brandChip(b, 'load-brand')) : []));
+    $('#load-override').hidden = !normalizeLoadMobile(loadForm.elements.mobileNumber.value);
+    $('#load-all-brands').replaceChildren(...loadCatalog.brands.map((b) => brandChip(b.code, 'load-brand-any')));
+  }
+
+  function onLoadMobileInput() {
+    const number = normalizeLoadMobile(loadForm.elements.mobileNumber.value);
+    const detect = $('#load-detect');
+    loadDetected = null;
+    if (!number) {
+      detect.textContent = loadForm.elements.mobileNumber.value.trim() ? 'Enter all 11 digits, e.g. 09171234567' : '';
+      detect.className = 'telco-detect';
+      loadBrand = null;
+    } else {
+      const prefix = number.slice(0, 4);
+      const network = loadCatalog.networks.find((n) => n.prefixes?.includes(prefix)) ?? null;
+      if (network) {
+        loadDetected = network.code;
+        if (!network.brands.includes(loadBrand)) loadBrand = network.brands[0];
+        detect.textContent = network.brands.length > 1
+          ? `${network.name} detected (${prefix}). Choose your brand:`
+          : `${network.name} detected (${prefix})`;
+        detect.className = 'telco-detect ok';
+      } else {
+        detect.textContent = `We don't recognise ${prefix}. Choose the network below.`;
+        detect.className = 'telco-detect warn';
+        $('#load-override').open = true;
+      }
+    }
+    renderLoadBrands();
+    renderLoadProducts();
+  }
+
+  function renderLoadProducts() {
+    const promo = loadProductType() === 'PROMO';
+    $('#load-regular').hidden = promo;
+    $('#load-promos').hidden = !promo;
+    $('#load-amounts').replaceChildren(
+      ...loadCatalog.regularAmounts.map((a) => {
+        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'amount-chip', textContent: money(a).replace('.00', '') });
+        b.dataset.testid = 'load-amount-' + a;
+        b.setAttribute('aria-pressed', String(loadAmount === a));
+        b.addEventListener('click', () => {
+          loadAmount = a;
+          loadForm.elements.amount.value = '';
+          renderLoadProducts();
+        });
+        return b;
+      }),
+    );
+    const promos = loadCatalog.promos.filter((p) => p.brand === loadBrand);
+    $('#load-promos').replaceChildren(
+      ...(loadBrand
+        ? promos.length
+          ? promos.map((p) => {
+              const b = Object.assign(document.createElement('button'), { type: 'button', className: 'promo-item' });
+              b.dataset.testid = 'load-promo-' + p.code;
+              b.setAttribute('aria-pressed', String(loadPromo === p.code));
+              const text = document.createElement('span');
+              text.append(
+                Object.assign(document.createElement('strong'), { textContent: p.name }),
+                Object.assign(document.createElement('small'), { textContent: p.description + ' · ' + p.validity }),
+              );
+              b.append(text, Object.assign(document.createElement('span'), { className: 'promo-price', textContent: money(p.price).replace('.00', '') }));
+              b.addEventListener('click', () => {
+                loadPromo = p.code;
+                renderLoadProducts();
+              });
+              return b;
+            })
+          : [Object.assign(document.createElement('p'), { className: 'empty', textContent: 'No promos for ' + brandName(loadBrand) + ' yet. Use Regular Load.' })]
+        : [Object.assign(document.createElement('p'), { className: 'empty', textContent: 'Enter the mobile number first to see its promos.' })]),
+    );
+  }
+
+  function loadCashbackHint() {
+    const c = loadCatalog?.cashback;
+    if (!c) return '';
+    return c.remainingToday > 0
+      ? `🎁 Earn ${money(c.amount)} cashback on loads of ${money(c.minAmount)} or more (${c.remainingToday} of ${c.dailyMax} left today)`
+      : `You've used today's ${c.dailyMax} load cashbacks. More tomorrow!`;
+  }
+
+  async function openLoad() {
+    try {
+      loadCatalog = await api('/api/v1/load');
+    } catch (err) {
+      return toast(err.message, 'error');
+    }
+    loadForm.reset();
+    setFormError(loadForm);
+    loadBrand = null;
+    loadDetected = null;
+    loadAmount = null;
+    loadPromo = null;
+    $('#load-cashback-hint').textContent = loadCashbackHint();
+    $('#load-detect').textContent = '';
+    $('#load-override').open = false;
+    loadForm.hidden = false;
+    loadReview.hidden = true;
+    renderLoadBrands();
+    renderLoadProducts();
+    loadDialog.showModal();
+    loadForm.elements.mobileNumber.focus();
+  }
+
+  $('#load-btn').addEventListener('click', openLoad);
+  loadForm.elements.mobileNumber.addEventListener('input', onLoadMobileInput);
+  loadForm.querySelectorAll('[name="productType"]').forEach((r) => r.addEventListener('change', renderLoadProducts));
+  loadForm.elements.amount.addEventListener('input', () => {
+    if (loadForm.elements.amount.value.trim()) { loadAmount = null; renderLoadProducts(); }
+  });
+  $('#load-back').addEventListener('click', () => { loadReview.hidden = true; loadForm.hidden = false; });
+
+  loadForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    setFormError(loadForm);
+    const mobileNumber = normalizeLoadMobile(loadForm.elements.mobileNumber.value);
+    if (!mobileNumber) return setFormError(loadForm, 'Enter an 11-digit mobile number, e.g. 09171234567.');
+    if (!loadBrand) return setFormError(loadForm, 'Choose the network brand.');
+    const type = loadProductType();
+    let amount;
+    let product;
+    if (type === 'PROMO') {
+      const promo = loadCatalog.promos.find((p) => p.code === loadPromo && p.brand === loadBrand);
+      if (!promo) return setFormError(loadForm, 'Choose a promo package.');
+      amount = promo.price;
+      product = promo.name + ' (' + promo.description + ')';
+    } else {
+      const custom = loadForm.elements.amount.value.trim();
+      amount = custom ? Number(custom) : loadAmount;
+      if (!Number.isInteger(amount) || amount < loadCatalog.customMin || amount > loadCatalog.customMax) {
+        return setFormError(loadForm, `Choose an amount, or enter a whole amount from ₱${loadCatalog.customMin} to ₱${loadCatalog.customMax.toLocaleString('en-PH')}.`);
+      }
+      product = 'Regular Load ' + money(amount).replace('.00', '');
+    }
+    if (currentBalance !== null && amount > Number(currentBalance)) {
+      return setFormError(loadForm, `Your Available Balance is ${money(currentBalance)}.`);
+    }
+    loadPending = type === 'PROMO'
+      ? { mobileNumber, brand: loadBrand, productType: 'PROMO', promoCode: loadPromo }
+      : { mobileNumber, brand: loadBrand, productType: 'REGULAR', amount };
+
+    setRows($('#load-summary'), [
+      ['Mobile Number', mobileNumber],
+      ['Network', brandName(loadBrand)],
+      [type === 'PROMO' ? 'Promo' : 'Load', product],
+      ['Amount', money(amount)],
+      ['Convenience Fee', `${money(0)} (free)`],
+    ]);
+    $('#load-total').textContent = money(amount);
+    const c = loadCatalog.cashback;
+    const eligible = amount >= Number(c.minAmount) && c.remainingToday > 0;
+    const banner = $('#load-cashback-banner');
+    banner.classList.toggle('muted', !eligible);
+    banner.textContent = eligible
+      ? `🎁 Earn ${money(c.amount)} Cashback on this Load Purchase!`
+      : c.remainingToday > 0
+        ? `Cashback applies to loads of ${money(c.minAmount)} or more.`
+        : `No cashback on this one: you've earned today's ${c.dailyMax} load cashbacks.`;
+    setFormError(loadReview);
+    loadMpin.clear();
+    loadForm.hidden = true;
+    loadReview.hidden = false;
+  });
+
+  loadReview.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const mpin = loadMpin.value();
+    setFormError(loadReview);
+    if (!/^\d{6}$/.test(mpin)) return setFormError(loadReview, 'Enter all 6 digits of your MPIN.');
+    const submit = loadReview.querySelector('[type="submit"]');
+    submit.disabled = true; // one tap = one purchase
+    try {
+      const bought = await api('/api/v1/load/purchase', { method: 'POST', body: { ...loadPending, mpin }, idempotencyKey: newIdempotencyKey() });
+      loadDialog.close();
+      await loadWallet();
+      toast(
+        bought.cashback.earned
+          ? `${bought.brand.name} load sent to ${bought.mobileNumber}. ${money(bought.cashback.amount)} cashback added!`
+          : `${bought.brand.name} load sent to ${bought.mobileNumber}.`,
+        'success',
+      );
+      openReceipt(bought.transactionId);
+    } catch (err) {
+      if (handleMpinError(err)) {
+        loadMpin.clear();
+      } else if (err.code === 'INVALID_MPIN') {
+        toast('Invalid MPIN', 'error');
+        loadMpin.clear();
+      } else {
+        setFormError(loadReview, describeError(err));
+        if (err.unconfirmed) loadWallet().catch(() => {});
+      }
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  // ---------- Pay Bills ----------  
 
   const billsDialog = $('#bills-dialog');
   const billsForm = $('#bills-form');
@@ -2486,7 +2778,9 @@
       );
       openReceipt(paid.transactionId);
     } catch (err) {
-      if (err.code === 'INVALID_MPIN') {
+      if (handleMpinError(err)) {
+        billsMpin.clear();
+      } else if (err.code === 'INVALID_MPIN') {
         toast('Invalid MPIN', 'error');
         billsMpin.clear();
       } else if (err.code === 'INVALID_BILLER_ACCOUNT' || err.code === 'INVALID_ACCOUNT_NAME') {
@@ -2624,29 +2918,13 @@
     askCardMpin('loan');
   });
 
-  async function repayLoan(amount, full) {
+  function repayLoan(amount, full) {
     const loan = loanOverview?.activeLoan;
-    const box = $('#loan-active');
-    setFormError(box);
+    setFormError($('#loan-active'));
     if (!loan) return;
     if (full && !window.confirm(`Pay ${money(amount)} from your wallet and close this loan?`)) return;
-    try {
-      const result = await api(`/api/v1/loans/${loan.loanId}/repay`, {
-        method: 'POST',
-        body: { amount },
-        idempotencyKey: newIdempotencyKey(),
-      });
-      await Promise.all([loadWallet(), loadLoans()]);
-      if (result.status === 'PAID') {
-        loanDialog.close();
-        toast('Loan fully paid. Your ₱50,000 credit line is available again.', 'success');
-      } else {
-        toast(`Paid ${money(result.payment.amount)}. You owe ${money(result.outstanding)}.`, 'success');
-      }
-    } catch (err) {
-      setFormError(box, describeError(err));
-      if (err.unconfirmed) loadWallet().catch(() => {});
-    }
+    mpinRequest = { loanId: loan.loanId, amount, full };
+    askCardMpin('repay');
   }
 
   $('#loan-pay-next').addEventListener('click', () => {
@@ -2664,7 +2942,8 @@
   const cardMpinForm = $('#card-mpin-form');
   const cardMpinInput = createCodeInput($('#card-mpin-input'));
   let card = null; // the user's first card (public, masked view)
-  let cardMpinAction = null; // 'generate' | 'reveal'
+  let cardMpinAction = null; // 'generate' | 'reveal' | 'loan' | 'repay' | 'card-pay' | 'unlock'
+  let mpinRequest = null; // details of the action waiting for the MPIN
   let maskTimer = null;
 
   const groupPan = (pan) => pan.replace(/(\d{4})(?=\d)/g, '$1 ');
@@ -2721,7 +3000,13 @@
         ? 'Confirm with your MPIN to create a virtual Visa card linked to your wallet.'
         : action === 'loan'
           ? `Confirm with your MPIN to borrow ${money(loanRequest.amount)} over ${loanRequest.termMonths} months.`
-          : 'Confirm with your MPIN to show the full card number and CVV.';
+          : action === 'repay'
+            ? `Confirm with your MPIN to pay ${money(mpinRequest.amount)} for your Instant Loan.`
+            : action === 'card-pay'
+              ? `Confirm with your MPIN to pay ${money(mpinRequest.amount)} to ${mpinRequest.merchant} with your virtual card.`
+              : action === 'unlock'
+                ? 'Confirm with your MPIN to unlock your card.'
+                : 'Confirm with your MPIN to show the full card number and CVV.';
     setFormError(cardMpinForm);
     cardMpinDialog.showModal();
     cardMpinInput.clear();
@@ -2734,6 +3019,12 @@
     if (!card) return;
     const toggle = event.currentTarget;
     const next = toggle.checked ? 'FROZEN' : 'ACTIVE';
+    if (next === 'ACTIVE') {
+      toggle.checked = true; // stays locked until the MPIN is confirmed
+      mpinRequest = {};
+      askCardMpin('unlock');
+      return;
+    }
     toggle.disabled = true;
     try {
       renderCard(await api(`/api/v1/cards/${card.token}`, { method: 'PATCH', body: { status: next } }));
@@ -2754,19 +3045,11 @@
     if (!card) return;
     const { merchant, amount } = formData(form);
     if (!validAmount(amount.trim())) return setFormError(form, 'Enter a valid amount, e.g. 250 or 99.50.');
-    try {
-      const paid = await api('/api/v1/cards/' + card.token + '/payments', {
-        method: 'POST',
-        body: { amount: amount.trim(), merchant },
-        idempotencyKey: newIdempotencyKey(),
-      });
-      form.reset();
-      await loadWallet();
-      toast(merchant + ' approved: ' + money(paid.amount) + ' (auth ' + paid.authCode + ')', 'success');
-      openReceipt(paid.transactionId);
-    } catch (err) {
-      setFormError(form, describeError(err));
+    if (card.status === 'FROZEN') {
+      return setFormError(form, 'Payment declined: this card is locked. Unlock it in the Card tab to pay.');
     }
+    mpinRequest = { amount: amount.trim(), merchant };
+    askCardMpin('card-pay');
   });
 
   cardMpinForm.addEventListener('submit', async (event) => {
@@ -2775,7 +3058,39 @@
     setFormError(cardMpinForm);
     if (!/^\d{6}$/.test(mpin)) return setFormError(cardMpinForm, 'Enter all 6 digits of your MPIN.');
     try {
-      if (cardMpinAction === 'loan') {
+      if (cardMpinAction === 'repay') {
+        const { loanId, amount, full } = mpinRequest;
+        const result = await api(`/api/v1/loans/${loanId}/repay`, {
+          method: 'POST',
+          body: { amount, mpin },
+          idempotencyKey: newIdempotencyKey(),
+        });
+        cardMpinDialog.close();
+        await Promise.all([loadWallet(), loadLoans()]);
+        if (result.status === 'PAID') {
+          loanDialog.close();
+          toast('Loan fully paid. Your ₱50,000 credit line is available again.', 'success');
+        } else {
+          toast(`Paid ${money(result.payment.amount)}. You owe ${money(result.outstanding)}.`, 'success');
+        }
+        void full;
+      } else if (cardMpinAction === 'card-pay') {
+        const { amount, merchant } = mpinRequest;
+        const paid = await api('/api/v1/cards/' + card.token + '/payments', {
+          method: 'POST',
+          body: { amount, merchant, mpin },
+          idempotencyKey: newIdempotencyKey(),
+        });
+        cardMpinDialog.close();
+        $('#card-pay-form').reset();
+        await loadWallet();
+        toast(merchant + ' approved: ' + money(paid.amount) + ' (auth ' + paid.authCode + ')', 'success');
+        openReceipt(paid.transactionId);
+      } else if (cardMpinAction === 'unlock') {
+        renderCard(await api(`/api/v1/cards/${card.token}`, { method: 'PATCH', body: { status: 'ACTIVE', mpin } }));
+        cardMpinDialog.close();
+        toast('Card unlocked', 'success');
+      } else if (cardMpinAction === 'loan') {
         const loan = await api('/api/v1/loans', {
           method: 'POST',
           body: { ...loanRequest, mpin },
@@ -2806,7 +3121,9 @@
         maskTimer = setTimeout(hideCardDetails, 30_000);
       }
     } catch (err) {
-      if (err.code === 'INVALID_MPIN') {
+      if (handleMpinError(err)) {
+        cardMpinInput.clear();
+      } else if (err.code === 'INVALID_MPIN') {
         toast('Invalid MPIN', 'error');
         cardMpinInput.clear();
       } else {
@@ -3103,6 +3420,18 @@
   /** [label, value, isTotal?] rows shared by the modal and the downloaded image. */
   function receiptRows(r) {
     const hasFee = Number(r.fee) > 0;
+    if (r.type === 'LOAD_PURCHASE' && r.load) {
+      return [
+        ['Network', r.load.brand],
+        ['Mobile Number', r.load.mobileNumber],
+        ['Product', r.load.product],
+        ['Amount', money(r.amount)],
+        ['Convenience Fee', `${money(0)} (free)`],
+        ['Total Paid', money(r.total), true],
+        ['Paid from', `${r.sender.name} · ${r.sender.account}`],
+        ...(r.cashback ? [['Cashback Earned', money(r.cashback)]] : []),
+      ];
+    }
     if (r.type === 'BILL_PAYMENT' && r.biller) {
       return [
         ['Biller', r.biller.name],
