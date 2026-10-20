@@ -28,7 +28,7 @@ export interface IntegrityReport {
   interestCents: number;
   /** Instant Loan money paid into wallets minus repayments taken out of them. */
   loanNetCents: number;
-  /** Cashback paid into wallets minus bill payments taken out of them. */
+  /** Cashback paid into wallets minus bill and card payments taken out of them. */
   billsNetCents: number;
   /** Transactions whose debits do not equal their credits. */
   unbalancedTransactions: number[];
@@ -79,7 +79,7 @@ export async function checkLedgerIntegrity(accountNumbers?: string[]): Promise<I
                  FILTER (WHERE t.type IN ('LOAN_DISBURSEMENT', 'LOAN_REPAYMENT') AND NOT a.is_system), 0)
           AS loans,
         COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' THEN le.amount_cents ELSE -le.amount_cents END)
-                 FILTER (WHERE t.type IN ('BILL_PAYMENT', 'CASHBACK') AND NOT a.is_system), 0)
+                 FILTER (WHERE t.type IN ('BILL_PAYMENT', 'CASHBACK', 'CARD_PAYMENT') AND NOT a.is_system), 0)
           AS bills
       FROM ledger_entries le
       JOIN transactions t ON t.id = le.transaction_id

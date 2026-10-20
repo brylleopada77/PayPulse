@@ -1,0 +1,210 @@
+name: PayPulse QA Pipeline
+
+# Every push and pull request: PostgreSQL service container -> schema migration -> app ->
+# Playwright (API, browser E2E + resilience, visual regression) -> k6 (idempotency + race) ->
+# ledger / end-of-day reconciliation. The HTML report (screenshots + videos), k6 reports and logs
+# are always published as workflow artifacts.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # PayPulse has a KNOWN, intentional race-condition bug in POST /api/transfers (see QA_NOTES.md).
+  # While this is "true", the race checks are reported but don't block the pipeline. After the bug
+  # is fixed, set it to "false" so they become hard gates.
+  RACE_BUG_EXPECTED: "true"
+  NODE_VERSION: 24
+  K6_VERSION: 1.3.0
+  PORT: 3000
+  BASE_URL: http://localhost:3000
+  DATABASE_URL: postgres://paypulse:paypulse@localhost:5432/paypulse
+  JWT_SECRET: ci-jwt-secret
+  WEBHOOK_SECRET: ci-webhook-secret
+  QA_SANDBOX: "true"
+  MOCK_PAYMENTS: "true"
+
+jobs:
+  qa:
+    name: Playwright + k6 (PostgreSQL service)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: paypulse
+          POSTGRES_PASSWORD: paypulse
+          POSTGRES_DB: paypulse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U paypulse -d paypulse"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Tests use the preinstalled Google Chrome; only ffmpeg is needed (video recording).
+      - name: Install Playwright ffmpeg (for test videos)
+        run: npx playwright install ffmpeg
+
+      - name: Apply database migrations (db/schema.sql)
+        run: npm run db:init
+
+      - name: Start the PayPulse app
+        run: |
+          mkdir -p reports
+          nohup node src/server.js > reports/app.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl --fail --silent "$BASE_URL/health" && echo " app is up" && exit 0
+            sleep 1
+          done
+          echo "App did not start"; cat reports/app.log; exit 1
+
+      # One Playwright run so there is one HTML report: projects api, ui (E2E + resilience in the
+      # preinstalled Google Chrome) and visual. Visual baselines are per OS; --update-snapshots=missing
+      # writes Linux baselines the first time (they are uploaded below so they can be committed),
+      # and compares against them once they are in the repository.
+      - name: Run Playwright (API, E2E, resilience, visual regression)
+        id: playwright
+        run: |
+          google-chrome --version
+          npx playwright test --update-snapshots=missing
+
+      - name: Set up k6
+        if: always() && steps.playwright.outcome != 'skipped'
+        uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: ${{ env.K6_VERSION }}
+
+      - name: k6 idempotency test (one key, 30 sends, exactly one transfer)
+        id: k6idem
+        if: always() && steps.playwright.outcome != 'skipped'
+        run: k6 run tests/load/idempotent-transfer.js
+
+      - name: k6 race-condition test (known bug)
+        id: k6race
+        if: always() && steps.playwright.outcome != 'skipped'
+        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
+        run: k6 run tests/load/race-transfer.js
+
+      - name: Database ledger check
+        id: dbcheck
+        if: always() && steps.playwright.outcome != 'skipped'
+        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
+        run: npm run db:check
+
+      - name: System ledger assertion (money in system = balances + fees)
+        id: systemledger
+        if: always() && steps.playwright.outcome != 'skipped'
+        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
+        run: node tests/assert-system-ledger.js
+
+      - name: End-of-day reconciliation (trial balance + GL controls)
+        id: eod
+        if: always() && steps.playwright.outcome != 'skipped'
+        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
+        run: node scripts/reconcile-eod.js
+
+      - name: Test summary
+        if: always()
+        run: |
+          {
+            echo "## PayPulse QA pipeline"
+            echo "| Step | Result |"
+            echo "|------|--------|"
+            echo "| Playwright (API, E2E, resilience, visual) | \`${{ steps.playwright.outcome }}\` |"
+            echo "| k6 idempotency (gate) | \`${{ steps.k6idem.outcome }}\` |"
+            echo "| k6 race condition (known bug: \`${RACE_BUG_EXPECTED}\`) | \`${{ steps.k6race.outcome }}\` |"
+            echo "| Database ledger check | \`${{ steps.dbcheck.outcome }}\` |"
+            echo "| System ledger assertion | \`${{ steps.systemledger.outcome }}\` |"
+            echo "| End-of-day reconciliation | \`${{ steps.eod.outcome }}\` |"
+            echo ""
+            echo "Artifacts: **playwright-report** (HTML, screenshots, videos), **k6-and-logs**, **test-results**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Upload test results (videos, traces, JUnit)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 14
+
+      - name: Upload k6 reports and logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: k6-and-logs
+          path: reports/
+          retention-days: 30
+
+      - name: Upload new Linux visual baselines (commit them to enable the comparison on CI)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: visual-baselines-linux
+          path: tests/visual/**/*-linux.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+  docker:
+    name: Docker image smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+
+      - name: Build and start app + database (Docker Compose)
+        run: docker compose up -d --build --wait
+
+      - name: Health check
+        run: curl --fail --silent http://localhost:3000/health
+
+      - name: k6 idempotency test inside Docker Compose
+        run: |
+          mkdir -p reports && chmod 777 reports
+          docker compose run --rm k6 run /scripts/idempotent-transfer.js
+
+      - name: Save container logs
+        if: failure()
+        run: docker compose logs --no-color > reports/docker-compose.log
+
+      - name: Upload Docker logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: docker-logs
+          path: reports/
+          retention-days: 7
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v

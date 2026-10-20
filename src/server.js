@@ -4,10 +4,14 @@ const { pool } = require('./db/pool');
 const pesonetWorker = require('./workers/pesonetWorker');
 const interestScheduler = require('./workers/interestScheduler');
 const roleService = require('./services/roleService');
+const realtime = require('./realtime');
 
 const server = app.listen(config.port, () => {
   console.log(`PayPulse API listening on http://localhost:${config.port}`);
 });
+
+// Real-time notifications (Socket.IO on the same port, fed by PostgreSQL LISTEN/NOTIFY).
+const live = realtime.attach(server);
 
 // Accounts listed in ADMIN_EMAILS get the ADMIN role.
 roleService
@@ -24,6 +28,7 @@ function shutdown(signal) {
   console.log(`${signal} received, shutting down...`);
   stopWorker();
   stopInterest();
+  live.close();
   server.close(() => pool.end().then(() => process.exit(0)));
 }
 

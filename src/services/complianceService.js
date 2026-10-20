@@ -30,7 +30,7 @@ async function recentTransferCount(userId) {
      JOIN users u ON u.id = a.user_id
      WHERE a.user_id = $1
        AND le.direction = 'DEBIT'
-       AND t.type IN ('TRANSFER', 'BANK_TRANSFER', 'BILL_PAYMENT')
+       AND t.type IN ('TRANSFER', 'BANK_TRANSFER', 'BILL_PAYMENT', 'CARD_PAYMENT')
        AND t.created_at > now() - make_interval(secs => $2)
        AND t.created_at > COALESCE(u.history_cleared_at, '-infinity')`,
     [userId, VELOCITY_WINDOW_SECONDS],

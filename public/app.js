@@ -160,6 +160,7 @@
     if (tx.type === 'LOAN_DISBURSEMENT') return { title: 'Loan Disbursement', icon: '💰' };
     if (tx.type === 'BILL_PAYMENT') return { title: tx.description, icon: '🧾' };
     if (tx.type === 'CASHBACK') return { title: 'Cashback Reward - Bills Payment', icon: '🎁' };
+    if (tx.type === 'CARD_PAYMENT') return { title: tx.description, icon: '💳' };
     if (tx.type === 'LOAN_REPAYMENT') return { title: 'Loan Repayment', icon: '↩' };
     if (tx.type === 'SAVINGS_TRANSFER') {
       return { title: tx.direction === 'DEBIT' ? 'Moved to PayPulse Save' : 'From PayPulse Save', icon: '🐷' };
@@ -368,6 +369,7 @@
     await loadWallet();
     loadLoans().catch(() => {});
     startNotificationPolling();
+    connectRealtime();
     startAutoRefresh();
     initQaControls(); // shows the QA panel only when the server runs in QA sandbox mode
     loadFeatures(); // shows "Add money" only when the mock payment provider is on
@@ -551,6 +553,7 @@
     $('#role-chip').hidden = true;
     $('#bell-dot').hidden = true;
     clearInterval(notifTimer);
+    disconnectRealtime();
     savings = null;
     showTab('home');
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
@@ -720,6 +723,81 @@
     if (await copyText(text)) toast('Invite message copied. Paste it to a friend!', 'success');
     else toast('Could not copy the invite message.', 'error');
   });
+
+  // ---------- Real-time: Socket.IO events for this user's wallet ----------
+
+  const liveToasts = $('#live-toasts');
+  const LIVE_TOAST_MS = 6000;
+  const LIVE_TOAST_MAX = 3;
+  const LIVE_ICONS = { 'money-in': '↙', 'money-out': '↗', cashback: '🎉' };
+  let socket = null;
+  let liveRefreshTimer = null;
+
+  function connectRealtime() {
+    if (typeof window.io !== 'function') return; // the client script couldn't load: polling still works
+    disconnectRealtime();
+    socket = window.io({ auth: { token: getToken() } });
+    socket.on('transaction', onLiveTransaction);
+  }
+
+  function disconnectRealtime() {
+    socket?.disconnect();
+    socket = null;
+    liveToasts.replaceChildren();
+    hidePopover(liveToasts);
+  }
+
+  function onLiveTransaction(event) {
+    renderBellCount(event.unreadCount);
+    const bell = $('#bell-btn');
+    bell.classList.remove('ring');
+    void bell.offsetWidth; // restart the animation
+    bell.classList.add('ring');
+    if (notifications && notifDialog.open) loadNotifications().catch(() => {});
+
+    // Toasts and a balance refresh for money coming in. Money going out was started by the user,
+    // who already sees a receipt, so it only updates the bell (and never adds extra API calls).
+    if (event.direction !== 'CREDIT') return;
+    showLiveToast(event);
+    clearTimeout(liveRefreshTimer);
+    liveRefreshTimer = setTimeout(() => loadWallet().catch(() => {}), 400);
+  }
+
+  function showLiveToast(event) {
+    const item = Object.assign(document.createElement('div'), { className: 'live-toast ' + event.kind });
+    item.dataset.testid = 'live-toast';
+    item.setAttribute('role', 'status');
+    const open = Object.assign(document.createElement('button'), { type: 'button', className: 'live-toast-main' });
+    open.append(
+      Object.assign(document.createElement('span'), { className: 'live-toast-icon', textContent: LIVE_ICONS[event.kind] ?? '•' }),
+      Object.assign(document.createElement('span'), { className: 'live-toast-text' }),
+    );
+    open.lastChild.append(
+      Object.assign(document.createElement('strong'), { textContent: event.title }),
+      Object.assign(document.createElement('span'), { textContent: event.message }),
+    );
+    open.addEventListener('click', () => {
+      item.remove();
+      openReceipt(event.transactionId);
+    });
+    const close = Object.assign(document.createElement('button'), { type: 'button', className: 'live-toast-close', textContent: '×' });
+    close.setAttribute('aria-label', 'Dismiss');
+    close.addEventListener('click', () => removeToast(item));
+    item.append(open, close);
+
+    liveToasts.prepend(item);
+    while (liveToasts.children.length > LIVE_TOAST_MAX) liveToasts.lastChild.remove();
+    showPopover(liveToasts);
+    setTimeout(() => removeToast(item), LIVE_TOAST_MS);
+  }
+
+  function removeToast(item) {
+    item.classList.add('leaving');
+    setTimeout(() => {
+      item.remove();
+      if (!liveToasts.children.length) hidePopover(liveToasts);
+    }, 200);
+  }
 
   // ---------- Notifications: updates, features, upcoming events and your activity ----------
 
@@ -2625,6 +2703,28 @@
       toast(err.message, 'error');
     } finally {
       toggle.disabled = false;
+    }
+  });
+
+  $('#card-pay-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    setFormError(form);
+    if (!card) return;
+    const { merchant, amount } = formData(form);
+    if (!validAmount(amount.trim())) return setFormError(form, 'Enter a valid amount, e.g. 250 or 99.50.');
+    try {
+      const paid = await api('/api/v1/cards/' + card.token + '/payments', {
+        method: 'POST',
+        body: { amount: amount.trim(), merchant },
+        idempotencyKey: newIdempotencyKey(),
+      });
+      form.reset();
+      await loadWallet();
+      toast(merchant + ' approved: ' + money(paid.amount) + ' (auth ' + paid.authCode + ')', 'success');
+      openReceipt(paid.transactionId);
+    } catch (err) {
+      setFormError(form, describeError(err));
     }
   });
 

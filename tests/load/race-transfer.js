@@ -13,6 +13,7 @@ import http from 'k6/http';
 import crypto from 'k6/crypto';
 import { check } from 'k6';
 import { Counter } from 'k6/metrics';
+import { summaryFor } from './summary.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
 const WEBHOOK_SECRET = __ENV.WEBHOOK_SECRET || 'dev-webhook-secret';
@@ -112,3 +113,6 @@ export function teardown({ sender, receiver }) {
   overspentTransfers.add(Math.max(0, receivedTransfers - maxAllowed));
   overdrawnCents.add(Math.max(0, -senderBalance));
 }
+
+// HTML + JSON report in reports/ (also written when thresholds fail).
+export const handleSummary = summaryFor('k6-race', 'Race condition: 10 parallel transfers without an Idempotency-Key (known bug)');

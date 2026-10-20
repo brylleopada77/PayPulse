@@ -102,6 +102,26 @@ async function getReceipt(userId, transactionId) {
     };
   }
 
+  if (type === 'CARD_PAYMENT') {
+    const { rows } = await pool.query(
+      `SELECT cp.merchant, cp.auth_code, vc.bin, vc.last4
+       FROM card_payments cp JOIN virtual_cards vc ON vc.id = cp.card_id WHERE cp.transaction_id = $1`,
+      [id],
+    );
+    const cp = rows[0];
+    return {
+      ...receipt,
+      title: 'Card Payment Approved',
+      amount: fromCents(mine.amount_cents),
+      fee: fromCents(0),
+      total: fromCents(mine.amount_cents),
+      sender: { name: `${mine.full_name} (Virtual Visa)`, account: cp ? `${cp.bin.slice(0, 4)} •••• ${cp.last4}` : 'Virtual Visa' },
+      recipient: { name: cp?.merchant ?? 'Merchant', account: 'Online purchase' },
+      bankName: 'PayPulse Visa',
+      note: cp ? `Authorization code ${cp.auth_code}` : null,
+    };
+  }
+
   if (type === 'BILL_PAYMENT' || type === 'CASHBACK') {
     const isBill = type === 'BILL_PAYMENT';
     const { rows } = await pool.query(

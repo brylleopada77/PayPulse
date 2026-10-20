@@ -4,7 +4,7 @@ const { fromCents } = require('../utils/money');
 
 // Daily send limit per calendar day (Philippine time), by KYC level: ₱50,000 for Level 1 (Basic),
 // ₱100,000 for Level 2 (Fully Verified). Counts the amounts you SEND with Express Send, Bank
-// Transfer and Pay Bills; bank fees and money you receive don't count.
+// Transfer, Pay Bills and card payments; bank fees and money you receive don't count.
 const DAILY_LIMIT_CENTS = 5_000_000; // Level 1
 const DAILY_LIMIT_BY_KYC = { 1: 5_000_000, 2: 10_000_000 };
 const dailyLimitFor = (kycLevel) => DAILY_LIMIT_BY_KYC[kycLevel] ?? DAILY_LIMIT_CENTS;
@@ -35,7 +35,7 @@ async function getUsage(accountId) {
      LEFT JOIN bank_transfers bt ON bt.transaction_id = t.id
      WHERE le.account_id = $1
        AND le.direction = 'DEBIT'
-       AND t.type IN ('TRANSFER', 'BANK_TRANSFER', 'BILL_PAYMENT')
+       AND t.type IN ('TRANSFER', 'BANK_TRANSFER', 'BILL_PAYMENT', 'CARD_PAYMENT')
        -- a QA sandbox reset restarts the limits
        AND t.created_at > COALESCE((SELECT u.history_cleared_at FROM users u
                                     JOIN accounts a ON a.user_id = u.id WHERE a.id = $1), '-infinity')

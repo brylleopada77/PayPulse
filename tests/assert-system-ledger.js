@@ -61,7 +61,7 @@ async function main() {
         COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE -amount_cents END)
                  FILTER (WHERE type IN ('LOAN_DISBURSEMENT', 'LOAN_REPAYMENT') AND NOT is_system), 0)        AS loans_net,
         COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE -amount_cents END)
-                 FILTER (WHERE type IN ('BILL_PAYMENT', 'CASHBACK') AND NOT is_system), 0)                    AS bills_net
+                 FILTER (WHERE type IN ('BILL_PAYMENT', 'CASHBACK', 'CARD_PAYMENT') AND NOT is_system), 0)                    AS bills_net
       FROM flows`);
     const n = Object.fromEntries(Object.entries(rows[0]).map(([k, v]) => [k, Number(v)]));
 

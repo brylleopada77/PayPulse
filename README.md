@@ -1,680 +1,205 @@
-# PayPulse
+# PayPulse: a QA automation showcase built around a realistic e-wallet
 
-A small e-wallet app (Node.js + Express + PostgreSQL, with a web wallet UI) built for **QA and test-automation practice**.
+[![PayPulse QA Pipeline](https://github.com/brylleopada77/PayPulse/actions/workflows/playwright.yml/badge.svg)](https://github.com/brylleopada77/PayPulse/actions/workflows/playwright.yml)
+![Playwright](https://img.shields.io/badge/Playwright-305_tests-2EAD33?logo=playwright&logoColor=white)
+![k6](https://img.shields.io/badge/k6-load_%26_concurrency-7D64FF?logo=k6&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
 
-- User registration, login (JWT) and balance check
-- Wallet-to-wallet transfers recorded in a **double-entry ledger**
-- A mock **payment webhook** that tops up wallets
-- A **web wallet UI** at http://localhost:3000 (sign up, add money, send money, history)
-- A Playwright + k6 test suite and a GitHub Actions pipeline
+PayPulse is a Philippine-style mobile e-wallet (send money, pay bills, instant loans, virtual Visa,
+savings) with a **double-entry general ledger** underneath. I built it to practise and demonstrate
+senior QA work end to end: a product worth testing, a **test strategy across five layers**, an
+**intentional concurrency bug** that the automation finds and proves, and a **CI pipeline** that
+runs everything on every push.
 
-> ⚠️ This app contains an **intentional race-condition bug** in the transfer endpoint, for QA
-> training. Never use it with real money. Details (spoilers!) are in [QA_NOTES.md](QA_NOTES.md).
+> **305 Playwright tests · 2 k6 scenarios · 3 ledger/reconciliation gates · all green in CI**
+> (the known race bug is reported, not hidden: see [the race condition](#the-bug-the-tests-were-built-to-catch)).
+
+| | | | |
+|:--:|:--:|:--:|:--:|
+| <img src="docs/images/home.png" width="190" alt="Home screen with glass cards and floating dock"> | <img src="docs/images/pay-bills-receipt.png" width="190" alt="Pay Bills receipt with cashback stamp"> | <img src="docs/images/live-toast.png" width="190" alt="Real-time toast: money received"> | <img src="docs/images/instant-loan.png" width="190" alt="Instant Loan offer"> |
+| Home (iOS glass UI) | Pay Bills + ₱5 cashback | Real-time toast (Socket.IO) | Instant Loan |
 
 ---
 
-## 1. Prerequisites
+## What this project demonstrates
 
-| Tool | Needed for | Get it |
-|------|------------|--------|
-| Docker Desktop | Running the app + database | https://www.docker.com/products/docker-desktop/ |
-| Node.js 20+ | Running the tests (and the app without Docker) | https://nodejs.org |
-| Git | Getting the code | https://git-scm.com |
+| Area | What I did | Where |
+|------|------------|-------|
+| **Test strategy** | API, browser E2E, chaos/resilience, visual regression, load/concurrency and accounting checks, each answering a different risk | [Testing strategy](#testing-strategy) |
+| **Finding a real bug** | Concurrency tests and k6 reproduce an overdraft race; the evidence is in the k6 report (wallet driven to **-₱200**) | [QA_NOTES.md](QA_NOTES.md) |
+| **Proving a fix pattern** | k6 shows `Idempotency-Key` makes 30 duplicate sends move money **exactly once** | `tests/load/idempotent-transfer.js` |
+| **Financial correctness** | Every test can assert the ledger: debits = credits, wallets = GL 2010, end-of-day reconciliation with 20 control checks | `tests/helpers/db.ts`, `scripts/reconcile-eod.js` |
+| **Test design** | Every test creates its own users, so 305 tests run **fully in parallel** without shared state or ordering | `tests/helpers/api.ts` |
+| **Tuning, not just writing tests** | Visual regression first missed a 28px→8px dock change; I tightened the threshold and proved it now fails on the regression and stays stable over repeated runs | `playwright.config.ts` |
+| **CI/CD** | GitHub Actions: PostgreSQL service container, migrations, Playwright, k6, ledger gates, HTML report + videos as artifacts | [CI pipeline](#ci-pipeline) |
 
-## 2. Quick start with Docker (recommended)
+---
+
+## Testing strategy
+
+```mermaid
+flowchart TB
+  subgraph L1["API: 281 tests (21 suites)"]
+    a1[auth, MPIN, OTP, lockouts] --- a2[transfers, limits, AML]
+    a2 --- a3[bills, loans, cards, savings]
+    a3 --- a4[receipts, notifications, realtime]
+  end
+  subgraph L2["Browser E2E + chaos: 9 tests"]
+    b1[Pay Bills ₱995 net] --- b2[Loan drawdown] --- b3[Locked card 403] --- b4[503 drops, DB locks, retries]
+  end
+  subgraph L3["Visual regression: 15 snapshots"]
+    v1[glass dock x 5 viewports x 3 states]
+  end
+  subgraph L4["Load & concurrency: k6"]
+    k1[race condition] --- k2[idempotency]
+  end
+  subgraph L5["Accounting gates"]
+    g1[ledger integrity] --- g2[system ledger] --- g3[EOD reconciliation]
+  end
+  L1 --> L2 --> L3 --> L4 --> L5
+```
+
+| Layer | Tool | Count | Risk it covers |
+|-------|------|------:|----------------|
+| API | Playwright `request` | 281 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, other users' data), money math in centavos |
+| Browser E2E | Playwright + Chrome | 4 | Real customer journeys: Pay Bills (net **₱995.00** after ₱5 cashback), ₱10,000 loan drawdown, locked virtual card → **403 CARD_FROZEN**, live toast on incoming money |
+| Chaos / resilience | Playwright + `x-chaos-*` headers | 5 | 503 drops before/after the server acts, exhausted retries, 2-second DB locks: the UI retries safely and **no money is duplicated or lost** |
+| Visual regression | `toHaveScreenshot` | 15 | The glassmorphic iOS dock and Home layout on iPhone SE, iPhone 15, Pixel 7, iPad mini and desktop |
+| Load / concurrency | k6 1.3 | 2 | The overdraft race (expected to fail until fixed) and the idempotency guarantee (must pass) |
+| Accounting | Node + SQL | 3 | Debits = credits, money in system = balances + fees, GL control accounts vs. sub-ledgers at end of day |
+
+**Design choices that keep the suite trustworthy**
+
+- **Isolation:** tests never share users or rely on order; `fullyParallel: true`, `retries: 0` (a flaky test gets fixed, not retried).
+- **Assert the money, not just the status:** most money-moving tests check balances *and* the ledger.
+- **Deterministic time:** a guarded `paypulse.allow_time_travel` session setting lets tests age transactions (anti-spam windows, "yesterday") without sleeping.
+- **Contract-level errors:** every error has a stable `code`, so tests assert on meaning, not wording.
+- **Real-time safety:** live notifications come from PostgreSQL `LISTEN/NOTIFY`, delivered only on commit. A test proves a refused payment announces nothing.
+
+---
+
+## The bug the tests were built to catch
+
+`POST /api/transfers` reads the sender's balance **without a lock**, then checks and writes: a
+classic check-then-act race. It is left in on purpose as a target for the automation.
+
+| Evidence | Result |
+|----------|--------|
+| k6: 10 parallel ₱30 transfers from a ₱100 wallet | **10 succeeded**, wallet at **-₱200**, 7 transfers over the limit; total money unchanged (the ledger can't create money) |
+| k6: the same transfer 30× with one `Idempotency-Key` | **exactly 1 transfer**, 28 replays, 1 `409 IN_PROGRESS`, 0 errors |
+| End-of-day reconciliation | `OD-1` flags the overdrawn wallets; every GL control still balances |
+
+<img src="docs/images/report-k6-race.png" width="640" alt="k6 race-condition report: overspent and overdrawn thresholds failed">
+
+Root cause, reproduction steps and the fix (`SELECT … FOR UPDATE`, already used by Pay Bills, cards
+and savings) are written up in **[QA_NOTES.md](QA_NOTES.md)**. In CI the race checks are reported but
+non-blocking while `RACE_BUG_EXPECTED=true`; flipping it to `false` turns them into hard gates.
+
+---
+
+## CI pipeline
+
+[`.github/workflows/playwright.yml`](.github/workflows/playwright.yml) runs on every push and pull request.
+
+```mermaid
+flowchart LR
+  A[push / PR] --> B[PostgreSQL 17<br>service container]
+  B --> C[npm ci +<br>db migrations]
+  C --> D[start app]
+  D --> E[Playwright<br>API · E2E · chaos · visual]
+  E --> F[k6 idempotency<br>gate]
+  F --> G[k6 race<br>known bug]
+  G --> H[ledger + EOD<br>reconciliation]
+  H --> I[artifacts:<br>HTML report, videos,<br>k6 reports, logs]
+  A --> J[Docker image<br>smoke test]
+```
+
+**Artifacts on every run:** `playwright-report` (HTML report with screenshots and a video of every
+browser test), `test-results` (videos, traces, JUnit XML), `k6-and-logs` (k6 HTML/JSON reports, EOD
+audit log, app log). A summary table is posted to the run page.
+
+<img src="docs/images/report-playwright.png" width="640" alt="Playwright HTML report: 305 passed">
+
+---
+
+## Product features under test
+
+- **Money movement:** Express Send (with an OTP above ₱1,000), Bank Transfer over InstaPay and PESONet (ISO 20022 pacs.008), QR Ph, receipts.
+- **Pay Bills:** 23 Philippine billers, ₱5 cashback on bills of ₱100 or more (max 3 a day), double-entry posting.
+- **Instant Loan:** ₱50,000 credit line, 3/6/12 months, interest-first repayments.
+- **Virtual Visa:** AES-256-GCM tokenized PAN, CVV never stored, lock/unlock, online purchases.
+- **PayPulse Save:** 6% p.a. with a daily interest job.
+- **Profile:** KYC levels (₱50k → ₱100k daily limit), linked accounts, Change MPIN, SMS 2FA.
+- **Notifications:** updates, events, activity, plus real-time Socket.IO toasts.
+- **Controls:** daily limit, anti-spam, AML holds, admin-only top-ups, QA sandbox and chaos headers.
+
+<img src="docs/images/notifications.png" width="190" alt="Notifications"> <img src="docs/images/profile.png" width="190" alt="Profile with KYC"> <img src="docs/images/pay-bills-summary.png" width="190" alt="Pay Bills summary"> <img src="docs/images/glass-dock.png" width="190" alt="Glass dock">
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI[Web wallet<br>HTML/CSS/JS] -- REST + JWT --> API[Express 5 API]
+  UI <-- Socket.IO --> RT[realtime.js]
+  API --> SVC[services<br>transfers · bills · loans · cards · KYC]
+  SVC --> LEDGER[(PostgreSQL 17<br>immutable double-entry ledger)]
+  LEDGER -- "pg_notify on commit" --> RT
+  JOBS[jobs: daily interest,<br>PESONet cut-off, EOD] --> LEDGER
+```
+
+Balances are never stored: they are computed from an append-only ledger (`UPDATE`/`DELETE` are blocked by triggers),
+mapped to a chart of accounts (GL 1010 cash … 5020 cashback expense).
+
+**Stack:** Node.js 24 · Express 5 · PostgreSQL 17 · Socket.IO 4 · Playwright 1.64 · k6 1.3 · Docker Compose · GitHub Actions.
+
+---
+
+## Run it
+
+**With Docker** (app + database):
 
 ```bash
-git clone https://github.com/brylleopada77/PayPulse.git
-cd PayPulse
-
-# Build and start the API + PostgreSQL in the background
-docker compose up -d --build --wait
+docker compose up -d --build --wait     # http://localhost:3000
 ```
 
-Verify that everything is running:
+**Run the tests** (against the running app):
 
 ```bash
-docker compose ps                     # both services should say "running (healthy)"
-curl http://localhost:3000/health     # {"status":"ok","database":"up"}
-# open http://localhost:3000 in your browser to use the web wallet
-docker compose logs -f app            # follow the API logs (Ctrl+C to stop following)
+npm ci
+npx playwright install ffmpeg            # for test videos (tests use your installed Chrome)
+npx playwright test                       # all 305: projects api, ui, visual
+npx playwright test --project=ui          # E2E + chaos in a real browser
+npx playwright show-report                # open the HTML report
+
+docker compose run --rm k6                                         # k6 race condition (known bug)
+docker compose run --rm k6 run /scripts/idempotent-transfer.js     # k6 idempotency
+npm run db:check && node tests/assert-system-ledger.js && npm run eod:reconcile
 ```
 
-> On Windows PowerShell use `curl.exe` instead of `curl`.
+Without Docker, use a local PostgreSQL, `npm run db:init` and `npm start` (see the reference docs).
+Visual baselines are per OS; after an intended UI change run `npx playwright test --project=visual --update-snapshots`.
 
-Stop everything:
+---
 
-```bash
-docker compose down        # stop containers, keep data
-docker compose down -v     # stop containers AND delete the database
-```
-
-## 3. Run without Docker (optional)
-
-You need a PostgreSQL 14+ server running locally.
-
-```bash
-npm install
-cp .env.example .env          # then edit DATABASE_URL if needed
-npm run db:init               # create tables
-npm run dev                   # start API on http://localhost:3000 (auto-restarts on changes)
-```
-
-### Windows: one-click start with a public link (optional)
-
-`start-paypulse.cmd` starts a local PostgreSQL (expected in `%LOCALAPPDATA%\PayPulse-Postgres`),
-the app, and a temporary Cloudflare quick tunnel (`%LOCALAPPDATA%\cloudflared\cloudflared.exe`),
-all in the background, then prints and copies the public `https://….trycloudflare.com` link.
-`stop-paypulse.cmd` stops all three. The link changes on every start and stops working when the
-PC sleeps or shuts down. Logs go to `logs\`.
-
-### Deploy online (Render, free)
-
-`render.yaml` is a Render Blueprint that creates the web app and a PostgreSQL database.
-
-1. Sign in at https://render.com with GitHub and give Render access to this repository.
-2. **New → Blueprint**, pick the repository and branch, then **Apply**.
-3. When the deploy is live, open the `https://paypulse-xxxx.onrender.com` URL Render shows.
-
-Secrets (`JWT_SECRET`, `WEBHOOK_SECRET`) are generated by Render, and tables are created on start.
-Free-plan limits: the app sleeps after ~15 minutes idle (the first visit then takes ~1 minute),
-and the free database expires after 30 days unless upgraded.
-
-## 4. Running the tests
-
-Start the app with Docker first (step 2), then:
-
-```bash
-npm install                    # once
-
-npx playwright test            # API test suite
-npx playwright show-report     # open the HTML report
-
-docker compose run --rm k6     # k6 concurrency test (10 simultaneous transfers)
-
-npm run db:check               # verify the whole ledger is balanced
-npm run db:assert-ledger       # standalone: money in system = user balances + collected fees
-```
-
-`tests/assert-system-ledger.js` is a plain Node.js script (no test runner). It works out the
-total money in the system from the ledger history (top-ups − bank payouts + QA adjustments) and
-asserts it equals `sum(user balances) + sum(collected fees) + PESONet pending`; it also checks that
-every transaction balances, all balances sum to 0, the trial balance debits equal its credits, and
-no wallet is overdrawn. Exit code 0 = consistent, 1 = not, 2 = could not run. Add `--json` for
-machine-readable output. For the full end-of-day audit see `npm run eod:reconcile` (section 6).
-
-Because of the intentional bug, expect these results:
-
-| Command | Result while the bug exists |
-|---------|-----------------------------|
-| `npx playwright test` | All pass. The concurrency test is marked as an *expected failure* |
-| `docker compose run --rm k6` | Thresholds **fail** (too many transfers succeeded; the sender was overdrawn) |
-| `npm run db:check` | **FAIL** after the concurrency tests have run (overdrawn wallets) |
-| `npm run db:assert-ledger` | **FAIL** after the concurrency tests have run (lists the overdrawn wallets; the money totals still match) |
-| `npm run eod:reconcile` | **EXCEPTIONS** after the concurrency tests have run (`OD-1` overdrafts; all GL controls reconcile) |
-
-## 5. API reference
-
-All bodies are JSON. Amounts are decimal numbers or strings with up to 2 decimals (e.g. `25`, `"25.50"`).
-
-| Method | Path | Auth | Body |
-|--------|------|------|------|
-| GET | `/health` | – | – |
-| POST | `/api/auth/register` | – | `{ email, password, fullName }` |
-| POST | `/api/auth/login` | – | `{ email, password }` → `{ token }` |
-| POST | `/api/auth/password/forgot` | – | `{ email }` → `{ message, resetId, expiresInSeconds, demoCode }` |
-| POST | `/api/auth/password/reset` | – | `{ resetId, code, newPassword }` → `{ message }` |
-| GET | `/api/accounts/me` | Bearer | – → balance |
-| GET | `/api/accounts/me/transactions` | Bearer | optional `?limit=1..100&before=<transactionId>&direction=IN\|OUT` → `{ transactions, hasMore, nextBefore }`, newest first (default: latest 50). Home shows the latest 5 with **See all transactions**; the full history pages 30 at a time with *Load more* |
-| POST | `/api/accounts/me/mpin/reset` | Bearer | `{ password }` → `{ mpin }` ("Forgot MPIN") |
-| GET | `/api/accounts/me/transactions/:id/receipt` | Bearer | – → receipt (own transactions only, else 404) |
-| PUT | `/api/accounts/me/mobile` | Bearer | `{ mobileNumber }` → `{ mobileNumber }` (add or change) |
-| POST | `/api/transfers` | Bearer + MPIN | Express Send: `{ toAccountNumber \| toMobileNumber, amount, description?, mpin, otpChallengeId?, otp? }` |
-| GET | `/api/transfers/banks` | Bearer | – → `{ feeCents, banks }` |
-| GET | `/api/transfers/limits` | Bearer | – → daily limit used/remaining, anti-spam rule |
-| POST | `/api/transfers/bank` | Bearer + MPIN | Bank Transfer: `{ bankCode, accountNumber, accountName, amount, mpin, otpChallengeId?, otp? }` |
-| POST | `/api/webhooks/payments` | HMAC signature | `{ paymentId, accountNumber, amount, status }` |
-| POST | `/api/payments/mock-checkout` | Bearer (admin) | `{ amount, outcome?: "approve" \| "decline" }`: mock "Add money", **only with `MOCK_PAYMENTS=true`** |
-| GET | `/api/payments/limits` | Bearer (admin) | – → top-up limits left (only with `MOCK_PAYMENTS=true`) |
-| GET | `/api/config` | – | – → `{ features: { mockPayments, qaSandbox } }` for the UI |
-
-### Try it by hand
-
-```bash
-# Register and log in
-curl -X POST localhost:3000/api/auth/register -H "Content-Type: application/json" \
-  -d '{"email":"ana@test.com","password":"Sup3rSecret!","fullName":"Ana"}'
-curl -X POST localhost:3000/api/auth/login -H "Content-Type: application/json" \
-  -d '{"email":"ana@test.com","password":"Sup3rSecret!"}'
-
-# Check balance (paste the token from login)
-curl localhost:3000/api/accounts/me -H "Authorization: Bearer <token>"
-```
-
-### Forgot password
-
-1. `POST /api/auth/password/forgot` with `{ email }` returns a `resetId` and a 6-digit code
-   (`demoCode`; this is a **mock** email, and a real system would email the code instead).
-2. `POST /api/auth/password/reset` with `{ resetId, code, newPassword }` sets the new password.
-
-The code is valid for 10 minutes, allows 3 wrong tries and can be used once. The answers are
-identical whether or not the email has an account, so the endpoint can't be used to find out who
-is registered. Changing the password **signs out all existing sessions**: tokens issued before
-the change get `401` with "Your password was changed. Please log in again."
-
-| Status | `error.code` | Meaning |
-|--------|--------------|---------|
-| 400 | `INVALID_PASSWORD` | New password shorter than 8 characters |
-| 403 | `INVALID_RESET_CODE` | Wrong, used or unknown code (message says how many tries are left) |
-| 410 | `RESET_CODE_EXPIRED` | Older than 10 minutes; request a new code |
-| 429 | `RESET_ATTEMPTS_EXCEEDED` | 3 wrong codes; request a new code |
-
-### Sending money: Express Send and Bank Transfer
-
-| | Express Send | Bank Transfer |
-|---|---|---|
-| To | Another PayPulse wallet, by account number (`PP…`) or mobile number (`09…`) | GCash, Maya (recipient's mobile number) or BDO, BPI, Metrobank (10 to 16 digit account number) |
-| Fee | ₱0 | **₱15** per transfer |
-| Deducted | amount | **amount + ₱15** |
-| History | "Transfer to PP…" | **"Bank Transfer to [Bank Name]"**, with account, fee and reference (`BT-…`) |
-
-Mobile numbers are optional: add one at sign-up (`mobileNumber`) or later with
-`PUT /api/accounts/me/mobile`. Formats like `+63 917 123 4567` are stored as `09171234567`.
-
-A bank transfer is one balanced ledger transaction (type `BANK_TRANSFER`): **DEBIT** the user
-(amount + fee), **CREDIT** `SYS-BANK-SETTLEMENT` (amount, money sent out) and **CREDIT**
-`SYS-FEE-INCOME` (fee). The ledger check therefore expects
-`user wallets = top-ups − (settlement + fee credits)`. Nothing is really sent to a bank: this is a mock.
-
-Both kinds of transfer use the same MPIN and OTP rules below. For Bank Transfer the OTP is bound to
-the bank and account number. Extra error codes: `INVALID_BANK`, `INVALID_BANK_ACCOUNT`,
-`INVALID_ACCOUNT_NAME`, `INVALID_MOBILE_NUMBER` (400) and `MOBILE_TAKEN` (409).
-
-### QR Ph: Receive via QR and Scan QR
-
-`GET /api/qr/me?amount=` returns the user's **QR Ph** code (payload + SVG). The payload follows the
-EMVCo layout QR Ph uses: P2P id `com.p2pqrpay`, a mock PayPulse code `PAYPPHM2XXX`, the account
-number, currency `608` (PHP), country `PH`, an optional amount (tag 54, "dynamic QR") and a
-**CRC-16** checksum (tag 63). `POST /api/qr/decode { payload }` reads a scanned code (or a plain
-`PP…` account number) and returns `{ accountNumber, receiverName, amount, isOwnAccount }`.
-Errors: `INVALID_QR`, `QR_CHECKSUM_MISMATCH` (edited/damaged code), `QR_NOT_SUPPORTED` (another
-bank's QR Ph code), `RECEIVER_NOT_FOUND`. In the UI, **Receive QR** shows/downloads your code and
-**Scan QR** reads an uploaded image (jsQR, in the browser) or pasted text, then opens Express Send
-with the recipient and amount filled in.
-
-### QA Sandbox Controls (dev mode only)
-
-Start the server with `QA_SANDBOX=true` (set in `.env`, Docker Compose and CI; **never in
-production**; Render doesn't set it). Then a **🧪 QA** button appears in the web app **for admin
-accounts**, and these endpoints exist (otherwise they return 404; customers get `403 ADMIN_ONLY`).
-Every action affects **only the caller's own account**. The panel floats at the bottom right; the
-three main controls are at the top, everything else is under *More tools*.
-
-| Control | API | Effect |
-|---------|-----|--------|
-| Reset DB State | `POST /api/qa/reset` | Wallet becomes ₱100,000.00 and PayPulse Save ₱0 via `QA_ADJUSTMENT` ledger transactions; an open Instant Loan is written off (its unpaid principal leaves GL 1030 against GL 3900); history is hidden from now on (rows are kept, so other users' history and the ledger stay intact), limits restart, all switches off |
-| Simulate 3s Network Latency | `PUT /api/qa/settings { slowNetwork }` | Every authenticated API call waits 3 s, Express Send included (not the QA calls themselves) |
-| Trigger HTTP 500 Error | `PUT /api/qa/settings { failNextTransaction }` | The next transfer, top-up, savings move or loan application/repayment returns `500 INTERNAL_ERROR` (`details.simulated: true`), no money moves, the switch turns itself off |
-| Freeze account | `PUT /api/qa/settings { frozen }` | Sending money and new loans return `423 ACCOUNT_FROZEN`; receiving still works |
-| State | `GET /api/qa/state` | Current switches and balance |
-
-### Transfer limits (negative-scenario rules)
-
-Checked by `middleware/transferLimits.js` before every Express Send and Bank Transfer (including
-the OTP step of large transfers):
-
-| Rule | Response |
-|------|----------|
-| **Daily limit:** at most ₱50,000 (KYC Level 1) or ₱100,000 (Level 2, Fully Verified) sent per account per calendar day (Philippine time). Counts the amounts sent (Express Send, Bank Transfer and Pay Bills); bank fees and money received don't count. | **400** `DAILY_LIMIT_EXCEEDED`, message `Daily transaction limit of ₱50,000 exceeded.`, `details`: `dailyLimit`, `sentToday`, `remainingToday`, `requested`, `resetsAt` |
-| **Anti-spam:** at most 3 completed transfers in any 10 seconds (simulated fraud prevention). Failed transfers don't count. | **429** `TOO_MANY_TRANSFERS`, `Retry-After` header, `details`: `maxTransfers`, `windowSeconds`, `retryAfterSeconds` |
-
-`GET /api/transfers/limits` shows how much of today's limit is left. Both rules have the same
-deliberate weakness as the balance check (see QA_NOTES.md).
-
-### Error format
-
-Every error, from every endpoint, has the same JSON shape so tests can assert on it:
-
-```json
-{ "error": { "code": "DAILY_LIMIT_EXCEEDED", "message": "Daily transaction limit of ₱50,000 exceeded.",
-             "details": { "remainingToday": "0.00", "...": "..." } } }
-```
-
-`code` is stable and machine-readable, `message` is for people, and `details` is only present
-when there is extra data. Unknown routes return `404 ROUTE_NOT_FOUND`, broken JSON
-`400 INVALID_JSON`, bodies over 100 kB `413 PAYLOAD_TOO_LARGE`, and unexpected failures
-`500 INTERNAL_ERROR` (no stack traces).
-
-### PayPulse Save (savings vault, 6.00% p.a.)
-
-Every customer has a savings vault (account `SV…`, GL **2030 Customer Savings Deposits**) next to
-the main wallet. `GET /api/v1/savings` shows the balance, rate, interest earned and estimated daily
-interest; `POST /api/v1/savings/deposit` and `/withdraw` with `{ amount }` move money as a
-`SAVINGS_TRANSFER` journal. These moves lock both accounts first, so (unlike Send) parallel moves
-can't overdraw anything.
-
-**Interest:** `jobs/daily-interest.js` accrues each vault's closing balance × 6% ÷ 365 for one
-business day (Manila), compounding daily, and posts whole centavos as an `INTEREST` journal (DEBIT GL
-**5010 Interest Expense**, CREDIT the vault). Fractions of a centavo carry over to the next day
-(`savings_interest_accruals.interest_exact`). Each vault/day is accrued once, so re-runs are safe.
-
-```bash
-node jobs/daily-interest.js                       # yesterday (schedule: 5 0 * * *)
-node jobs/daily-interest.js --date 2026-10-14     # a specific day (catch-up)
-node jobs/daily-interest.js --date 2026-10-14 --account SV5000000001   # one vault
-```
-
-The API server also runs it automatically for yesterday (`INTEREST_JOB=false` to disable). QA
-sandbox: `POST /api/qa/savings/accrue { days }` simulates N days of interest on your own vault.
-
-### Notifications (`/api/v1/notifications`)
-
-The bell on Home shows an unread count and opens the **Notifications** panel, filtered by
-**All · Updates · Features · Events · Activity**. Tap an item to read it all (and mark it read);
-items with a button jump straight to the feature (Pay Bills, Instant Loan, Verify ID, a receipt…).
-
-- **Updates, features and upcoming events** come from `src/services/announcements.js`: edit that
-  list to publish news (each item: `id`, `category`, `title`, `body`, `publishedAt`, optional
-  `eventDate` / `eventEnd` and `action`). An item appears once `publishedAt` has passed.
-- **Activity** is personal: money received (with the sender), top-ups, cashback (last 30 days) and an
-  Instant Loan installment due within 7 days.
-- Read state is stored per user (`notification_reads`), so it is the same on every device.
-  `GET /api/v1/notifications` → `{ unreadCount, unreadByCategory, items }`;
-  `POST /api/v1/notifications/read` with `{ ids: [...] }` or `{ all: true }`.
-- The unread count refreshes every 60 seconds on its own timer (not on every balance refresh).
-
-### My Profile: KYC, linked accounts, MPIN, security, help (`/api/v1/profile`)
-
-The avatar (or **Me**) opens My Profile: the KYC badge, an *Account level & limits* card, a settings
-menu, and a collapsible **QA & Sandbox Rules** section (live daily-limit tracker, anti-spam slots,
-AML thresholds, MPIN expiry status).
-
-| Feature | API | Rules |
-|---------|-----|-------|
-| KYC level | `GET /api/v1/profile`, `POST /api/v1/profile/kyc` `{ idType, idNumber, birthDate, selfieConfirmed }` | Level 1 (Basic) = **₱50,000/day**, Level 2 (Fully Verified) = **₱100,000/day**, enforced by the transfer limits. Mock check, approved instantly; 18+ only; only the last 4 ID characters are kept |
-| Linked bank accounts / cards | `POST /api/v1/profile/linked-accounts`, `DELETE …/:id` | MPIN required; banks: 10-16 digit account; cards: Visa / Mastercard, Luhn-valid, not expired, **no CVV asked**; only the last 4 digits stored; max 5; duplicates `409` |
-| Change MPIN | `POST /api/accounts/me/mpin/change` `{ currentMpin, newMpin, confirmMpin }` | Current MPIN checked like a transfer; new one must match its confirmation, differ from the old one and not be weak (`111111`, `123456`, `987654` → `400 WEAK_MPIN`); valid 5 minutes like every MPIN |
-| Security & Biometrics | `PATCH /api/v1/profile/security` `{ smsTwoFactor?, biometricLogin?, mpin? }` | **SMS 2FA on** = an OTP for *every* Send / Bank Transfer (above ₱1,000 it's always required); turning it off needs the MPIN. Face ID / Touch ID is a saved preference (simulated on the web) |
-| Help Center | `POST /api/v1/profile/support/tickets` `{ category, subject, message }` | FAQs, an automated chat assistant (keyword answers, clearly labelled), and tickets `PP-TKT-000123` (max 10 a day) |
-
-### Pay Bills with ₱5.00 cashback (`/api/v1/bills`)
-
-**Pay Bills** (Home → quick actions) lists 23 billers in 5 categories, the kind Philippine
-e-wallets and payment centers offer (mock: no money really reaches the biller):
-
-| Category | Billers |
-|----------|---------|
-| Utilities | Meralco, Manila Water, Maynilad, Visayan Electric (VECO), Davao Light |
-| Telecoms & Internet | PLDT Home, Globe Postpaid, Smart Postpaid, Converge ICT, DITO Telecommunity |
-| Government | NBI Clearance, SSS (PRN), Pag-IBIG Fund, LTO, BIR |
-| Credit Cards & Loans | Home Credit, Maya Credit, BDO / BPI / UnionBank Credit Card |
-| Cable & TV | Cignal TV, Sky Cable, Cablelink |
-
-Flow: category grid or search → biller → account number, account name and amount → summary
-(amount due, ₱0.00 convenience fee, cashback banner) → **MPIN** → receipt with reference
-`REF-BILL-<date>-<id>` and a "Cashback Earned" stamp.
-
-| API | |
-|-----|---|
-| `GET /api/v1/bills` | Categories, billers (account label + format hint), fee and today's cashback status |
-| `POST /api/v1/bills/pay` `{ billerCode, accountNumber, accountName, amount, mpin }` | Pay → `201` with reference, cashback and new balance |
-
-- **Ledger:** one database transaction writes two journals: `BILL_PAYMENT` (DEBIT wallet, CREDIT
-  GL 2040 Biller Settlement) and `CASHBACK` (DEBIT GL 5020 Marketing Expense - Cashback, CREDIT
-  wallet ₱5.00). History shows "Bill Payment - Meralco" and "Cashback Reward - Bills Payment".
-- **Cashback rules:** ₱5.00 on bills of **₱100 or more**, at most **3 cashbacks per customer per
-  day** (Manila). Without these, paying ₱1 "bills" would earn ₱4 each time.
-- **Guards (same as a transfer):** the wallet is locked during the payment (no overdraft, unlike
-  Send), frozen accounts get `423`, AML screening, and bill payments count toward the ₱50,000
-  daily send limit and the 3-per-10-seconds anti-spam rule. The QA "Trigger HTTP 500" switch applies.
-- **Card billers:** only the last 4 digits of a credit card number are stored and shown.
-- **Errors:** `400 UNKNOWN_BILLER`, `400 INVALID_BILLER_ACCOUNT` (names the biller's account label,
-  e.g. Meralco's 10-digit CAN), `400 INVALID_ACCOUNT_NAME`, `400 INVALID_AMOUNT`,
-  `403 INVALID_MPIN`, `422 INSUFFICIENT_FUNDS`, `400 DAILY_LIMIT_EXCEEDED`, `429 TOO_MANY_TRANSFERS`.
-
-### Instant Loan (`/api/v1/loans`)
-
-Every customer has a **pre-approved ₱50,000 credit line**. On the Home tab the *Instant Loan* tile
-opens a dialog with a slider (₱1,000 to ₱50,000), a 3 / 6 / 12-month term and a live quote;
-**Apply & Disburse** asks for the MPIN and credits the wallet immediately ("Loan Disbursement" in the
-history, with a receipt). While a loan is open, the same dialog shows the balance, the installment
-schedule, and *Pay installment* / *Pay in full*.
-
-| API | |
-|-----|---|
-| `GET /api/v1/loans` | Credit line, rate, terms and your open loan with its schedule |
-| `POST /api/v1/loans/quote` `{ amount, termMonths }` | Interest, total and monthly installment (nothing is booked) |
-| `POST /api/v1/loans` `{ amount, termMonths, mpin }` | Apply & Disburse → `201`, wallet credited |
-| `POST /api/v1/loans/:id/repay` `{ amount }` | Repay from the wallet: interest first, then principal |
-
-- **Pricing:** 1.50% a month, flat add-on fixed at disbursement (₱10,000 over 6 months = ₱900
-  interest, ₱1,816.67 a month; the last installment absorbs the rounding).
-- **Guardrails:** MPIN required; **one open loan per customer** (the user row is locked while
-  applying and a partial unique index backs it up, so parallel applications can't both win);
-  frozen accounts get `423`, accounts under compliance review `403 TRANSACTION_HELD_FOR_REVIEW`.
-- **Errors:** `400 LOAN_AMOUNT_OUT_OF_RANGE`, `400 INVALID_LOAN_TERM`, `409 LOAN_ALREADY_ACTIVE`,
-  `400 AMOUNT_EXCEEDS_BALANCE_DUE`, `422 INSUFFICIENT_FUNDS`, `404 LOAN_NOT_FOUND` (also for
-  someone else's loan), `409 LOAN_NOT_ACTIVE`.
-- **Demo risk:** loans are play money, but borrowed money can be sent on before it is repaid, and
-  one person can open several accounts (no KYC yet). The credit line caps that at ₱50,000 per account.
-
-### Virtual cards (`/api/v1/cards`)
-
-| API | |
-|-----|---|
-| `POST /api/v1/cards/generate` `{ mpin }` | Issue a 16-digit virtual **Visa** (BIN `484735`, Luhn-valid, 3-year expiry) linked to the wallet |
-| `GET /api/v1/cards`, `GET /api/v1/cards/:token` | Your cards: **token + masked PAN** (`4847 35•• •••• 1234`) only |
-| `PATCH /api/v1/cards/:token` `{ status }` | `ACTIVE` / `FROZEN` |
-| `POST /api/v1/cards/:token/reveal` `{ mpin }` | Full PAN, expiry and CVV, for the cardholder only |
-
-PCI-DSS-style handling (mock issuer, not on the Visa network): the PAN is stored **only encrypted**
-(AES-256-GCM, key from `CARD_ENCRYPTION_KEY`) plus an HMAC fingerprint; the **CVV is never stored**
-but derived on demand from PAN + expiry with a separate key; every card response is
-`Cache-Control: no-store`; and `middleware/pciMask.js` masks any Luhn-valid card number (and any
-`cvv` field) in card responses, except the MPIN-protected reveal. At most 3 cards per user.
-
-### Chaos engineering and idempotency
-
-`middleware/chaos.js` (dev only: `QA_SANDBOX=true` and an ADMIN caller, otherwise ignored) injects faults per request:
-
-| Header | Effect |
-|--------|--------|
-| `x-chaos-mode: true` | enable chaos for this request |
-| `x-chaos-fault: db-lock \| drop \| random` | **db-lock**: hold a real row lock on your wallet for `x-chaos-lock-ms` (default 2000) first; **drop**: answer `503 SERVICE_UNAVAILABLE`; **random**: 50% lock, then drop with `x-chaos-rate` |
-| `x-chaos-rate: 0..1` | drop probability (default 0.3) |
-| `x-chaos-drop-when: before \| after` | **before**: the request never runs; **after**: it runs, then the answer is lost |
-| `x-chaos-drop-attempts: N` | deterministic: drop the first N attempts of each `Idempotency-Key` |
-
-Because an answer can be lost *after* money moved, money-moving POSTs accept an
-**`Idempotency-Key`** header (`middleware/idempotency.js`): the first final answer is stored and a
-retry with the same key gets it back (`Idempotent-Replayed: true`) instead of running again
-(`409 IDEMPOTENCY_IN_PROGRESS`, `422 IDEMPOTENCY_KEY_REUSED`). The web wallet sends one key per user
-action and retries 503 / network failures up to 3 times with "Retrying (1/3)…" toasts. A
-double-click is two actions with two keys, so the intentional race condition is still reproducible.
-The QA panel has a **Chaos mode** selector that adds these headers to every call.
-
-**`tests/resilience.spec.ts`** (Playwright project `ui`, real Chrome) asserts that under 503 drops,
-lost answers, exhausted retries and 2-second DB locks the UI shows retry toasts / clear errors and
-that balances are exactly right (no double transfers, no lost money). Run it with
-`npx playwright test --project=ui`; `--project=api` runs only the API suite.
-
-### Receipts
-
-Every transaction has a reference `REF-<YYYYMMDD>-<id>` (date in Philippine time), e.g.
-`REF-20261015-0931`. It is returned by both send endpoints, listed in the history, and shown on the
-receipt from `GET /api/accounts/me/transactions/:id/receipt` (title, date, amount, fee, total,
-sender, recipient, bank, note, bank reference). Your own name is shown in full, the other party's
-shortened ("Maria S."). In the web UI the receipt opens after every successful transfer and when
-you click a row in Recent activity; **Download / Save Receipt** saves it as a PNG.
-
-### Transfer security: MPIN and OTP
-
-**MPIN.** Every transfer needs the sender's 6-digit `mpin`. Each user gets their **own random
-MPIN** at sign-up: `POST /api/auth/register` returns it once as `mpin`, and only a bcrypt hash
-is stored. An MPIN **expires 5 minutes after it is issued** (`mpinExpiresInSeconds: 300`;
-`GET /api/accounts/me` reports the seconds left); after that, get a new one with the password.
-Five wrong MPINs in a row lock transfers for 5 minutes.
-
-**Forgot MPIN.** `POST /api/accounts/me/mpin/reset` with `{ password }` (Bearer auth) checks the
-account password, replaces the MPIN with a new random one, clears any lock, and returns
-`{ mpin, mpinExpiresInSeconds }`.
-
-**OTP above ₱1,000.** For amounts **greater than ₱1,000.00** the transfer takes two calls:
-
-1. Send the transfer with `mpin` → **202** `{ otpRequired: true, challengeId, expiresInSeconds: 30, demoCode }`.
-   No money moves yet.
-2. Send the **same** transfer again with `mpin`, `otpChallengeId` and `otp` → **201**, transfer done.
-
-The code is valid for 30 seconds, allows 3 wrong tries, can be used once, and only works for
-the recipient and amount it was issued for. This is a **mock** 2FA: a real system would text the
-code to the user instead of returning `demoCode`.
-
-| Status | `error.code` | Meaning |
-|--------|--------------|---------|
-| 400 | `MPIN_REQUIRED` | No `mpin` sent |
-| 403 | `INVALID_MPIN` | Wrong MPIN (message: `Invalid MPIN`) |
-| 410 | `MPIN_EXPIRED` | MPIN is older than 5 minutes; get a new one with the password |
-| 403 | `MPIN_NOT_SET` | Account was created before random MPINs; use Forgot MPIN |
-| 423 | `MPIN_LOCKED` | Too many wrong MPINs; wait 5 minutes or use Forgot MPIN |
-| 403 | `INVALID_PASSWORD` | Forgot MPIN: wrong account password |
-| 403 | `INVALID_OTP` | Wrong code (message says how many tries are left) |
-| 403 | `OTP_MISMATCH` | Code was issued for a different recipient or amount |
-| 403 | `INVALID_OTP_CHALLENGE` | Unknown challenge, or it belongs to another user |
-| 409 | `OTP_ALREADY_USED` | Code was already used |
-| 410 | `OTP_EXPIRED` | More than 30 seconds passed; start again |
-| 429 | `OTP_ATTEMPTS_EXCEEDED` | 3 wrong codes; start again |
-
-### Add money: mock checkout (dev / demo only) and its limits
-
-"Add money" in the web UI does **not** charge anyone: it calls a mock payment provider. So it is
-**off by default** and only exists when the server runs with `MOCK_PAYMENTS=true` (set in `.env`,
-Docker Compose and CI; never on Render / production). Without it, the endpoint is a 404, the button
-is hidden, and money can only enter through the provider's **signed** webhook below.
-
-Even when it is on, **only ADMIN accounts** can use it (see *Roles* below): customers don't see the
-button and get `403 ADMIN_ONLY` from the API. So people you share the link with can only receive
-money and send what they were given. Every admin top-up is checked **before** money is credited,
-inside the payment's database transaction under a per-user lock (so a burst of parallel requests
-can't slip through):
-
-| Rule | Response |
-|------|----------|
-| caller is not an admin | `403 ADMIN_ONLY` "This feature is only available to PayPulse admins" |
-| at most **₱1,000,000 of mock top-ups per day** (Manila) | `400 TOPUP_DAILY_LIMIT_EXCEEDED` "Daily top-up limit of ₱1,000,000.00 exceeded." |
-| at most **₱10,000,000 held** (wallet + PayPulse Save) | `400 WALLET_LIMIT_EXCEEDED` "Wallet limit of ₱10,000,000.00 exceeded." |
-| account under compliance review | `403 TRANSACTION_HELD_FOR_REVIEW` (`ACCOUNT_UNDER_REVIEW`) |
-| more than **5 top-ups within a minute** | `403 TRANSACTION_HELD_FOR_REVIEW` (`TOPUP_VELOCITY`), opens an alert and puts the account under review |
-
-Declined payments don't count. Money from the real (signed) provider channel isn't capped by the
-daily mock limit, since it was actually paid and providers check limits before charging.
-
-### Roles: CUSTOMER and ADMIN
-
-Every new account is a `CUSTOMER`. Admin-only features: **Add money** (mock checkout and its
-limits), the **QA sandbox** (`/api/qa/*`, the 🧪 QA button) and **chaos headers** (ignored for
-customers). Admins see an **Admin** chip next to their name, and `GET /api/accounts/me` returns `role`.
-
-There are two ways to make someone an admin:
-
-- `ADMIN_EMAILS=you@example.com,other@example.com` in `.env`: these accounts are promoted when the
-  server starts, and when they register.
-- `npm run admin:set -- someone@example.com ADMIN` (or `CUSTOMER` to remove it).
-
-### Payment webhook
-
-Money enters the system only through the webhook (a mock payment provider calling back).
-The `X-PayPulse-Signature` header must be the hex **HMAC-SHA256** of the raw body using
-`WEBHOOK_SECRET` (default `dev-webhook-secret`).
-
-```bash
-BODY='{"paymentId":"pay_001","accountNumber":"PP1000000001","amount":500,"status":"SUCCESS"}'
-SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "dev-webhook-secret" | sed 's/^.* //')
-curl -X POST localhost:3000/api/webhooks/payments \
-  -H "Content-Type: application/json" -H "X-PayPulse-Signature: $SIG" -d "$BODY"
-```
-
-- `SUCCESS` credits the wallet; `PENDING` and `FAILED` do not.
-- The same `paymentId` is only ever credited once, even if the callback is retried.
-
-### Web wallet UI
-
-Open **http://localhost:3000**. The UI is plain HTML/CSS/JS in `public/` (no build step) and
-uses the same API as the tests:
-
-- **Create account / Log in**: register a user and open their wallet.
-- **Add money** (admins only, with `MOCK_PAYMENTS=true`; limited to ₱1,000,000/day and ₱10,000,000 held):
-  a mock checkout in TEST MODE. Choose *Approve* or *Decline* to simulate the card
-  result. It calls `/api/payments/mock-checkout`, which signs a provider callback and runs it
-  through the real webhook handler.
-- **Send**: transfer to another account number (find it on the wallet card, with a Copy button).
-  Then enter your MPIN in the PIN pad. It is shown once right after sign-up; **Forgot MPIN?**
-  gives a new one after you re-enter your password. Above ₱1,000 an OTP screen follows, with a
-  30-second countdown, a **Resend code** button, and a mock SMS banner that shows the code.
-- **Recent activity**: the wallet's ledger entries; refreshes every 10 seconds.
-
-The MPIN **Confirm** button is deliberately **not** disabled while a request is in flight, so a
-fast double-click can reproduce the race-condition bug from the browser (for amounts up to
-₱1,000; above that the single-use OTP blocks duplicates). Elements carry `data-testid`
-attributes for UI automation.
-
-### Error codes (general)
-
-| Status | Codes |
-|--------|-------|
-| 400 | `INVALID_AMOUNT`, `INVALID_ACCOUNT_NUMBER`, `SAME_ACCOUNT`, `INVALID_EMAIL`, `INVALID_PASSWORD`, `INVALID_NAME`, `INVALID_STATUS`, `INVALID_JSON`, `DAILY_LIMIT_EXCEEDED` |
-| 401 | `UNAUTHORIZED` |
-| 404 | `RECEIVER_NOT_FOUND`, `ACCOUNT_NOT_FOUND`, `RECEIPT_NOT_FOUND`, `ROUTE_NOT_FOUND` |
-| 409 | `EMAIL_TAKEN`, `MOBILE_TAKEN` |
-| 413 | `PAYLOAD_TOO_LARGE` |
-| 422 | `INSUFFICIENT_FUNDS` |
-| 429 | `TOO_MANY_TRANSFERS` |
-| 500 | `INTERNAL_ERROR` |
-
-The MPIN, OTP, password reset and bank transfer codes are listed in their own sections above.
-
-## 6. Core banking architecture
-
-### Double-entry General Ledger
-
-- Every money movement is a `transactions` row (the journal) with `ledger_entries` where
-  **debits = credits**.
-- **Balances are never stored.** A balance is computed by SQL aggregation of the ledger
-  (view `account_balances`: credits − debits). There is no balance column anyone could edit.
-- `ledger_entries` is **immutable**: a trigger refuses `UPDATE`, `DELETE` and `TRUNCATE`;
-  `transactions` can't be deleted or rewritten either. Mistakes are fixed with a new, reversing
-  journal. (Automated tests may move `created_at` in their own session with
-  `SET paypulse.allow_time_travel = 'on'`; the app never does.)
-- Every account maps to a GL account (`gl_accounts`, `accounts.gl_code`); view `gl_trial_balance`
-  gives debits, credits and the balance per GL account:
-
-| GL | Account | Category | System account | Used for |
-|----|---------|----------|----------------|----------|
-| 1010 | Cash at Bank - Settlement Account | Asset | `SYS-EXTERNAL-FUNDING` | top-ups arrive here |
-| 1020 | Bank Clearing - Settled Outbound Payments | Asset | `SYS-BANK-SETTLEMENT` | InstaPay payouts, settled PESONet batches |
-| 2010 | Customer Wallet Liabilities | Liability | every customer wallet | what PayPulse owes its customers |
-| 2020 | PESONet Clearing - Pending Outbound | Liability | `SYS-PESONET-CLEARING` | PESONet transfers waiting for the cut-off |
-| 3900 | Sandbox Adjustments (non-production) | Equity | `SYS-QA-ADJUSTMENT` | QA sandbox resets |
-| 4010 | Fee Revenue - Bank Transfers | Revenue | `SYS-FEE-INCOME` | ₱15 bank transfer fees |
-| 1030 | Loans Receivable - Instant Loan | Asset | `SYS-LOANS-RECEIVABLE` | loan principal customers still owe |
-| 4020 | Interest Revenue - Instant Loan | Revenue | `SYS-LOAN-INTEREST` | interest collected on repayments |
-| 2040 | Biller Settlement - Payable to Billers | Liability | `SYS-BILLER-SETTLEMENT` | bill payments owed to billers |
-| 5020 | Marketing Expense - Cashback | Expense | `SYS-CASHBACK-EXPENSE` | ₱5.00 bills cashback |
-
-| Event | Debit | Credit |
-|-------|-------|--------|
-| Top-up | 1010 Cash at Bank | 2010 customer wallet |
-| Express Send | 2010 sender | 2010 receiver |
-| Bank Transfer, InstaPay | 2010 sender (amount + fee) | 1020 amount, 4010 fee |
-| Bank Transfer, PESONet | 2010 sender (amount + fee) | 2020 amount, 4010 fee |
-| PESONet batch cut-off | 2020 batch total | 1020 batch total |
-| Instant Loan disbursement | 1030 Loans Receivable | 2010 customer wallet |
-| Instant Loan repayment | 2010 customer wallet | 4020 interest part, 1030 principal part |
-| QA reset: loan write-off | 3900 Sandbox Adjustments | 1030 unpaid principal |
-| Bill payment | 2010 customer wallet | 2040 Biller Settlement |
-| Bills cashback | 5020 Cashback Expense | 2010 customer wallet (₱5.00) |
-
-Money is stored as integer cents. No floating point.
-
-### Payment switch: ISO 20022 and InstaPay / PESONet
-
-Every Bank Transfer chooses a rail (`rail` = `INSTAPAY` default, or `PESONET`):
-
-- **InstaPay**: real time, up to ₱50,000 per transfer, settled immediately.
-- **PESONet**: batch. The money waits in GL 2020 until the next **mock cut-off** (every
-  `PESONET_CUTOFF_MINUTES`, default 2, on the clock), then the batch worker settles every queued
-  transfer in one journal (`PESONET_SETTLEMENT`) and records a `pesonet_batches` row.
-
-The **payment switch** (`src/services/paymentSwitch.js`) turns each outbound transfer into an
-**ISO 20022 `pacs.008.001.08`** (FI-to-FI Customer Credit Transfer) message, built in
-`src/services/iso20022.js`, and stores it in `payment_messages` as JSON and XML: group header
-(`MsgId`, `SttlmInf/ClrSys` = rail), payment ids (`InstrId` = bank reference, `EndToEndId` = REF
-number, `UETR`), interbank amount in PHP, `ChrgBr DEBT` with the ₱15 charge, debtor / creditor with
-accounts and BICs (PayPulse `PAYPPHM2XXX`, BDO `BNORPHMMXXX`, ...), and remittance information.
-
-| API | |
-|-----|---|
-| `GET /api/transfers/bank/:transactionId/iso20022?format=json\|xml` | The pacs.008 of one of your bank transfers |
-| `GET /api/transfers/pesonet` | Your PESONet transfers (`QUEUED` / `SETTLED`) and the next cut-off |
-| `POST /api/qa/pesonet/run-cutoff` | QA sandbox: settle your queued PESONet transfers now |
-
-The batch worker runs inside the API server (`PESONET_WORKER=false` to disable) or on its own:
-`npm run pesonet:worker` (`-- --once` for a single cut-off). It takes a PostgreSQL advisory lock
-and `SKIP LOCKED`s rows, so several workers can't settle the same transfer twice.
-
-### AML / compliance monitoring
-
-`middleware/amlMonitor.js` screens every outgoing transfer (Express Send and Bank Transfer,
-including the OTP step) **before** the transfer limits:
-
-| Rule | Trigger |
-|------|---------|
-| `LARGE_TRANSFER` | a single transfer **above ₱500,000** |
-| `VELOCITY` | more than **5 transfers within 1 minute** (the 6th is held) |
-| `ACCOUNT_UNDER_REVIEW` | any transfer while the account is under review |
-
-A firing rule opens a `compliance_alerts` row, sets `users.aml_status = 'UNDER_REVIEW'`, and the
-transfer is **not executed**. Response: **`403`** `{ "error": { "code": "TRANSACTION_HELD_FOR_REVIEW",
-"message": "Transaction Held for Compliance Review", "details": { "rule", "reason", "alertId", ... } } }`.
-`GET /api/accounts/me/compliance` shows the status and alerts; `POST /api/qa/compliance/clear`
-(QA sandbox) plays the compliance officer and releases the hold. Note: with the ₱50,000 daily limit,
-amounts between ₱50,000 and ₱500,000 are rejected by the limit (`400`), above ₱500,000 by AML (`403`).
-
-### End-of-day reconciliation
-
-`npm run eod:reconcile` (`scripts/reconcile-eod.js`, add `--date YYYY-MM-DD` for a past day,
-`--json` for machine output) reads **one consistent snapshot** and reconciles the trial balance as of
-the end of the Manila business day: debits = credits, **total customer liability (GL 2010) = sum of
-customer wallets**, Assets = Liabilities + Equity + Revenue, GL 1010 = successful top-ups,
-GL 1020 = settled bank transfers, GL 2020 = PESONet transfers still queued, GL 4010 = fees,
-GL 2030 / 5010 = savings and savings interest, **GL 1030 = unpaid Instant Loan principal** and
-**GL 4020 = interest collected on loan repayments** (checks `LOAN-1`, `LOAN-2`), GL 2040 = bill
-payments collected and GL 5020 = cashback paid (`BILL-1`, `CB-1`), every bank transfer has a matching pacs.008, and no wallet is overdrawn. It writes an **audit log**
-(`reports/eod/eod-<date>-<time>.log` and `.json`) listing every mismatch, records the run in
-`eod_reconciliations`, and exits `0` balanced / `1` exceptions / `2` error, so it can run from cron
-or CI unattended.
-
-## 7. Project structure
+## Repository map
 
 ```
-PayPulse/
-├── src/
-│   ├── app.js / server.js     Express app and entry point
-│   ├── config.js              Environment variables
-│   ├── db/pool.js             PostgreSQL pool + transaction helper
-│   ├── middleware/            Auth (JWT), AML monitor, limits, account guards, error handling
-│   ├── routes/                HTTP endpoints
-│   ├── services/              Business logic: ledger, transfers, payment switch + ISO 20022,
-│   │                          PESONet, compliance (AML), limits, receipts, QR Ph, QA sandbox
-│   ├── routes/v1/             Versioned APIs: savings, virtual cards
-│   ├── workers/               PESONet batch worker, daily interest scheduler
-│   └── utils/                 Errors, money, mobile, QR Ph, privacy helpers
-├── public/                    Web wallet UI (index.html, styles.css, app.js)
-├── db/schema.sql              Database schema: GL accounts, immutable ledger, views, payments, AML
-├── scripts/
-│   ├── init-db.js             Creates / upgrades tables
-│   ├── reconcile-eod.js       End-of-day reconciliation + audit log
-│   └── pesonet-worker.js      Standalone PESONet batch worker
-├── jobs/daily-interest.js     Daily savings interest (cron)
-├── tests/
-│   ├── api/                   Playwright API tests (project "api")
-│   ├── resilience.spec.ts     Browser chaos / resilience tests (project "ui")
-│   ├── load/                  k6 concurrency test
-│   └── helpers/               API + database helpers, ledger checker
-├── Dockerfile
-├── docker-compose.yml
-└── .github/workflows/test.yml CI pipeline
+src/            Express API: routes, services (ledger, transfers, bills, loans, cards, KYC…), realtime.js
+public/         web wallet (vanilla JS, iOS glass design)
+db/schema.sql   schema, chart of accounts, immutability + notify triggers (re-runnable migration)
+tests/api/      281 API tests (21 suites)            tests/e2e/      customer journeys in Chrome
+tests/visual/   visual regression + baselines         tests/load/     k6: race + idempotency (+ HTML reports)
+tests/resilience.spec.ts  chaos tests                 scripts/        EOD reconciliation, workers
 ```
 
-## 8. CI/CD
+## More documentation
 
-`.github/workflows/test.yml` runs on every pull request:
+- **[QA_NOTES.md](QA_NOTES.md):** the race condition: root cause, reproduction, fix.
+- **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md):** full API reference, business rules, error codes, chart of accounts, every feature in detail.
 
-1. Starts the app + database with Docker Compose
-2. Runs the Playwright API tests
-3. Runs the k6 concurrency test
-4. Runs the database ledger check
-5. On failure, uploads the Playwright HTML report, JUnit XML, k6 summary, DB report and container logs
-   as the **paypulse-test-reports** artifact
+---
 
-While `RACE_BUG_EXPECTED` is `"true"`, the known bug doesn't block pull requests. See
-[QA_NOTES.md](QA_NOTES.md) for what to change once it's fixed.
+*Built by **Brylle Opada** as a QA automation portfolio project. All balances are play money; billers, banks and card network are mocks.*

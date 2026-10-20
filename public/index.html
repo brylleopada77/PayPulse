@@ -287,6 +287,23 @@
             </span>
             <input type="checkbox" role="switch" class="toggle" id="card-freeze" data-testid="card-freeze">
           </label>
+          <form id="card-pay-form" class="card-pay" novalidate>
+            <h3>Try an online purchase</h3>
+            <div class="card-pay-row">
+              <label>Store
+                <select name="merchant" data-testid="card-pay-merchant">
+                  <option>Lazada</option><option>Shopee</option><option>Netflix</option>
+                  <option>Spotify</option><option>Grab</option><option>Steam</option>
+                </select>
+              </label>
+              <label>Amount (₱)
+                <input name="amount" inputmode="decimal" placeholder="250.00" data-testid="card-pay-amount">
+              </label>
+            </div>
+            <p class="form-error" role="alert"></p>
+            <button type="submit" class="btn primary" data-testid="card-pay-submit">Pay with virtual card</button>
+            <p class="hint">Demo store: the amount is taken from your wallet. A locked card is declined.</p>
+          </form>
           <p class="hint" id="card-hint" data-testid="card-hint">Card details are hidden. They are shown for 30 seconds after you enter your MPIN.</p>
         </div>
       </section>
@@ -1089,8 +1106,12 @@
 
   <div id="net-indicator" class="net-indicator" role="status" data-testid="net-indicator" popover="manual">⏳ Waiting for server…</div>
 
+  <div id="live-toasts" class="live-toasts" popover="manual" aria-live="polite" data-testid="live-toasts"></div>
+
   <div id="toast" class="toast" role="status" aria-live="polite" data-testid="toast" popover="manual"></div>
 
+  <!-- Socket.IO client, served by the PayPulse server itself (real-time notifications) -->
+  <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

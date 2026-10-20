@@ -160,11 +160,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS history_cleared_at TIMESTAMPTZ;
 -- SAVINGS_TRANSFER: wallet <-> PayPulse Save vault.  INTEREST: daily savings interest posting.
 -- LOAN_DISBURSEMENT / LOAN_REPAYMENT: Instant Loan money out to / back from the wallet.
 -- BILL_PAYMENT: Pay Bills (wallet -> biller settlement).  CASHBACK: bills cashback reward.
+-- CARD_PAYMENT: an online purchase with the virtual Visa (wallet -> card settlement).
 ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
 ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
   CHECK (type IN ('TRANSFER', 'DEPOSIT', 'BANK_TRANSFER', 'QA_ADJUSTMENT', 'PESONET_SETTLEMENT',
                   'SAVINGS_TRANSFER', 'INTEREST', 'LOAN_DISBURSEMENT', 'LOAN_REPAYMENT',
-                  'BILL_PAYMENT', 'CASHBACK'));
+                  'BILL_PAYMENT', 'CASHBACK', 'CARD_PAYMENT'));
 
 INSERT INTO accounts (account_number, is_system)
 VALUES ('SYS-QA-ADJUSTMENT', true)
@@ -219,6 +220,7 @@ UPDATE accounts SET gl_code = CASE account_number
     WHEN 'SYS-LOAN-INTEREST'    THEN '4020'
     WHEN 'SYS-BILLER-SETTLEMENT' THEN '2040'
     WHEN 'SYS-CASHBACK-EXPENSE' THEN '5020'
+    WHEN 'SYS-CARD-SETTLEMENT'  THEN '2050'
     ELSE '2010' END
   WHERE gl_code IS NULL OR is_system;
 ALTER TABLE accounts ALTER COLUMN gl_code SET NOT NULL;
@@ -629,3 +631,55 @@ CREATE TABLE IF NOT EXISTS notification_reads (
   read_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, notification_id)
 );
+
+-- =====================================================================================
+-- Virtual card payments (online purchases with the virtual Visa)
+-- =====================================================================================
+
+INSERT INTO gl_accounts (code, name, category, normal_balance, description) VALUES
+  ('2050', 'Card Settlement - Payable to Merchants', 'LIABILITY', 'CREDIT',
+   'Virtual card purchases taken from wallets, owed to merchants through the card network')
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name, category = EXCLUDED.category,
+  normal_balance = EXCLUDED.normal_balance, description = EXCLUDED.description;
+
+INSERT INTO accounts (account_number, is_system, gl_code)
+VALUES ('SYS-CARD-SETTLEMENT', true, '2050')
+ON CONFLICT (account_number) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS card_payments (
+  id               SERIAL PRIMARY KEY,
+  card_id          INTEGER     NOT NULL REFERENCES virtual_cards (id),
+  user_id          INTEGER     NOT NULL REFERENCES users (id),
+  merchant         TEXT        NOT NULL,
+  amount_cents     BIGINT      NOT NULL CHECK (amount_cents > 0),
+  auth_code        TEXT        NOT NULL,
+  transaction_id   INTEGER     NOT NULL UNIQUE REFERENCES transactions (id),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_card_payments_user ON card_payments (user_id, created_at);
+
+-- =====================================================================================
+-- Real-time notifications
+-- =====================================================================================
+
+-- Every ledger entry is announced on the paypulse_ledger channel. PostgreSQL delivers NOTIFY
+-- only when the transaction COMMITS (and never if it rolls back), so the app's live toasts can
+-- never announce money that didn't actually move. src/realtime.js LISTENs and pushes the
+-- events to the owner's browser over Socket.IO.
+CREATE OR REPLACE FUNCTION notify_ledger_entry() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('paypulse_ledger', json_build_object(
+    'transactionId', NEW.transaction_id,
+    'accountId', NEW.account_id,
+    'direction', NEW.direction,
+    'amountCents', NEW.amount_cents
+  )::text);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_ledger_entries_notify ON ledger_entries;
+CREATE TRIGGER trg_ledger_entries_notify
+  AFTER INSERT ON ledger_entries
+  FOR EACH ROW EXECUTE FUNCTION notify_ledger_entry();
