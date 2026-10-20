@@ -14,7 +14,8 @@
     "db:assert-ledger": "node tests/assert-system-ledger.js",
     "eod:reconcile": "node scripts/reconcile-eod.js",
     "pesonet:worker": "node scripts/pesonet-worker.js",
-    "admin:set": "node scripts/set-role.js"
+    "admin:set": "node scripts/set-role.js",
+    "theme:dark": "node scripts/build-dark-theme.js"
   },
   "engines": {
     "node": ">=20"

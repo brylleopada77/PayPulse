@@ -124,3 +124,35 @@ test.describe('PayPulse full flow', () => {
     await expect(page.getByTestId('receipt-title')).toHaveText('Money Received');
   });
 });
+
+test.describe('Appearance (iOS dark glass)', () => {
+  test.use({ colorScheme: 'dark' });
+
+  test('Dark (Obsidian) is the default; Light is remembered; Auto follows the device live', async ({ page, request }) => {
+    const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
+    await login(page, await createUser(request, 'Theme Tester'));
+    expect(await theme()).toBe('dark'); // default look: Obsidian & Emerald
+
+    await page.getByTestId('open-profile').click();
+    const appearance = page.getByTestId('menu-appearance');
+    await appearance.scrollIntoViewIfNeeded();
+    await expect(page.getByTestId('theme-dark')).toBeChecked();
+    await appearance.getByText('Light').click();
+    expect(await theme()).toBe('light');
+    // Light means light everywhere, including dialogs (their default follows the device otherwise)
+    await expect(page.getByTestId('profile-dialog')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+
+    await page.reload();
+    await expect(page.getByTestId('balance')).not.toHaveText('—');
+    expect(await theme()).toBe('light'); // remembered on this device
+
+    await page.getByTestId('open-profile').click();
+    await page.getByTestId('menu-appearance').getByText('Dark').click();
+    expect(await theme()).toBe('dark');
+    await expect(page.getByTestId('balance')).toHaveCSS('color', 'rgb(255, 255, 255)'); // white balance on the slate card
+
+    await page.getByTestId('menu-appearance').getByText('Auto').click();
+    await page.emulateMedia({ colorScheme: 'light' }); // the device switches to light
+    await expect.poll(theme).toBe('light');
+  });
+});

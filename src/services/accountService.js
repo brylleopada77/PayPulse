@@ -95,6 +95,8 @@ function parseHistoryQuery({ limit, before, direction } = {}) {
 
 /**
  * Ledger history for the user's wallet, newest first. Bank transfers include their details.
+ * Daily interest credited to the user's PayPulse Save vault is included too (account: "SAVINGS"),
+ * so every day's earnings show in the history; everything else is the main wallet (account: "WALLET").
  * Entries from before a QA sandbox reset (users.history_cleared_at) are hidden.
  * Returns one page: { transactions, hasMore, nextBefore } (nextBefore = cursor for the next page).
  */
@@ -102,12 +104,14 @@ async function getTransactionPage(userId, { limit = 50, before = null, direction
   const account = await getAccountForUser(userId);
   const { rows } = await pool.query(
     `SELECT t.id, t.type, t.description, t.created_at, le.direction, le.amount_cents,
+            le.account_id <> $1 AS in_savings,
             bt.reference, bt.bank_code, bt.account_number AS bank_account, bt.account_name,
             bt.amount_cents AS bank_amount_cents, bt.fee_cents, bt.rail, bt.status AS bank_status
      FROM ledger_entries le
      JOIN transactions t ON t.id = le.transaction_id
      LEFT JOIN bank_transfers bt ON bt.transaction_id = t.id
-     WHERE le.account_id = $1
+     WHERE (le.account_id = $1
+            OR (t.type = 'INTEREST' AND le.account_id = (SELECT id FROM accounts WHERE savings_owner_id = $3)))
        -- compared inside SQL: a JS Date would drop the microseconds of history_cleared_at
        AND t.created_at > COALESCE((SELECT history_cleared_at FROM users WHERE id = $3), '-infinity')
        AND ($4::int IS NULL OR t.id < $4)
@@ -128,6 +132,8 @@ async function getTransactionPage(userId, { limit = 50, before = null, direction
     amountCents: row.amount_cents,
     description: row.description,
     createdAt: row.created_at,
+    // WALLET: the main wallet (Available Balance). SAVINGS: credited to PayPulse Save (interest).
+    account: row.in_savings ? 'SAVINGS' : 'WALLET',
     ...(row.reference && {
       bankTransfer: {
         bankReference: row.reference,

@@ -1,0 +1,22 @@
+name: Keep PayPulse awake
+
+# Render's free plan sleeps after 15 minutes without traffic (the next visit then takes ~50 s).
+# Pinging /health every 10 minutes keeps the public link instant.
+# Set the repository variable PAYPULSE_URL (Settings -> Secrets and variables -> Actions ->
+# Variables), e.g. https://paypulse.onrender.com. Scheduled workflows run from the default branch.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /health
+        env:
+          PAYPULSE_URL: ${{ vars.PAYPULSE_URL }}
+        run: |
+          if [ -z "$PAYPULSE_URL" ]; then echo "Repository variable PAYPULSE_URL is not set: nothing to ping."; exit 0; fi
+          curl --fail --silent --show-error --max-time 90 --retry 2 "$PAYPULSE_URL/health"

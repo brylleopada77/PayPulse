@@ -161,6 +161,7 @@
     if (tx.type === 'BILL_PAYMENT') return { title: tx.description, icon: '🧾' };
     if (tx.type === 'CASHBACK') return { title: 'Cashback Reward - Bills Payment', icon: '🎁' };
     if (tx.type === 'CARD_PAYMENT') return { title: tx.description, icon: '💳' };
+    if (tx.type === 'INTEREST') return { title: 'Savings interest earned', icon: '🌱' };
     if (tx.type === 'LOAN_REPAYMENT') return { title: 'Loan Repayment', icon: '↩' };
     if (tx.type === 'SAVINGS_TRANSFER') {
       return { title: tx.direction === 'DEBIT' ? 'Moved to PayPulse Save' : 'From PayPulse Save', icon: '🐷' };
@@ -316,6 +317,43 @@
   }
   addPasswordToggles();
 
+  /** A theme token from styles.css (e.g. "--accent"), so canvas drawings follow the palette. */
+  function cssToken(name, fallback) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  }
+
+  // ---------- Appearance: System / Light / Dark (iOS dark glass) ----------
+
+  const THEME_KEY = 'paypulse.theme';
+  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+
+  function themePref() {
+    // Default: Dark (Obsidian & Emerald). Users can pick Light or Auto (follow the device).
+    try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
+  }
+
+  /** Apply a preference: "system" follows the device, "light" / "dark" are fixed. */
+  function applyTheme(pref) {
+    const dark = pref === 'dark' || (pref === 'system' && darkQuery.matches);
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.documentElement.dataset.themePref = pref;
+    themeColor?.setAttribute('content', dark ? '#121212' : cssToken('--bg', '#f1f5f4'));
+    document.querySelectorAll('input[name="theme"]').forEach((r) => { r.checked = r.value === pref; });
+    const sub = document.getElementById('appearance-sub');
+    if (sub) sub.textContent = pref === 'system' ? 'Follows your device (' + (dark ? 'dark' : 'light') + ' now)' : dark ? 'Dark glass' : 'Light';
+  }
+
+  document.querySelectorAll('input[name="theme"]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+      try { localStorage.setItem(THEME_KEY, radio.value); } catch { /* not remembered */ }
+      applyTheme(radio.value);
+    });
+  });
+  // When following the device, switch live if the device changes (e.g. sunset on iOS / Android).
+  darkQuery.addEventListener('change', () => { if (themePref() === 'system') applyTheme('system'); });
+  applyTheme(themePref());
+
   // ---------- Hide / show balance ----------
 
   const HIDE_BALANCE_KEY = 'paypulse.hideBalance';
@@ -407,7 +445,7 @@
     const incoming = tx.direction === 'CREDIT';
 
     const li = document.createElement('li');
-    li.className = 'tx ' + (incoming ? 'in' : 'out');
+    li.className = 'tx ' + (incoming ? 'in' : 'out') + (tx.account === 'SAVINGS' ? ' savings' : '');
     li.dataset.testid = 'tx-item';
     // Each row opens its receipt (click, Enter or Space).
     li.tabIndex = 0;
@@ -434,7 +472,10 @@
     const bt = tx.bankTransfer;
     const pending = bt?.status === 'QUEUED' ? ' · PESONet: pending cut-off' : '';
     // Top-ups carry a long payment id in their description: the receipt shows it, the list doesn't.
-    const note = tx.type === 'DEPOSIT' ? 'Card top-up' : tx.description;
+    const note =
+      tx.type === 'DEPOSIT' ? 'Card top-up'
+        : tx.type === 'INTEREST' ? (tx.description || '').replace('Savings interest for', 'For') + ' · added to PayPulse Save'
+          : tx.description;
     meta.textContent = bt
       ? bt.accountName + ' ' + bt.accountNumber + ' · ' + money(bt.amount) + ' + ' + money(bt.fee) + ' fee' + pending + ' · ' + formatDate(tx.createdAt)
       : note && note !== title
@@ -3194,11 +3235,14 @@
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, W, H);
 
-    // Light green header
+    // Light violet header (theme)
     const gradient = ctx.createLinearGradient(0, 0, W, headH);
-    gradient.addColorStop(0, '#b9f0d3');
-    gradient.addColorStop(0.5, '#cdf5e0');
-    gradient.addColorStop(1, '#e3fbef');
+    // The PNG is always drawn in the LIGHT palette (a receipt is printed / shared, not themed dark).
+    const light = (name, fallback) => (document.documentElement.dataset.theme === 'dark' ? fallback : cssToken(name, fallback));
+    const ink = light('--accent-ink', '#047857');
+    gradient.addColorStop(0, light('--accent-tint', '#c8f7dc'));
+    gradient.addColorStop(0.5, light('--accent-soft', '#e6fbef'));
+    gradient.addColorStop(1, light('--accent-softer', '#f3fdf7'));
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, W, headH);
 
@@ -3207,7 +3251,7 @@
     ctx.beginPath();
     ctx.arc(W / 2, 46, 24, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#12b886';
+    ctx.strokeStyle = '#0e9f6e';
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -3217,7 +3261,7 @@
     ctx.lineTo(W / 2 + 11, 39);
     ctx.stroke();
 
-    ctx.fillStyle = '#0b5d43';
+    ctx.fillStyle = ink;
     ctx.textAlign = 'center';
     ctx.font = font(18, 700);
     ctx.fillText(r.title, W / 2, 98);
@@ -3241,7 +3285,7 @@
       ctx.fillText(label, PAD, y);
       ctx.textAlign = 'right';
       ctx.font = font(isTotal ? 15 : 13, 600);
-      ctx.fillStyle = isTotal || label === 'Reference No.' ? '#0b5d43' : '#1b1d2a';
+      ctx.fillStyle = isTotal || label === 'Reference No.' ? ink : '#0f172a';
       ctx.fillText(fit(value, W - PAD * 2 - 130), W - PAD, y);
       y += ROW;
     }
@@ -3257,7 +3301,7 @@
     ctx.setLineDash([]);
     ctx.textAlign = 'center';
     ctx.font = font(12, 700);
-    ctx.fillStyle = '#12b886';
+    ctx.fillStyle = light('--accent-ink', '#047857');
     ctx.fillText('PayPulse', W / 2, y + 16);
     ctx.font = font(11);
     ctx.fillStyle = '#6b7086';

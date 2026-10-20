@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { authHeader, createFundedUser, createUser, fundAccount, transfer, type TestUser } from '../helpers/api';
+import { authHeader, createFundedAdmin, createFundedUser, createUser, fundAccount, getBalanceCents, transfer, type TestUser } from '../helpers/api';
 import { ageOutgoingTransactions } from '../helpers/db';
 
 // GET /api/accounts/me/transactions paging: limit, before (cursor), direction (IN / OUT).
@@ -72,4 +72,45 @@ test.describe('Transaction history paging', () => {
       expect((await response.json()).error.code).toBe(code);
     });
   }
+});
+
+test.describe('Savings interest in the history', () => {
+  test('every day of PayPulse Save interest is listed, marked SAVINGS, with a receipt', async ({ request }) => {
+    const saver = await createFundedAdmin(request, 20_000); // admin: uses the QA "simulate interest" tool
+    await request.post('/api/v1/savings/deposit', { data: { amount: 10_000 }, headers: authHeader(saver.token) });
+    const walletBefore = await getBalanceCents(request, saver);
+    const accrue = await request.post('/api/qa/savings/accrue', { data: { days: 3 }, headers: authHeader(saver.token) });
+    expect(accrue.status(), await accrue.text()).toBe(200);
+
+    const body = await (await page(request, saver)).json();
+    const interest = body.transactions.filter((t: Tx & { type: string }) => t.type === 'INTEREST');
+    expect(interest).toHaveLength(3);
+    for (const row of interest) {
+      expect(row).toMatchObject({ direction: 'CREDIT', account: 'SAVINGS' });
+      expect(row.description).toMatch(/^Savings interest for \d{4}-\d{2}-\d{2}$/);
+      expect(Number(row.amount)).toBeGreaterThan(0);
+    }
+    // Wallet rows are still marked WALLET, and interest never touches the Available Balance.
+    expect(body.transactions.find((t: { type: string }) => t.type === 'SAVINGS_TRANSFER')).toMatchObject({ account: 'WALLET' });
+    expect(await getBalanceCents(request, saver)).toBe(walletBefore);
+    // "Money in" includes the interest.
+    const moneyIn = await (await page(request, saver, '?direction=IN')).json();
+    expect(moneyIn.transactions.filter((t: { type: string }) => t.type === 'INTEREST')).toHaveLength(3);
+
+    const receipt = await (
+      await request.get(`/api/accounts/me/transactions/${interest[0].transactionId}/receipt`, { headers: authHeader(saver.token) })
+    ).json();
+    expect(receipt).toMatchObject({ title: 'Savings Interest Earned', amount: interest[0].amount, direction: 'RECEIVED' });
+    expect(receipt.note).toMatch(/^Interest for \d{4}-\d{2}-\d{2} at 6\.00% p\.a\., added to PayPulse Save$/);
+  });
+
+  test("you can't open someone else's interest receipt", async ({ request }) => {
+    const saver = await createFundedAdmin(request, 5_000);
+    const other = await createUser(request);
+    await request.post('/api/v1/savings/deposit', { data: { amount: 5_000 }, headers: authHeader(saver.token) });
+    await request.post('/api/qa/savings/accrue', { data: { days: 1 }, headers: authHeader(saver.token) });
+    const [row] = (await (await page(request, saver)).json()).transactions.filter((t: { type: string }) => t.type === 'INTEREST');
+    const response = await request.get(`/api/accounts/me/transactions/${row.transactionId}/receipt`, { headers: authHeader(other.token) });
+    expect(response.status()).toBe(404);
+  });
 });

@@ -38,17 +38,18 @@ async function getReceipt(userId, transactionId) {
   if (!Number.isInteger(id) || id <= 0) throw notYours();
 
   const { rows: entries } = await pool.query(
-    `SELECT le.direction, le.amount_cents, a.account_number, a.is_system, a.user_id, u.full_name,
-            t.type, t.description, t.created_at
+    `SELECT le.direction, le.amount_cents, a.account_number, a.is_system, a.user_id, a.savings_owner_id,
+            u.full_name, t.type, t.description, t.created_at
      FROM ledger_entries le
      JOIN transactions t ON t.id = le.transaction_id
      JOIN accounts a ON a.id = le.account_id
-     LEFT JOIN users u ON u.id = a.user_id
+     LEFT JOIN users u ON u.id = COALESCE(a.user_id, a.savings_owner_id)
      WHERE le.transaction_id = $1
      ORDER BY le.id`,
     [id],
   );
-  const mine = entries.find((e) => e.user_id === userId);
+  // The user's wallet entry; for savings interest (which never touches the wallet), their vault's.
+  const mine = entries.find((e) => e.user_id === userId) ?? entries.find((e) => e.savings_owner_id === userId);
   if (!mine) throw notYours();
 
   const { type, description, created_at: createdAt } = mine;
@@ -99,6 +100,27 @@ async function getReceipt(userId, transactionId) {
       sender: { name: 'Card payment', account: rows[0]?.payment_id ?? 'External funding' },
       recipient: party(mine),
       bankName: 'PayPulse',
+    };
+  }
+
+  if (type === 'INTEREST') {
+    const { rows } = await pool.query(
+      `SELECT accrual_date::text AS day, rate_bps FROM savings_interest_accruals WHERE transaction_id = $1`,
+      [id],
+    );
+    const accrual = rows[0];
+    return {
+      ...receipt,
+      title: 'Savings Interest Earned',
+      amount: fromCents(mine.amount_cents),
+      fee: fromCents(0),
+      total: fromCents(mine.amount_cents),
+      sender: { name: 'PayPulse (interest)', account: 'PayPulse Save' },
+      recipient: { name: `${mine.full_name} (PayPulse Save)`, account: mine.account_number },
+      bankName: 'PayPulse',
+      note: accrual
+        ? `Interest for ${accrual.day} at ${(accrual.rate_bps / 100).toFixed(2)}% p.a., added to PayPulse Save`
+        : 'Added to PayPulse Save',
     };
   }
 

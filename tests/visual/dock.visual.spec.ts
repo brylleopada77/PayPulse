@@ -30,6 +30,10 @@ async function settle(page: Page) {
 for (const vp of VIEWPORTS) {
   test.describe(`Glass dock @ ${vp.name} (${vp.width}x${vp.height})`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
+    // The app opens in Dark (Obsidian) by default; this set checks the Light theme.
+    test.beforeEach(async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem('paypulse.theme', 'light'));
+    });
 
     test('dock on Home: frosted pill, raised Scan & Pay, active Home badge', async ({ page, request }) => {
       await login(page, await createUser(request, 'Visual Tester'));
@@ -54,6 +58,24 @@ for (const vp of VIEWPORTS) {
       await expect(page).toHaveScreenshot(`home-${vp.name}.png`, {
         mask: [page.getByTestId('account-number')],
       });
+    });
+  });
+}
+
+for (const vp of VIEWPORTS.filter((v) => ['iphone-15', 'desktop'].includes(v.name))) {
+  test.describe(`Dark glass @ ${vp.name}`, () => {
+    test.use({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: 'dark' });
+
+    test('dark dock: dark glass pill with glowing Scan & Pay', async ({ page, request }) => {
+      await login(page, await createUser(request, 'Visual Tester'));
+      await settle(page);
+      await expect(page.getByRole('navigation', { name: 'Main' })).toHaveScreenshot(`dark-dock-${vp.name}.png`);
+    });
+
+    test('dark Home screen', async ({ page, request }) => {
+      await login(page, await createUser(request, 'Visual Tester'));
+      await settle(page);
+      await expect(page).toHaveScreenshot(`dark-home-${vp.name}.png`, { mask: [page.getByTestId('account-number')] });
     });
   });
 }

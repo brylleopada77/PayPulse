@@ -66,6 +66,12 @@ jobs:
       - name: Install Playwright ffmpeg (for test videos)
         run: npx playwright install ffmpeg
 
+      # public/theme-dark.css is generated from styles.css: fail if someone forgot to regenerate it.
+      - name: Dark theme is up to date
+        run: |
+          npm run theme:dark
+          git diff --exit-code -- public/theme-dark.css || { echo "Run: npm run theme:dark"; exit 1; }
+
       - name: Apply database migrations (db/schema.sql)
         run: npm run db:init
 
