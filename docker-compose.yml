@@ -1,0 +1,60 @@
+name: paypulse
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: paypulse
+      POSTGRES_PASSWORD: paypulse
+      POSTGRES_DB: paypulse
+    ports:
+      - "${DB_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs automatically the first time the database volume is created
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paypulse -d paypulse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://paypulse:paypulse@db:5432/paypulse
+      JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-webhook-secret}
+      # Local/CI only: QA Sandbox panel + /api/qa endpoints
+      QA_SANDBOX: ${QA_SANDBOX:-true}
+      # Local/CI only: mock "Add money" checkout (with limits). Never in production.
+      MOCK_PAYMENTS: ${MOCK_PAYMENTS:-true}
+    ports:
+      - "${APP_HOST_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Load / concurrency tests. Not started by "docker compose up"; run on demand with:
+  #   docker compose run --rm k6                                         (race condition, the default)
+  #   docker compose run --rm k6 run /scripts/idempotent-transfer.js     (idempotency)
+  # HTML + JSON reports are written to ./reports.
+  k6:
+    image: grafana/k6:1.3.0
+    profiles: ["test"]
+    environment:
+      BASE_URL: http://app:3000
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-webhook-secret}
+      REPORT_DIR: /reports
+    volumes:
+      - ./tests/load:/scripts:ro
+      - ./reports:/reports
+    command: ["run", "/scripts/race-transfer.js"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  pgdata:

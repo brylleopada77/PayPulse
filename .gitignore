@@ -147,3 +147,11 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# PayPulse test output
+playwright-report/
+test-results/
+reports/
+
+# Public link written by start-paypulse.ps1
+paypulse-link.txt
