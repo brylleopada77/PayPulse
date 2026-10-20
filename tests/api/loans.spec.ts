@@ -22,7 +22,7 @@ const loans = {
   apply: (request: APIRequestContext, user: TestUser, data: Record<string, unknown>) =>
     request.post('/api/v1/loans', { data: { mpin: user.mpin, ...data }, headers: authHeader(user.token) }),
   repay: (request: APIRequestContext, user: TestUser, loanId: number, amount: unknown) =>
-    request.post(`/api/v1/loans/${loanId}/repay`, { data: { amount }, headers: authHeader(user.token) }),
+    request.post(`/api/v1/loans/${loanId}/repay`, { data: { amount, mpin: user.mpin }, headers: authHeader(user.token) }),
 };
 const qa = (request: APIRequestContext, user: TestUser, settings: Record<string, boolean>) =>
   request.put('/api/qa/settings', { data: settings, headers: authHeader(user.token) });
@@ -248,5 +248,21 @@ test.describe('Instant Loan with the QA sandbox (admin)', () => {
 
     const report = await checkLedgerIntegrity([admin.accountNumber]);
     expect(report.unbalancedTransactions).toEqual([]);
+  });
+});
+
+test.describe('Instant Loan: repayment needs the MPIN', () => {
+  test('missing or wrong MPIN: nothing is repaid', async ({ request }) => {
+    const alice = await createFundedUser(request, 1000);
+    const loan = await (await loans.apply(request, alice, { amount: 5000, termMonths: 3 })).json();
+    const missing = await request.post(`/api/v1/loans/${loan.loanId}/repay`, { data: { amount: 100 }, headers: authHeader(alice.token) });
+    expect(missing.status()).toBe(400);
+    expect((await missing.json()).error.code).toBe('MPIN_REQUIRED');
+    const wrong = await request.post(`/api/v1/loans/${loan.loanId}/repay`, {
+      data: { amount: 100, mpin: wrongMpinFor(alice) },
+      headers: authHeader(alice.token),
+    });
+    expect(wrong.status()).toBe(403);
+    expect(await getBalanceCents(request, alice)).toBe(600_000);
   });
 });

@@ -88,8 +88,17 @@ async function listCards(userId) {
 }
 
 /** Freeze or unfreeze a card. */
-async function setStatus(userId, token, status) {
+/**
+ * Lock (FROZEN) or unlock (ACTIVE) a card. Locking is one tap (an emergency); UNLOCKING a locked card
+ * needs the MPIN, so someone holding an unlocked phone can't undo the lock.
+ */
+async function setStatus(userId, token, status, mpin) {
   if (status !== 'ACTIVE' && status !== 'FROZEN') throw badRequest('INVALID_STATUS', 'status must be ACTIVE or FROZEN');
+  if (status === 'ACTIVE') {
+    const { rows } = await pool.query('SELECT status FROM virtual_cards WHERE user_id = $1 AND token = $2', [userId, token]);
+    if (!rows[0]) throw notFound('CARD_NOT_FOUND', 'Card not found');
+    if (rows[0].status === 'FROZEN') await mpinService.verifyMpin(userId, mpin);
+  }
   const { rowCount } = await pool.query('UPDATE virtual_cards SET status = $3 WHERE user_id = $1 AND token = $2', [
     userId,
     token,

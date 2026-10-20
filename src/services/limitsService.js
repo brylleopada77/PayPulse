@@ -35,7 +35,7 @@ async function getUsage(accountId) {
      LEFT JOIN bank_transfers bt ON bt.transaction_id = t.id
      WHERE le.account_id = $1
        AND le.direction = 'DEBIT'
-       AND t.type IN ('TRANSFER', 'BANK_TRANSFER', 'BILL_PAYMENT', 'CARD_PAYMENT')
+       AND t.type IN ('TRANSFER', 'BANK_TRANSFER', 'BILL_PAYMENT', 'CARD_PAYMENT', 'LOAD_PURCHASE')
        -- a QA sandbox reset restarts the limits
        AND t.created_at > COALESCE((SELECT u.history_cleared_at FROM users u
                                     JOIN accounts a ON a.user_id = u.id WHERE a.id = $1), '-infinity')

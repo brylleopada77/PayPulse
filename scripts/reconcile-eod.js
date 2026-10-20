@@ -20,6 +20,7 @@
  *      Biller settlement         GL 2040 = bill payments collected for billers
  *      Cashback expense          GL 5020 = cashback credited on bill payments
  *      Card settlement           GL 2050 = virtual card purchases owed to merchants
+ *      Telco settlement          GL 2060 = prepaid load sold (Buy Load)
  *   9. Payment messages          every bank transfer has an ISO 20022 pacs.008 with the same status
  *  10. Overdrafts                no customer wallet below zero
  *
@@ -103,8 +104,13 @@ async function reconcile(client, businessDate) {
     SELECT COALESCE(SUM(bp.amount_cents), 0) AS v FROM bill_payments bp
     JOIN transactions t ON t.id = bp.transaction_id WHERE t.created_at <= $1`);
   const cashbackPaid = await one(`
-    SELECT COALESCE(SUM(bp.cashback_cents), 0) AS v FROM bill_payments bp
-    JOIN transactions t ON t.id = bp.cashback_transaction_id WHERE t.created_at <= $1`);
+    SELECT (SELECT COALESCE(SUM(bp.cashback_cents), 0) FROM bill_payments bp
+            JOIN transactions t ON t.id = bp.cashback_transaction_id WHERE t.created_at <= $1)
+         + (SELECT COALESCE(SUM(lp.cashback_cents), 0) FROM load_purchases lp
+            JOIN transactions t ON t.id = lp.cashback_transaction_id WHERE t.created_at <= $1) AS v`);
+  const loadSold = await one(`
+    SELECT COALESCE(SUM(lp.amount_cents), 0) AS v FROM load_purchases lp
+    JOIN transactions t ON t.id = lp.transaction_id WHERE t.created_at <= $1`);
   const cardPurchases = await one(`
     SELECT COALESCE(SUM(cp.amount_cents), 0) AS v FROM card_payments cp
     JOIN transactions t ON t.id = cp.transaction_id WHERE t.created_at <= $1`);
@@ -180,7 +186,8 @@ async function reconcile(client, businessDate) {
     check('LOAN-1', 'Loans receivable: GL 1030 = unpaid Instant Loan principal', loanPrincipalOpen, gl['1030'].balance),
     check('LOAN-2', 'Loan interest revenue: GL 4020 = interest collected on repayments', loanInterestCollected, gl['4020'].balance),
     check('BILL-1', 'Biller settlement: GL 2040 = bill payments collected', billsCollected, gl['2040'].balance),
-    check('CB-1', 'Cashback expense: GL 5020 = cashback paid on bill payments', cashbackPaid, gl['5020'].balance),
+    check('CB-1', 'Cashback expense: GL 5020 = cashback paid on bills and load', cashbackPaid, gl['5020'].balance),
+    check('LOAD-1', 'Telco settlement: GL 2060 = prepaid load sold', loadSold, gl['2060'].balance),
     check('CARD-1', 'Card settlement: GL 2050 = virtual card purchases', cardPurchases, gl['2050'].balance),
     check('MSG-1', 'Bank transfers without an ISO 20022 message (since the switch went live)', 0, missingMessages, { money: false }),
     check('MSG-2', 'Bank transfer vs pacs.008 status mismatches', 0, statusMismatches, { money: false }),
@@ -209,6 +216,7 @@ async function reconcile(client, businessDate) {
       billerSettlement: peso(gl['2040'].balance),
       cashbackExpense: peso(gl['5020'].balance),
       cardSettlement: peso(gl['2050'].balance),
+      telcoSettlement: peso(gl['2060'].balance),
       cashAtBank: peso(gl['1010'].balance),
       settledOutbound: peso(-gl['1020'].balance),
     },

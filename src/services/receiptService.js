@@ -1,6 +1,7 @@
 const { pool } = require('../db/pool');
 const { findBank } = require('./banks');
 const { findBiller } = require('./billers');
+const telcos = require('./telcos');
 const { nextCutoff } = require('./pesonetService');
 const { notFound } = require('../utils/errors');
 const { fromCents } = require('../utils/money');
@@ -142,6 +143,47 @@ async function getReceipt(userId, transactionId) {
       bankName: 'PayPulse Visa',
       note: cp ? `Authorization code ${cp.auth_code}` : null,
     };
+  }
+
+  // Load purchases, and the cashback of a load purchase
+  if (type === 'LOAD_PURCHASE' || type === 'CASHBACK') {
+    const isLoad = type === 'LOAD_PURCHASE';
+    const { rows } = await pool.query(
+      `SELECT lp.*, t.created_at AS paid_at FROM load_purchases lp JOIN transactions t ON t.id = lp.transaction_id
+       WHERE ${isLoad ? 'lp.transaction_id' : 'lp.cashback_transaction_id'} = $1`,
+      [id],
+    );
+    const lp = rows[0];
+    if (lp) {
+      const brandName = telcos.BRANDS[lp.brand]?.name ?? lp.brand;
+      const loadRef = formatReference(lp.transaction_id, lp.paid_at).replace(/^REF-/, 'REF-LOAD-');
+      if (isLoad) {
+        return {
+          ...receipt,
+          reference: loadRef,
+          title: 'Load Purchase Successful',
+          amount: fromCents(Number(lp.amount_cents)),
+          fee: fromCents(0),
+          total: fromCents(Number(lp.amount_cents)),
+          sender: party(mine),
+          recipient: { name: `${brandName} prepaid`, account: lp.mobile_number },
+          bankName: 'PayPulse Buy Load',
+          load: { brand: brandName, mobileNumber: lp.mobile_number, product: lp.product_name, productCode: lp.product_code },
+          cashback: Number(lp.cashback_cents) > 0 ? fromCents(Number(lp.cashback_cents)) : null,
+        };
+      }
+      return {
+        ...receipt,
+        title: 'Cashback Received',
+        amount: fromCents(mine.amount_cents),
+        fee: fromCents(0),
+        total: fromCents(mine.amount_cents),
+        sender: { name: 'PayPulse Rewards', account: 'Buy Load Cashback' },
+        recipient: party(mine),
+        bankName: 'PayPulse',
+        note: `For ${brandName} load to ${lp.mobile_number} (${loadRef})`,
+      };
+    }
   }
 
   if (type === 'BILL_PAYMENT' || type === 'CASHBACK') {

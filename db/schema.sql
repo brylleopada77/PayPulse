@@ -161,11 +161,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS history_cleared_at TIMESTAMPTZ;
 -- LOAN_DISBURSEMENT / LOAN_REPAYMENT: Instant Loan money out to / back from the wallet.
 -- BILL_PAYMENT: Pay Bills (wallet -> biller settlement).  CASHBACK: bills cashback reward.
 -- CARD_PAYMENT: an online purchase with the virtual Visa (wallet -> card settlement).
+-- LOAD_PURCHASE: Buy Load / mobile prepaid top-up (wallet -> telco settlement).
 ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
 ALTER TABLE transactions ADD CONSTRAINT transactions_type_check
   CHECK (type IN ('TRANSFER', 'DEPOSIT', 'BANK_TRANSFER', 'QA_ADJUSTMENT', 'PESONET_SETTLEMENT',
                   'SAVINGS_TRANSFER', 'INTEREST', 'LOAN_DISBURSEMENT', 'LOAN_REPAYMENT',
-                  'BILL_PAYMENT', 'CASHBACK', 'CARD_PAYMENT'));
+                  'BILL_PAYMENT', 'CASHBACK', 'CARD_PAYMENT', 'LOAD_PURCHASE'));
 
 INSERT INTO accounts (account_number, is_system)
 VALUES ('SYS-QA-ADJUSTMENT', true)
@@ -221,6 +222,7 @@ UPDATE accounts SET gl_code = CASE account_number
     WHEN 'SYS-BILLER-SETTLEMENT' THEN '2040'
     WHEN 'SYS-CASHBACK-EXPENSE' THEN '5020'
     WHEN 'SYS-CARD-SETTLEMENT'  THEN '2050'
+    WHEN 'SYS-TELCO-SETTLEMENT' THEN '2060'
     ELSE '2010' END
   WHERE gl_code IS NULL OR is_system;
 ALTER TABLE accounts ALTER COLUMN gl_code SET NOT NULL;
@@ -683,3 +685,34 @@ DROP TRIGGER IF EXISTS trg_ledger_entries_notify ON ledger_entries;
 CREATE TRIGGER trg_ledger_entries_notify
   AFTER INSERT ON ledger_entries
   FOR EACH ROW EXECUTE FUNCTION notify_ledger_entry();
+
+-- =====================================================================================
+-- Buy Load (mobile prepaid top-up) with the ₱5.00 load cashback
+-- =====================================================================================
+
+INSERT INTO gl_accounts (code, name, category, normal_balance, description) VALUES
+  ('2060', 'Telco Settlement - Payable to Telcos', 'LIABILITY', 'CREDIT',
+   'Prepaid load sold to customers, owed to Globe, Smart, DITO and GOMO')
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name, category = EXCLUDED.category,
+  normal_balance = EXCLUDED.normal_balance, description = EXCLUDED.description;
+
+INSERT INTO accounts (account_number, is_system, gl_code)
+VALUES ('SYS-TELCO-SETTLEMENT', true, '2060')
+ON CONFLICT (account_number) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS load_purchases (
+  id                        SERIAL PRIMARY KEY,
+  user_id                   INTEGER     NOT NULL REFERENCES users (id),
+  mobile_number             TEXT        NOT NULL CHECK (mobile_number ~ '^09[0-9]{9}$'),
+  brand                     TEXT        NOT NULL CHECK (brand IN ('GLOBE', 'TM', 'SMART', 'TNT', 'DITO', 'GOMO')),
+  network                   TEXT        NOT NULL,
+  product_code              TEXT        NOT NULL,
+  product_name              TEXT        NOT NULL,
+  amount_cents              BIGINT      NOT NULL CHECK (amount_cents > 0),
+  cashback_cents            BIGINT      NOT NULL DEFAULT 0 CHECK (cashback_cents >= 0),
+  transaction_id            INTEGER     NOT NULL UNIQUE REFERENCES transactions (id),
+  cashback_transaction_id   INTEGER     UNIQUE REFERENCES transactions (id),
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_load_purchases_user ON load_purchases (user_id, created_at);

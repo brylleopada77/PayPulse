@@ -23,7 +23,7 @@ router.post('/', idempotency, blockFrozenAccounts, simulateServerError, async (r
   res.status(201).json(await loanService.apply(req.user.id, req.body || {}));
 });
 
-// POST /api/v1/loans/:id/repay  { amount } -> pay from the wallet (interest first, then principal)
+// POST /api/v1/loans/:id/repay  { amount, mpin } -> pay from the wallet (interest first, then principal)
 router.post('/:id/repay', idempotency, simulateServerError, async (req, res) => {
   res.status(201).json(await loanService.repay(req.user.id, req.params.id, req.body || {}));
 });

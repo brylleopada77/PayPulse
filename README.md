@@ -188,6 +188,7 @@ audit log, app log). A summary table is posted to the run page.
 | **ISO 20022 messaging** | Every bank transfer produces a `pacs.008.001.08` FI-to-FI credit transfer; InstaPay settles instantly, PESONet in batches at the cut-off |
 | **Instant Loans** | ₱50,000 pre-approved line, 3 / 6 / 12 months at 1.5% a month flat, MPIN to apply, interest-first repayments, GL 1030 / 4020 |
 | **Virtual Visa cards** | AES-256-GCM encrypted PAN, CVV derived and never stored, PCI-style masking, lock / unlock, online purchases (locked card → `403 CARD_FROZEN`) |
+| **Buy Load** | Prepaid top-up for Globe, TM, Smart, TNT, DITO and GOMO: network detected from the number prefix (brand chosen within Globe/TM and Smart/TNT, override for ported numbers), regular load ₱10–₱1,000 or promo packages, **₱5.00 cashback** on loads of ₱50 or more (max 3 a day), GL 2060 Telco Settlement |
 | **Pay Bills + cashback engine** | 23 Philippine billers in 5 categories; an automated **₱5.00 cashback** on bills of ₱100 or more (max 3 a day), posted as its own journal |
 | **PayPulse Save** | 6.00% p.a. savings vault with a daily interest job and fractional-centavo carry-over; every day's interest in the history |
 

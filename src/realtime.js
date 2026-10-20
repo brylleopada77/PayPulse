@@ -47,6 +47,8 @@ async function describe(entry, tx) {
       return { kind: 'money-in', title: 'Instant Loan', message: `${amount} loan credited to your Available Balance` };
     case 'BILL_PAYMENT':
       return { kind: 'money-out', title: 'Bill paid', message: `${tx.description}: ${amount}` };
+    case 'LOAD_PURCHASE':
+      return { kind: 'money-out', title: 'Load sent', message: `${tx.description}: ${amount}` };
     case 'CARD_PAYMENT':
       return { kind: 'money-out', title: 'Card payment', message: `${tx.description}: ${amount}` };
     case 'BANK_TRANSFER':

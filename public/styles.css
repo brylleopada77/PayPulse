@@ -1346,3 +1346,46 @@ h1, h2, h3, .who-name, .product-title, .tx-title { color: var(--text); }
 
 /* Readable accent text on white: neon emerald is for fills (buttons, badges), links use the darker ink */
 .btn.link, .badge-action, .see-all, .activity-head-btn:hover span { color: var(--accent-ink); }
+
+/* ---------- Buy Load ---------- */
+/* quick actions: up to 4 per row, so 7 actions still fit on a phone */
+.quick-actions { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.load-sheet { width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
+.load-sheet .sheet-head h2 { margin-right: auto; }
+.telco-detect { margin: -6px 0 0; min-height: 1.2em; font-size: 0.84rem; color: var(--muted); }
+.telco-detect.ok { color: var(--accent-ink); font-weight: 600; }
+.telco-detect.warn { color: #b26a00; font-weight: 600; }
+.brand-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.brand-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.brand-chip span {
+  display: inline-block; padding: 8px 16px; border-radius: 999px; cursor: pointer; font-weight: 700; font-size: 0.88rem;
+  border: 1.5px solid var(--border); background: var(--surface); color: var(--text);
+}
+.brand-chip input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.25); }
+.brand-chip input:focus-visible + span { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+.telco-override summary { cursor: pointer; font-size: 0.84rem; color: var(--muted); }
+.telco-override .brand-chips { margin-top: 8px; }
+.amount-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.amount-chip {
+  padding: 14px 4px; border-radius: 14px; cursor: pointer; font: inherit; font-weight: 800; font-size: 1.05rem;
+  border: 1.5px solid var(--border); background: var(--glass-bg, var(--surface)); color: var(--text);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.amount-chip:hover { border-color: var(--accent); }
+.amount-chip:active { transform: scale(0.96); }
+.amount-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.3); }
+.promo-list { display: grid; gap: 8px; }
+.promo-item {
+  display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; width: 100%; padding: 12px 14px; text-align: left;
+  border: 1.5px solid var(--border); border-radius: 14px; background: var(--glass-bg, var(--surface)); color: var(--text); font: inherit; cursor: pointer;
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+.promo-item span:first-child { display: grid; gap: 2px; }
+.promo-item small { color: var(--muted); font-size: 0.8rem; }
+.promo-item:hover { border-color: var(--accent); }
+.promo-item[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.3); }
+.promo-price { font-weight: 800; color: var(--accent-ink); font-size: 1.05rem; }
+.load-sheet .segmented span { font-size: 0.82rem; }
+
+/* MPIN status under every MPIN entry */
+.mpin-status { margin: -4px 0 -8px; font-size: 0.85rem; }

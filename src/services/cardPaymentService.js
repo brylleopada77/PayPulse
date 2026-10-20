@@ -9,6 +9,7 @@
 const crypto = require('crypto');
 const { withTransaction } = require('../db/pool');
 const { recordTransaction, getBalanceCents } = require('./ledgerService');
+const mpinService = require('./mpinService');
 const { referenceFor } = require('./receiptService');
 const { AppError, badRequest, notFound, unprocessable } = require('../utils/errors');
 const { toCents, fromCents } = require('../utils/money');
@@ -22,7 +23,7 @@ function declined(code, message) {
 }
 
 /** POST /api/v1/cards/:token/payments { amount, merchant }: authorize and capture in one step. */
-async function pay(userId, token, { amount, merchant } = {}) {
+async function pay(userId, token, { amount, merchant, mpin } = {}) {
   const amountCents = toCents(amount);
   const shop = String(merchant ?? 'Online store').trim().replace(/\s+/g, ' ');
   if (shop.length < 2 || shop.length > 60) throw badRequest('INVALID_MERCHANT', 'Merchant name must be 2 to 60 characters');
@@ -38,6 +39,8 @@ async function pay(userId, token, { amount, merchant } = {}) {
       throw declined('CARD_FROZEN', 'Payment declined: this card is locked. Unlock it in the Card tab to pay.');
     }
     if (card.is_expired) throw declined('CARD_EXPIRED', 'Payment declined: this card has expired.');
+    // Money leaves the wallet: confirm it is the cardholder (a locked card is declined above first).
+    await mpinService.verifyMpin(userId, mpin);
 
     await client.query('SELECT id FROM accounts WHERE id = $1 FOR UPDATE', [card.account_id]);
     const balance = await getBalanceCents(client, card.account_id);
