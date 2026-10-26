@@ -209,8 +209,8 @@ audit log, app log). A summary table is posted to the run page.
 - **Real-time WebSocket notifications** (Socket.IO): live toasts such as "Received ₱500.00 from Account …" and "🎉 Earned ₱5.00 Cashback!", a ringing bell with an unread count.
 - **QA Sandbox Controls** (admin): Reset DB State, Simulate 3s Network Latency, Trigger HTTP 500 Error, freeze account, chaos mode, PESONet cut-off, compliance clear.
 - Notifications center, My Profile (KYC, linked accounts, Change MPIN, security toggles, help center), receipts with download.
-- **Brand theme:** "Monochrome Obsidian & Emerald" (Wise / Robinhood style): the app opens in an obsidian dark theme with neon emerald (#00E676) actions; a matching light theme is one tap away. All colours are CSS tokens at the top of `public/styles.css` (light and dark side by side); Royal Blue, Indigo and Sunset Orange palettes are included as ready-to-swap alternatives.
-- **Appearance:** Dark (default) / Light / Auto in the profile; Auto follows the device live. `public/theme-dark.css` is generated from `styles.css` by `npm run theme:dark`; CI fails if it is stale.
+- **Brand theme:** "Sunset Orange & Warm Amber" (MariBank / ShopeePay / Maya style): orange #FF5722 actions, an orange balance card, warm amber #FFB300 for interest rates and rewards. All colours are CSS tokens at the top of `public/styles.css` (light and dark side by side); Obsidian & Emerald, Royal Blue and Indigo palettes are included as ready-to-swap alternatives.
+- **Appearance:** Light (default) / Dark / Auto in the profile; Auto follows the device live. `public/theme-dark.css` is generated from `styles.css` by `npm run theme:dark`; CI fails if it is stale.
 
 <img src="docs/images/notifications.png" width="190" alt="Notifications"> <img src="docs/images/profile.png" width="190" alt="Profile with KYC"> <img src="docs/images/pay-bills-summary.png" width="190" alt="Pay Bills summary"> <img src="docs/images/glass-dock.png" width="190" alt="Glass dock">
 

@@ -330,8 +330,8 @@
   const themeColor = document.querySelector('meta[name="theme-color"]');
 
   function themePref() {
-    // Default: Dark (Obsidian & Emerald). Users can pick Light or Auto (follow the device).
-    try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
+    // Default: Light (Royal Blue). Users can pick Dark or Auto (follow the device).
+    try { return localStorage.getItem(THEME_KEY) || 'light'; } catch { return 'light'; }
   }
 
   /** Apply a preference: "system" follows the device, "light" / "dark" are fixed. */
@@ -339,7 +339,7 @@
     const dark = pref === 'dark' || (pref === 'system' && darkQuery.matches);
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     document.documentElement.dataset.themePref = pref;
-    themeColor?.setAttribute('content', dark ? '#121212' : cssToken('--bg', '#f1f5f4'));
+    themeColor?.setAttribute('content', dark ? '#0a0f1a' : '#f4f7ff');
     document.querySelectorAll('input[name="theme"]').forEach((r) => { r.checked = r.value === pref; });
     const sub = document.getElementById('appearance-sub');
     if (sub) sub.textContent = pref === 'system' ? 'Follows your device (' + (dark ? 'dark' : 'light') + ' now)' : dark ? 'Dark glass' : 'Light';
@@ -3568,10 +3568,10 @@
     const gradient = ctx.createLinearGradient(0, 0, W, headH);
     // The PNG is always drawn in the LIGHT palette (a receipt is printed / shared, not themed dark).
     const light = (name, fallback) => (document.documentElement.dataset.theme === 'dark' ? fallback : cssToken(name, fallback));
-    const ink = light('--accent-ink', '#047857');
-    gradient.addColorStop(0, light('--accent-tint', '#c8f7dc'));
-    gradient.addColorStop(0.5, light('--accent-soft', '#e6fbef'));
-    gradient.addColorStop(1, light('--accent-softer', '#f3fdf7'));
+    const ink = light('--accent-ink', '#0040cc');
+    gradient.addColorStop(0, light('--accent-tint', '#d6e4ff'));
+    gradient.addColorStop(0.5, light('--accent-soft', '#ebf2ff'));
+    gradient.addColorStop(1, light('--accent-softer', '#f4f7ff'));
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, W, headH);
 
@@ -3630,7 +3630,7 @@
     ctx.setLineDash([]);
     ctx.textAlign = 'center';
     ctx.font = font(12, 700);
-    ctx.fillStyle = light('--accent-ink', '#047857');
+    ctx.fillStyle = light('--accent-ink', '#0040cc');
     ctx.fillText('PayPulse', W / 2, y + 16);
     ctx.font = font(11);
     ctx.fillStyle = '#6b7086';

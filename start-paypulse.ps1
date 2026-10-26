@@ -10,7 +10,8 @@
 
 param(
   [switch]$NoBrowser,  # don't open the link in the browser
-  [switch]$NoPause     # don't wait for Enter at the end (for automation)
+  [switch]$NoPause,    # don't wait for Enter at the end (for automation)
+  [switch]$Quiet       # background watchdog: don't overwrite the clipboard unless the link changed
 )
 
 # 'Continue': in Windows PowerShell 5.1, 'Stop' turns a program's stderr output into a crash.
@@ -151,8 +152,20 @@ if ($url -and (Test-Health $url)) {
   else { Ok 'online' }
 }
 
+$previous = if (Test-Path $linkFile) { (Get-Content $linkFile -Raw).Trim() } else { '' }
 Set-Content -Path $linkFile -Value $url -Encoding ascii
-try { Set-Clipboard -Value $url; $copied = $true } catch { $copied = $false }
+
+# Desktop shortcut "PayPulse" that always opens the CURRENT link (rewritten whenever the link changes).
+try {
+  $desktop = [Environment]::GetFolderPath('Desktop')
+  Set-Content -Path (Join-Path $desktop 'PayPulse.url') -Encoding ascii -Value "[InternetShortcut]`r`nURL=$url`r`n"
+} catch { Warn "could not update the desktop shortcut: $($_.Exception.Message)" }
+
+# The background watchdog (-Quiet) only touches the clipboard when the link actually changed.
+$copied = $false
+if (-not $Quiet -or $url -ne $previous) {
+  try { Set-Clipboard -Value $url; $copied = $true } catch { $copied = $false }
+}
 
 Write-Host ''
 Write-Host '==============================================' -ForegroundColor Green

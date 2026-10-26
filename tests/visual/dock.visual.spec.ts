@@ -30,7 +30,7 @@ async function settle(page: Page) {
 for (const vp of VIEWPORTS) {
   test.describe(`Glass dock @ ${vp.name} (${vp.width}x${vp.height})`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
-    // The app opens in Dark (Obsidian) by default; this set checks the Light theme.
+    // This set checks the Light theme (the default), whatever the device prefers.
     test.beforeEach(async ({ page }) => {
       await page.addInitScript(() => localStorage.setItem('paypulse.theme', 'light'));
     });
@@ -65,6 +65,9 @@ for (const vp of VIEWPORTS) {
 for (const vp of VIEWPORTS.filter((v) => ['iphone-15', 'desktop'].includes(v.name))) {
   test.describe(`Dark glass @ ${vp.name}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: 'dark' });
+    test.beforeEach(async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem('paypulse.theme', 'dark'));
+    });
 
     test('dark dock: dark glass pill with glowing Scan & Pay', async ({ page, request }) => {
       await login(page, await createUser(request, 'Visual Tester'));
