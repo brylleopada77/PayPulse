@@ -92,7 +92,7 @@ jobs:
       # preinstalled Google Chrome) and visual. Visual baselines are per OS; --update-snapshots=missing
       # writes Linux baselines the first time (they are uploaded below so they can be committed),
       # and compares against them once they are in the repository.
-      - name: Run Playwright (API, E2E, resilience, visual regression) + ledger invariant check
+      - name: Run Playwright (API + OpenAPI contract, E2E, resilience, visual regression, axe a11y) + ledger invariant check
         id: playwright
         run: |
           google-chrome --version
@@ -141,7 +141,7 @@ jobs:
             echo "## PayPulse QA pipeline"
             echo "| Step | Result |"
             echo "|------|--------|"
-            echo "| Playwright (API, E2E, resilience, visual) | \`${{ steps.playwright.outcome }}\` |"
+            echo "| Playwright (API, E2E, resilience, visual, a11y) | \`${{ steps.playwright.outcome }}\` |"
             echo "| k6 idempotency (gate) | \`${{ steps.k6idem.outcome }}\` |"
             echo "| k6 race condition (known bug: \`${RACE_BUG_EXPECTED}\`) | \`${{ steps.k6race.outcome }}\` |"
             echo "| Database ledger check | \`${{ steps.dbcheck.outcome }}\` |"

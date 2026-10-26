@@ -452,6 +452,7 @@
     lastAccount = account;
     $('#user-name').textContent = account.accountHolder;
     $('#avatar').textContent = initials(account.accountHolder);
+    $('#profile-btn').setAttribute('aria-label', `${initials(account.accountHolder)}: open my profile`); // name includes the visible initials
     $('#role-chip').hidden = account.role !== 'ADMIN';
     currentBalance = account.balance;
     renderBalance();
@@ -471,30 +472,27 @@
     const { title, icon } = describe(tx);
     const incoming = tx.direction === 'CREDIT';
 
+    // A list item holding a real button that opens the receipt (click, Enter or Space); its
+    // accessible name is its visible text, plus "View receipt" for screen readers.
     const li = document.createElement('li');
-    li.className = 'tx ' + (incoming ? 'in' : 'out') + (tx.account === 'SAVINGS' ? ' savings' : '');
-    li.dataset.testid = 'tx-item';
-    // Each row opens its receipt (click, Enter or Space).
-    li.tabIndex = 0;
-    li.setAttribute('role', 'button');
-    li.setAttribute('aria-label', title + ', ' + money(tx.amount) + '. View receipt');
-    li.addEventListener('click', () => openReceipt(tx.transactionId));
-    li.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        openReceipt(tx.transactionId);
-      }
-    });
+    li.className = 'tx-row';
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'tx ' + (incoming ? 'in' : 'out') + (tx.account === 'SAVINGS' ? ' savings' : '');
+    row.dataset.testid = 'tx-item';
+    row.addEventListener('click', () => openReceipt(tx.transactionId));
 
     const iconEl = document.createElement('span');
     iconEl.className = 'tx-icon';
+    iconEl.setAttribute('aria-hidden', 'true');
     iconEl.textContent = icon;
 
-    const info = document.createElement('div');
-    const titleEl = document.createElement('div');
+    const info = document.createElement('span');
+    info.className = 'tx-info';
+    const titleEl = document.createElement('span');
     titleEl.className = 'tx-title';
     titleEl.textContent = title;
-    const meta = document.createElement('div');
+    const meta = document.createElement('span');
     meta.className = 'tx-date';
     const bt = tx.bankTransfer;
     const pending = bt?.status === 'QUEUED' ? ' · PESONet: pending cut-off' : '';
@@ -514,7 +512,9 @@
     amountEl.className = 'tx-amount';
     amountEl.textContent = (incoming ? '+' : '−') + money(tx.amount);
 
-    li.append(iconEl, info, amountEl);
+    const hint = Object.assign(document.createElement('span'), { className: 'visually-hidden', textContent: '. View receipt' });
+    row.append(iconEl, info, amountEl, hint);
+    li.append(row);
     return li;
   }
 
@@ -912,7 +912,8 @@
     const badge = $('#bell-dot');
     badge.hidden = !count;
     badge.textContent = count > 9 ? '9+' : String(count || '');
-    $('#bell-btn').setAttribute('aria-label', count ? 'Notifications, ' + count + ' unread' : 'Notifications');
+    // the name includes the badge text exactly as shown ("9+"), so voice control users can say it
+    $('#bell-btn').setAttribute('aria-label', count ? 'Notifications, ' + badge.textContent + ' unread' : 'Notifications');
   }
 
   async function loadNotifications() {

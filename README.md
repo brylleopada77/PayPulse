@@ -1,7 +1,7 @@
 # PayPulse: a QA automation showcase built around a realistic e-wallet
 
 [![PayPulse QA Pipeline](https://github.com/brylleopada77/PayPulse/actions/workflows/qa-pipeline.yml/badge.svg)](https://github.com/brylleopada77/PayPulse/actions/workflows/qa-pipeline.yml)
-![Playwright](https://img.shields.io/badge/Playwright-355_tests-2EAD33?logo=playwright&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-374_tests-2EAD33?logo=playwright&logoColor=white)
 ![k6](https://img.shields.io/badge/k6-load_%26_concurrency-7D64FF?logo=k6&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
@@ -23,7 +23,7 @@ across five layers**, an **intentional concurrency bug** that the automation fin
 **CI pipeline** that runs everything on every push. (All money is play money; banks, billers and the
 card network are mocks.)
 
-> **355 Playwright tests · 2 k6 scenarios · 3 ledger/reconciliation gates · all green in CI**
+> **374 Playwright tests · 2 k6 scenarios · 3 ledger/reconciliation gates · all green in CI**
 > (the known race bug is reported, not hidden: see [the race condition](#the-bug-the-tests-were-built-to-catch)).
 
 | | | | |
@@ -41,7 +41,7 @@ card network are mocks.)
 | **Finding a real bug** | Concurrency tests and k6 reproduce an overdraft race; the evidence is in the k6 report (wallet driven to **-₱200**) | [QA_NOTES.md](QA_NOTES.md) |
 | **Proving a fix pattern** | k6 shows `Idempotency-Key` makes 30 duplicate sends move money **exactly once** | `tests/load/idempotent-transfer.js` |
 | **Financial correctness** | Every test can assert the ledger: debits = credits, wallets = GL 2010, end-of-day reconciliation with 20 control checks | `tests/helpers/db.ts`, `scripts/reconcile-eod.js` |
-| **Test design** | Every test creates its own users, so 355 tests run **fully in parallel** without shared state or ordering | `tests/helpers/api.ts` |
+| **Test design** | Every test creates its own users, so 374 tests run **fully in parallel** without shared state or ordering | `tests/helpers/api.ts` |
 | **Tuning, not just writing tests** | Visual regression first missed a 28px→8px dock change; I tightened the threshold and proved it now fails on the regression and stays stable over repeated runs | `playwright.config.ts` |
 | **CI/CD** | GitHub Actions: PostgreSQL service container, migrations, Playwright, k6, ledger gates, HTML report + videos as artifacts | [CI pipeline](#ci-pipeline) |
 
@@ -51,10 +51,10 @@ card network are mocks.)
 
 ```mermaid
 flowchart TB
-  subgraph L1["API: 320 tests (23 suites)"]
+  subgraph L1["API: 324 tests (24 suites)"]
     a1[auth, MPIN, OTP, lockouts] --- a2[transfers, limits, AML]
     a2 --- a3[bills, loans, cards, savings]
-    a3 --- a4[receipts, notifications, realtime] --- a5[ISO 20022 pacs.008]
+    a3 --- a4[receipts, notifications, realtime] --- a5[ISO 20022 pacs.008] --- a6[OpenAPI contract]
   end
   subgraph L2["Browser E2E + chaos: 16 tests"]
     b1[Pay Bills ₱995 net] --- b2[Loan drawdown] --- b3[Locked card 403] --- b4[503 drops, DB locks, retries] --- b5[Chaos Engine 500s, ISO inspector]
@@ -62,21 +62,26 @@ flowchart TB
   subgraph L3["Visual regression: 19 snapshots"]
     v1[glass dock: 5 viewports x 3 states + dark glass]
   end
+  subgraph L3b["Accessibility: 15 tests"]
+    x1[axe-core WCAG 2.2 AA: 12 screens x light/dark] --- x2[keyboard: focus trap, tabs]
+  end
   subgraph L4["Load & concurrency: k6"]
     k1[race condition] --- k2[idempotency]
   end
   subgraph L5["Accounting gates"]
     g1[ledger integrity] --- g2[system ledger] --- g3[EOD reconciliation]
   end
-  L1 --> L2 --> L3 --> L4 --> L5
+  L1 --> L2 --> L3 --> L3b --> L4 --> L5
 ```
 
 | Layer | Tool | Count | Risk it covers |
 |-------|------|------:|----------------|
-| API | Playwright `request` | 320 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, other users' data), money math in centavos |
+| API | Playwright `request` | 324 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, other users' data), money math in centavos |
 | Browser E2E | Playwright + Chrome | 11 | Real customer journeys: Pay Bills (net **₱995.00** after ₱5 cashback), ₱10,000 loan drawdown, locked virtual card → **403 CARD_FROZEN**, live toast on incoming money, Buy Load, the Chaos Engine fault toast and recovery, the ISO 20022 Message Inspector (XML + Copy Payload) |
 | Chaos / resilience | Playwright + `x-chaos-*` headers | 5 | 503 drops before/after the server acts, exhausted retries, 2-second DB locks: the UI retries safely and **no money is duplicated or lost** |
 | Visual regression | `toHaveScreenshot` | 19 | The glassmorphic iOS dock and Home layout on iPhone SE, iPhone 15, Pixel 7, iPad mini and desktop, plus the dark glass theme |
+| Accessibility | `@axe-core/playwright` | 15 | WCAG 2.0 / 2.1 / 2.2 A + AA on login, Home, Send, Pay Bills, Buy Load, receipt + ISO inspector, notifications, profile, logout and the QA panel, in **light and dark**; keyboard-only login, dialog focus trap / focus return, ARIA tabs |
+| API contract | OpenAPI 3 + Playwright | 4 | Every Express route is documented at `/api-docs` and every documented operation exists; `$ref`s resolve; documented GETs answer with a documented status |
 | Load / concurrency | k6 1.3 | 2 | The overdraft race (expected to fail until fixed) and the idempotency guarantee (must pass) |
 | Accounting | Node + SQL | 3 | Debits = credits, total system cash = balances + fees + reserves (also run automatically after every Playwright run), GL control accounts vs. sub-ledgers at end of day |
 
@@ -106,6 +111,21 @@ classic check-then-act race. It is left in on purpose as a target for the automa
 Root cause, reproduction steps and the fix (`SELECT … FOR UPDATE`, already used by Pay Bills, cards
 and savings) are written up in **[QA_NOTES.md](QA_NOTES.md)**. In CI the race checks are reported but
 non-blocking while `RACE_BUG_EXPECTED=true`; flipping it to `false` turns them into hard gates.
+
+### Accessibility: what axe found and how it was fixed
+
+The first axe-core run found **real WCAG 2.2 AA violations**, all fixed in the same change and now guarded by `tests/a11y`:
+
+| Finding | Fix |
+|---------|-----|
+| Muted captions `#64748b` on the blue tints: 4.23:1 | `--muted: #576579` (5.27:1) |
+| White on the dark-mode accent `#3d7bff`: 3.84:1 | dark `--accent: #2b66f6` (4.85:1) |
+| White on the red unread badges `#e5484d`: 3.91:1 | `#cd2b31` (5.27:1) |
+| Green "free" / success text `#0e9f6e`: 3.01:1 | `--success: #047857` (4.88:1) |
+| QA panel unreadable in dark mode (1.62:1) | the dark theme generator leaves the always-dark dev panel alone |
+| History rows: `<li role="button">` inside `<ul>` | a real `<button>` inside each `<li>` |
+| Accessible names not matching visible text (profile, bell "9+", Instant Loan) | names include the visible text |
+| Radio inputs inside `role="tablist"` (Buy Load) | `role="radiogroup"` |
 
 ---
 
@@ -268,9 +288,10 @@ or Instant Loan. To use Add money and the QA Sandbox, make your account an admin
 ```bash
 npm ci
 npx playwright install ffmpeg            # for test videos (tests use your installed Chrome)
-npx playwright test                       # all 355: projects api, ui, visual (+ ledger check at the end)
+npx playwright test                       # all 374: projects api, ui, visual, a11y (+ ledger check at the end)
 npx playwright test --project=ui          # E2E + chaos in a real browser
-npx playwright show-report                # open the HTML report
+npx playwright test --project=a11y        # axe-core WCAG 2.2 AA scans + keyboard checks
+npx playwright show-report                # open the HTML report (each axe scan is attached as JSON)
 
 docker compose run --rm k6                                         # k6 race condition (known bug)
 docker compose run --rm k6 run /scripts/idempotent-transfer.js     # k6 idempotency
@@ -288,14 +309,16 @@ Visual baselines are per OS; after an intended UI change run `npx playwright tes
 src/            Express API: routes, services (ledger, transfers, bills, loans, cards, KYC…), realtime.js
 public/         web wallet (vanilla JS, iOS glass design)
 db/schema.sql   schema, chart of accounts, immutability + notify triggers (re-runnable migration)
-tests/api/      283 API tests (21 suites)            tests/e2e/      customer journeys in Chrome
+tests/api/      324 API tests (24 suites)            tests/e2e/      customer journeys in Chrome
 tests/visual/   visual regression + baselines         tests/load/     k6: race + idempotency (+ HTML reports)
-tests/resilience.spec.ts  chaos tests                 scripts/        EOD reconciliation, workers
+tests/a11y/     axe-core accessibility + keyboard     src/docs/       OpenAPI 3 document (served at /api-docs)
+tests/resilience.spec.ts  chaos tests                 scripts/        ledger assertion, EOD reconciliation, workers
 ```
 
 ## More documentation
 
 - **[QA_NOTES.md](QA_NOTES.md):** the race condition: root cause, reproduction, fix.
+- **Interactive API docs:** **`/api-docs`** on the running app (Swagger UI: Authorize with your JWT and *Try it out*), raw OpenAPI 3 at `/api-docs/openapi.json`. Live: https://paypulse-4cqi.onrender.com/api-docs
 - **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md):** full API reference, business rules, error codes, chart of accounts, every feature in detail.
 
 ---
