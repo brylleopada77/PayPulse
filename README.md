@@ -1,7 +1,7 @@
 # PayPulse: a QA automation showcase built around a realistic e-wallet
 
-[![PayPulse QA Pipeline](https://github.com/brylleopada77/PayPulse/actions/workflows/playwright.yml/badge.svg)](https://github.com/brylleopada77/PayPulse/actions/workflows/playwright.yml)
-![Playwright](https://img.shields.io/badge/Playwright-312_tests-2EAD33?logo=playwright&logoColor=white)
+[![PayPulse QA Pipeline](https://github.com/brylleopada77/PayPulse/actions/workflows/qa-pipeline.yml/badge.svg)](https://github.com/brylleopada77/PayPulse/actions/workflows/qa-pipeline.yml)
+![Playwright](https://img.shields.io/badge/Playwright-355_tests-2EAD33?logo=playwright&logoColor=white)
 ![k6](https://img.shields.io/badge/k6-load_%26_concurrency-7D64FF?logo=k6&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
@@ -23,7 +23,7 @@ across five layers**, an **intentional concurrency bug** that the automation fin
 **CI pipeline** that runs everything on every push. (All money is play money; banks, billers and the
 card network are mocks.)
 
-> **312 Playwright tests · 2 k6 scenarios · 3 ledger/reconciliation gates · all green in CI**
+> **355 Playwright tests · 2 k6 scenarios · 3 ledger/reconciliation gates · all green in CI**
 > (the known race bug is reported, not hidden: see [the race condition](#the-bug-the-tests-were-built-to-catch)).
 
 | | | | |
@@ -41,7 +41,7 @@ card network are mocks.)
 | **Finding a real bug** | Concurrency tests and k6 reproduce an overdraft race; the evidence is in the k6 report (wallet driven to **-₱200**) | [QA_NOTES.md](QA_NOTES.md) |
 | **Proving a fix pattern** | k6 shows `Idempotency-Key` makes 30 duplicate sends move money **exactly once** | `tests/load/idempotent-transfer.js` |
 | **Financial correctness** | Every test can assert the ledger: debits = credits, wallets = GL 2010, end-of-day reconciliation with 20 control checks | `tests/helpers/db.ts`, `scripts/reconcile-eod.js` |
-| **Test design** | Every test creates its own users, so 312 tests run **fully in parallel** without shared state or ordering | `tests/helpers/api.ts` |
+| **Test design** | Every test creates its own users, so 355 tests run **fully in parallel** without shared state or ordering | `tests/helpers/api.ts` |
 | **Tuning, not just writing tests** | Visual regression first missed a 28px→8px dock change; I tightened the threshold and proved it now fails on the regression and stays stable over repeated runs | `playwright.config.ts` |
 | **CI/CD** | GitHub Actions: PostgreSQL service container, migrations, Playwright, k6, ledger gates, HTML report + videos as artifacts | [CI pipeline](#ci-pipeline) |
 
@@ -51,13 +51,13 @@ card network are mocks.)
 
 ```mermaid
 flowchart TB
-  subgraph L1["API: 283 tests (21 suites)"]
+  subgraph L1["API: 320 tests (23 suites)"]
     a1[auth, MPIN, OTP, lockouts] --- a2[transfers, limits, AML]
     a2 --- a3[bills, loans, cards, savings]
-    a3 --- a4[receipts, notifications, realtime]
+    a3 --- a4[receipts, notifications, realtime] --- a5[ISO 20022 pacs.008]
   end
-  subgraph L2["Browser E2E + chaos: 10 tests"]
-    b1[Pay Bills ₱995 net] --- b2[Loan drawdown] --- b3[Locked card 403] --- b4[503 drops, DB locks, retries]
+  subgraph L2["Browser E2E + chaos: 16 tests"]
+    b1[Pay Bills ₱995 net] --- b2[Loan drawdown] --- b3[Locked card 403] --- b4[503 drops, DB locks, retries] --- b5[Chaos Engine 500s, ISO inspector]
   end
   subgraph L3["Visual regression: 19 snapshots"]
     v1[glass dock: 5 viewports x 3 states + dark glass]
@@ -73,16 +73,16 @@ flowchart TB
 
 | Layer | Tool | Count | Risk it covers |
 |-------|------|------:|----------------|
-| API | Playwright `request` | 283 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, other users' data), money math in centavos |
-| Browser E2E | Playwright + Chrome | 5 | Real customer journeys: Pay Bills (net **₱995.00** after ₱5 cashback), ₱10,000 loan drawdown, locked virtual card → **403 CARD_FROZEN**, live toast on incoming money |
+| API | Playwright `request` | 320 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, other users' data), money math in centavos |
+| Browser E2E | Playwright + Chrome | 11 | Real customer journeys: Pay Bills (net **₱995.00** after ₱5 cashback), ₱10,000 loan drawdown, locked virtual card → **403 CARD_FROZEN**, live toast on incoming money, Buy Load, the Chaos Engine fault toast and recovery, the ISO 20022 Message Inspector (XML + Copy Payload) |
 | Chaos / resilience | Playwright + `x-chaos-*` headers | 5 | 503 drops before/after the server acts, exhausted retries, 2-second DB locks: the UI retries safely and **no money is duplicated or lost** |
 | Visual regression | `toHaveScreenshot` | 19 | The glassmorphic iOS dock and Home layout on iPhone SE, iPhone 15, Pixel 7, iPad mini and desktop, plus the dark glass theme |
 | Load / concurrency | k6 1.3 | 2 | The overdraft race (expected to fail until fixed) and the idempotency guarantee (must pass) |
-| Accounting | Node + SQL | 3 | Debits = credits, money in system = balances + fees, GL control accounts vs. sub-ledgers at end of day |
+| Accounting | Node + SQL | 3 | Debits = credits, total system cash = balances + fees + reserves (also run automatically after every Playwright run), GL control accounts vs. sub-ledgers at end of day |
 
 **Design choices that keep the suite trustworthy**
 
-- **Isolation:** tests never share users or rely on order; `fullyParallel: true`, `retries: 0` (a flaky test gets fixed, not retried).
+- **Isolation:** tests never share users or rely on order; `fullyParallel: true`; locally `retries: 0`, on CI one retry only to record a video, and a test that needs it is reported as **flaky** (it gets fixed, not hidden). Screenshots on failure, videos on the first retry.
 - **Assert the money, not just the status:** most money-moving tests check balances *and* the ledger.
 - **Deterministic time:** a guarded `paypulse.allow_time_travel` session setting lets tests age transactions (anti-spam windows, "yesterday") without sleeping.
 - **Contract-level errors:** every error has a stable `code`, so tests assert on meaning, not wording.
@@ -132,22 +132,26 @@ bug to catch ([above](#the-bug-the-tests-were-built-to-catch)).
 | **Forced HTTP 500** | QA Sandbox "Trigger HTTP 500 Error": the next money-moving request fails with `500 INTERNAL_ERROR` (`details.simulated: true`) | a clean `500`, nothing debited or recorded, and the switch turns itself off (transfers, top-ups, bills, loans) |
 | **Dropped responses (503)** | `x-chaos-mode` headers: drop **before** the server acts, or **after** it acted (the answer is lost) | the UI retries with the same Idempotency-Key, shows "Retrying (n/3)…", and the money moves **exactly once** |
 | **Database lock contention** | `x-chaos-fault: db-lock` holds a real row lock on the wallet for 2 s | the UI shows it is waiting and completes correctly |
+| **Random HTTP 500 fault injection** | **Chaos Engine** switch in the QA panel (`x-chaos-fault: error-500`, rate 20%): transfers, bank transfers, top-ups, bills and load fail with `500 CHAOS_FAULT_INJECTED` **before** they run; other requests are untouched | a glass "⚠️ Chaos Engine: Server Fault Injected. Retrying transaction…" toast, automatic retries with the same Idempotency-Key, "recovered", and the transfer in the ledger **exactly once** |
+| **Header latency** | `x-chaos-latency-ms: N` (max 10 s) on any request | the request is delayed by N ms and still succeeds |
 
 Chaos and sandbox tools are **admin-only** and exist only when the server runs with `QA_SANDBOX=true`.
 
 ### 3. Automated ledger assertion
 
-[`tests/assert-system-ledger.js`](tests/assert-system-ledger.js) runs after the suites and proves that
-money is **conserved** across the whole system:
+[`scripts/assert-ledger.js`](scripts/assert-ledger.js) runs **automatically at the end of every
+Playwright run** (`globalTeardown`, [`tests/global-teardown.ts`](tests/global-teardown.ts)) and again in CI
+after k6. It proves that money is **conserved** across the whole system:
 
 $$
 \underbrace{\text{top-ups} - \text{bank payouts} + \text{QA adjustments} + \text{interest} + \text{loans (net)} - \text{bill \& card spend (net of cashback)}}_{\text{Total System Cash}}
-= \sum \text{User Balances} + \text{Collected Fees} + \text{PESONet pending}
+= \sum \text{User Balances} + \text{Collected Fees} + \text{Reserves (PESONet pending)}
 $$
 
-It also asserts that **all balances (users + system accounts) sum to zero**, the **trial balance**
-holds (total debits = total credits), **every transaction balances**, and **no customer wallet is
-overdrawn**. The end-of-day job ([`scripts/reconcile-eod.js`](scripts/reconcile-eod.js)) goes further
+It also asserts `SUM(debit) - SUM(credit) = 0` over every ledger entry, that **all balances (users +
+system accounts) sum to zero**, the **trial balance** holds, **every transaction balances**, and **no
+customer wallet is overdrawn**. Any accounting failure fails the run; wallets overdrawn by the known race
+bug are reported as `KNOWN` while `RACE_BUG_EXPECTED=true`. The end-of-day job ([`scripts/reconcile-eod.js`](scripts/reconcile-eod.js)) goes further
 with 20 checks of each GL control account against its sub-ledger (wallets, savings, loans, biller and
 card settlement, fees, PESONet clearing, ISO 20022 message status) and writes an audit log.
 
@@ -155,14 +159,14 @@ card settlement, fees, PESONet clearing, ISO 20022 message status) and writes an
 
 ## CI pipeline
 
-[`.github/workflows/playwright.yml`](.github/workflows/playwright.yml) runs on every push and pull request.
+[`.github/workflows/qa-pipeline.yml`](.github/workflows/qa-pipeline.yml) runs on every push and pull request.
 
 ```mermaid
 flowchart LR
   A[push / PR] --> B[PostgreSQL 17<br>service container]
   B --> C[npm ci +<br>db migrations]
-  C --> D[start app]
-  D --> E[Playwright<br>API · E2E · chaos · visual]
+  C --> D[start app +<br>seed QA accounts]
+  D --> E[Playwright<br>API · E2E · chaos · visual<br>+ ledger invariant check]
   E --> F[k6 idempotency<br>gate]
   F --> G[k6 race<br>known bug]
   G --> H[ledger + EOD<br>reconciliation]
@@ -170,8 +174,8 @@ flowchart LR
   A --> J[Docker image<br>smoke test]
 ```
 
-**Artifacts on every run:** `playwright-report` (HTML report with screenshots and a video of every
-browser test), `test-results` (videos, traces, JUnit XML), `k6-and-logs` (k6 HTML/JSON reports, EOD
+**Artifacts on every run:** `playwright-report` (HTML report; a screenshot of every failure and a
+video of every retried test), `test-results` (videos, traces, JUnit XML), `k6-and-logs` (k6 HTML/JSON reports, EOD
 audit log, app log). A summary table is posted to the run page.
 
 <img src="docs/images/report-playwright.png" width="640" alt="Playwright HTML report: all tests passed">
@@ -185,7 +189,7 @@ audit log, app log). A summary table is posted to the run page.
 | Feature | Details |
 |---------|---------|
 | **Double-entry general ledger** | Immutable journals, balances computed from entries, chart of accounts (GL 1010 cash … 5020 cashback expense), trial balance view |
-| **ISO 20022 messaging** | Every bank transfer produces a `pacs.008.001.08` FI-to-FI credit transfer; InstaPay settles instantly, PESONet in batches at the cut-off |
+| **ISO 20022 messaging** | Every bank transfer produces a `pacs.008.001.08` FI-to-FI credit transfer; InstaPay settles instantly, PESONet in batches at the cut-off. `GET /api/v1/transactions/:id/iso20022` serialises any transfer, bill payment or load purchase from its ledger entries, shown in the receipt's **ISO 20022 Message Inspector** tab (highlighted XML, Copy Payload) |
 | **Instant Loans** | ₱50,000 pre-approved line, 3 / 6 / 12 months at 1.5% a month flat, MPIN to apply, interest-first repayments, GL 1030 / 4020 |
 | **Virtual Visa cards** | AES-256-GCM encrypted PAN, CVV derived and never stored, PCI-style masking, lock / unlock, online purchases (locked card → `403 CARD_FROZEN`) |
 | **Buy Load** | Prepaid top-up for Globe, TM, Smart, TNT, DITO and GOMO: network detected from the number prefix (brand chosen within Globe/TM and Smart/TNT, override for ported numbers), regular load ₱10–₱1,000 or promo packages, **₱5.00 cashback** on loads of ₱50 or more (max 3 a day), GL 2060 Telco Settlement |
@@ -207,9 +211,9 @@ audit log, app log). A summary table is posted to the run page.
 
 - **Floating navigation dock** with a raised Scan & Pay button, frosted-glass cards and quick actions, and an **iOS dark glass** theme.
 - **Real-time WebSocket notifications** (Socket.IO): live toasts such as "Received ₱500.00 from Account …" and "🎉 Earned ₱5.00 Cashback!", a ringing bell with an unread count.
-- **QA Sandbox Controls** (admin): Reset DB State, Simulate 3s Network Latency, Trigger HTTP 500 Error, freeze account, chaos mode, PESONet cut-off, compliance clear.
+- **QA Sandbox Controls** (admin): Reset DB State, a **Chaos Engine** (3 s latency, 20% random HTTP 500 fault injection with a glass toast and safe retries), Trigger HTTP 500 Error, freeze account, chaos mode, PESONet cut-off, compliance clear.
 - Notifications center, My Profile (KYC, linked accounts, Change MPIN, security toggles, help center), receipts with download.
-- **Brand theme:** "Sunset Orange & Warm Amber" (MariBank / ShopeePay / Maya style): orange #FF5722 actions, an orange balance card, warm amber #FFB300 for interest rates and rewards. All colours are CSS tokens at the top of `public/styles.css` (light and dark side by side); Obsidian & Emerald, Royal Blue and Indigo palettes are included as ready-to-swap alternatives.
+- **Brand theme:** "Royal Electric Blue" (Chase / PayPal style): #0052FF actions and balance card, light-cyan labels, a solid blue rate badge, and blue on deep navy in dark mode. All colours are CSS tokens at the top of `public/styles.css` (light and dark side by side); Sunset Orange, Obsidian & Emerald and Indigo palettes are included as ready-to-swap alternatives.
 - **Appearance:** Light (default) / Dark / Auto in the profile; Auto follows the device live. `public/theme-dark.css` is generated from `styles.css` by `npm run theme:dark`; CI fails if it is stale.
 
 <img src="docs/images/notifications.png" width="190" alt="Notifications"> <img src="docs/images/profile.png" width="190" alt="Profile with KYC"> <img src="docs/images/pay-bills-summary.png" width="190" alt="Pay Bills summary"> <img src="docs/images/glass-dock.png" width="190" alt="Glass dock">
@@ -264,13 +268,13 @@ or Instant Loan. To use Add money and the QA Sandbox, make your account an admin
 ```bash
 npm ci
 npx playwright install ffmpeg            # for test videos (tests use your installed Chrome)
-npx playwright test                       # all 312: projects api, ui, visual
+npx playwright test                       # all 355: projects api, ui, visual (+ ledger check at the end)
 npx playwright test --project=ui          # E2E + chaos in a real browser
 npx playwright show-report                # open the HTML report
 
 docker compose run --rm k6                                         # k6 race condition (known bug)
 docker compose run --rm k6 run /scripts/idempotent-transfer.js     # k6 idempotency
-npm run db:check && node tests/assert-system-ledger.js && npm run eod:reconcile
+npm run db:check && node scripts/assert-ledger.js && npm run eod:reconcile
 ```
 
 Without Docker, use a local PostgreSQL, `npm run db:init` and `npm start` (see the reference docs).

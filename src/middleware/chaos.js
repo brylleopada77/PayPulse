@@ -3,24 +3,32 @@
 //
 // Turn it on per request with headers:
 //   x-chaos-mode: true                     enable chaos for this request
-//   x-chaos-fault: db-lock | drop | random which fault to inject (default: random)
+//   x-chaos-fault: db-lock | drop | error-500 | random   which fault to inject (default: random)
 //       db-lock  hold a real row lock on the caller's wallet for x-chaos-lock-ms (default 2000)
 //                before the request continues: the request is slow, and other requests that
 //                need that wallet's lock wait too
 //       drop     answer 503 Service Unavailable (a "network drop")
+//       error-500  fault injection: a money-moving POST (transfers, bank transfers, top-ups,
+//                bills, load) fails with HTTP 500 CHAOS_FAULT_INJECTED with probability
+//                x-chaos-rate, BEFORE it runs (no money moves, so the app may retry it). Other
+//                requests are not affected.
 //       random   each request: 50% db-lock, then a drop with probability x-chaos-rate
-//   x-chaos-rate: 0..1                     probability of a drop (default 0.3)
+//   x-chaos-rate: 0..1                     probability of a drop / 500 (default 0.3)
+//   x-chaos-latency-ms: N                  wait N ms (max 10000) before the request runs; can be
+//                                          combined with any fault (or sent alone)
 //   x-chaos-drop-when: before | after      before (default): the request never runs
 //                                          after: the request RUNS, then its answer is lost
 //                                          (the retry must not repeat it: see idempotency.js)
-//   x-chaos-drop-attempts: N               deterministic: drop only the first N attempts of each
-//                                          Idempotency-Key (ignores x-chaos-rate), for tests
+//   x-chaos-drop-attempts: N               deterministic: drop (or 500) only the first N attempts
+//                                          of each Idempotency-Key (ignores x-chaos-rate), for tests
 // Every chaos-affected response carries `X-Chaos: <what happened>`.
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const { pool } = require('../db/pool');
 
 const MAX_LOCK_MS = 10_000;
+// Requests that move money (relative to /api): the targets of error-500 fault injection.
+const MONEY_PATHS = /^\/(transfers(\/bank)?|payments\/mock-checkout|v1\/bills\/pay|v1\/load\/purchase)\/?$/;
 const attempts = new Map(); // "<auth>|<idempotency key>" -> { count, at }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -60,6 +68,17 @@ async function lockDelay(req, ms) {
   }
 }
 
+function injectedFault(res) {
+  res.set('X-Chaos', 'error-500');
+  return res.status(500).json({
+    error: {
+      code: 'CHAOS_FAULT_INJECTED',
+      message: 'Chaos Engine: server fault injected. The request was not processed.',
+      details: { chaos: true, retryable: true },
+    },
+  });
+}
+
 function unavailable(res, when) {
   res.set('Retry-After', '1');
   res.set('X-Chaos', `drop-${when}`);
@@ -88,11 +107,27 @@ async function chaos(req, res, next) {
   if (!config.qaSandbox || req.get('x-chaos-mode') !== 'true') return next();
   if (!(await isAdminRequest(req))) return next();
 
+  const latencyMs = Math.min(MAX_LOCK_MS, Math.max(0, Number(req.get('x-chaos-latency-ms')) || 0));
+  if (latencyMs) {
+    await sleep(latencyMs);
+    res.set('X-Chaos', `latency-${latencyMs}ms`);
+  }
+  if (!req.get('x-chaos-fault') && latencyMs) return next();
+
   const fault = (req.get('x-chaos-fault') || 'random').toLowerCase();
   const rate = Math.min(1, Math.max(0, Number(req.get('x-chaos-rate') ?? 0.3) || 0));
   const when = req.get('x-chaos-drop-when') === 'after' ? 'after' : 'before';
   const dropFirst = Number(req.get('x-chaos-drop-attempts'));
   const lockMs = Math.min(MAX_LOCK_MS, Math.max(0, Number(req.get('x-chaos-lock-ms')) || 2000));
+
+  if (fault === 'error-500') {
+    if (req.method !== 'POST' || !MONEY_PATHS.test(req.path)) return next();
+    const fail =
+      Number.isInteger(dropFirst) && dropFirst > 0 && req.get('idempotency-key')
+        ? attemptNumber(req) <= dropFirst
+        : Math.random() < rate;
+    return fail ? injectedFault(res) : next();
+  }
 
   const effects = [];
   if (fault === 'db-lock' || (fault === 'random' && Math.random() < 0.5)) {

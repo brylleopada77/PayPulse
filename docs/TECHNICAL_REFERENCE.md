@@ -96,7 +96,7 @@ npm run db:check               # verify the whole ledger is balanced
 npm run db:assert-ledger       # standalone: money in system = user balances + collected fees
 ```
 
-`tests/assert-system-ledger.js` is a plain Node.js script (no test runner). It works out the
+`scripts/assert-ledger.js` is a plain Node.js script (no test runner). It works out the
 total money in the system from the ledger history (top-ups − bank payouts + QA adjustments) and
 asserts it equals `sum(user balances) + sum(collected fees) + PESONet pending`; it also checks that
 every transaction balances, all balances sum to 0, the trial balance debits equal its credits, and
@@ -422,10 +422,11 @@ but derived on demand from PAN + expiry with a separate key; every card response
 | Header | Effect |
 |--------|--------|
 | `x-chaos-mode: true` | enable chaos for this request |
-| `x-chaos-fault: db-lock \| drop \| random` | **db-lock**: hold a real row lock on your wallet for `x-chaos-lock-ms` (default 2000) first; **drop**: answer `503 SERVICE_UNAVAILABLE`; **random**: 50% lock, then drop with `x-chaos-rate` |
-| `x-chaos-rate: 0..1` | drop probability (default 0.3) |
+| `x-chaos-fault: db-lock \| drop \| error-500 \| random` | **db-lock**: hold a real row lock on your wallet for `x-chaos-lock-ms` (default 2000) first; **drop**: answer `503 SERVICE_UNAVAILABLE`; **error-500** (Chaos Engine fault injection): money-moving POSTs (transfers, bank transfers, top-ups, bills, load) answer `500 CHAOS_FAULT_INJECTED` with probability `x-chaos-rate`, before they run; **random**: 50% lock, then drop with `x-chaos-rate` |
+| `x-chaos-rate: 0..1` | drop / 500 probability (default 0.3; the Chaos Engine switch sends 0.2) |
+| `x-chaos-latency-ms: N` | wait N ms (max 10000) before the request runs; combines with any fault |
 | `x-chaos-drop-when: before \| after` | **before**: the request never runs; **after**: it runs, then the answer is lost |
-| `x-chaos-drop-attempts: N` | deterministic: drop the first N attempts of each `Idempotency-Key` |
+| `x-chaos-drop-attempts: N` | deterministic: drop (or 500) the first N attempts of each `Idempotency-Key` |
 
 Because an answer can be lost *after* money moved, money-moving POSTs accept an
 **`Idempotency-Key`** header (`middleware/idempotency.js`): the first final answer is stored and a
@@ -636,6 +637,7 @@ accounts and BICs (PayPulse `PAYPPHM2XXX`, BDO `BNORPHMMXXX`, ...), and remittan
 | API | |
 |-----|---|
 | `GET /api/transfers/bank/:transactionId/iso20022?format=json\|xml` | The pacs.008 of one of your bank transfers |
+| `GET /api/v1/transactions/:id/iso20022?format=json\|xml` | The pacs.008 of any of your transfers, bill payments or load purchases (the receipt's Message Inspector). Bank transfers: the stored switch message; the rest are serialised from the ledger entries (debited wallet = debtor, fee = credit to `SYS-FEE-INCOME`, `SttlmMtd INDA`) with identifiers derived from the transaction, so the message is always the same. 404 if not yours; 422 `NOT_A_CREDIT_TRANSFER` for top-ups, interest and loans |
 | `GET /api/transfers/pesonet` | Your PESONet transfers (`QUEUED` / `SETTLED`) and the next cut-off |
 | `POST /api/qa/pesonet/run-cutoff` | QA sandbox: settle your queued PESONet transfers now |
 

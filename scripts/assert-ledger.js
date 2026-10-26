@@ -2,8 +2,10 @@
 /**
  * Standalone system-ledger assertion for PayPulse (plain Node.js, no test runner needed).
  *
- * Main rule:
- *   total money in the system  ==  sum(user balances) + sum(collected fees) + PESONet pending
+ * Main rule (the core accounting equation of the double-entry general ledger):
+ *   total system cash  ==  sum(user balances) + sum(collected fees) + reserves
+ * Reserves = money still held by PayPulse on its way out (PESONet transfers waiting for their
+ * batch cut-off).
  *
  * "Total money in the system" is worked out from the ledger *flows*:
  *   top-ups paid in  -  amounts paid out to banks (settled)  +  net QA sandbox adjustments
@@ -13,12 +15,18 @@
  * (view account_balances; nothing is stored). Bank fees stay inside PayPulse, and PESONet
  * transfers waiting for their batch cut-off are still inside PayPulse too.
  *
- * Extra checks: every transaction balances (debits = credits), all balances sum to 0, the
- * trial balance debits equal its credits, and no customer wallet is overdrawn (< 0).
+ * Extra checks: SUM(debit) - SUM(credit) == 0 over every ledger entry, every transaction
+ * balances (debits = credits), all balances sum to 0, the trial balance debits equal its
+ * credits, and no customer wallet is overdrawn (< 0).
  *
- * Usage:   node tests/assert-system-ledger.js          (or: npm run db:assert-ledger)
- *          node tests/assert-system-ledger.js --json   (machine-readable output)
- * Env:     DATABASE_URL (read from .env if present)
+ * The overdraft check is the symptom of the KNOWN race-condition bug in POST /api/transfers (see
+ * QA_NOTES.md). While RACE_BUG_EXPECTED is not "false" it is reported as KNOWN and does not fail
+ * the run; the accounting checks always do. Playwright runs this script after every test run
+ * (tests/global-teardown.ts).
+ *
+ * Usage:   node scripts/assert-ledger.js          (or: npm run db:assert-ledger)
+ *          node scripts/assert-ledger.js --json   (machine-readable output)
+ * Env:     DATABASE_URL (read from .env if present), RACE_BUG_EXPECTED (default "true")
  * Exit:    0 = all checks pass, 1 = a check failed, 2 = could not run
  */
 require('dotenv').config({ quiet: true });
@@ -26,6 +34,7 @@ const { Client } = require('pg');
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://paypulse:paypulse@localhost:5432/paypulse';
 const asJson = process.argv.includes('--json');
+const RACE_BUG_EXPECTED = process.env.RACE_BUG_EXPECTED !== 'false';
 
 const peso = (cents) =>
   `${cents < 0 ? '-' : ''}₱${(Math.abs(cents) / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -50,6 +59,8 @@ async function main() {
         (SELECT COUNT(*) FROM balances WHERE NOT is_system AND balance_cents < 0)                            AS overdrawn,
         (SELECT COALESCE(SUM(total_debits_cents), 0) FROM gl_trial_balance)                                  AS tb_debits,
         (SELECT COALESCE(SUM(total_credits_cents), 0) FROM gl_trial_balance)                                 AS tb_credits,
+        COALESCE(SUM(amount_cents) FILTER (WHERE direction = 'DEBIT'), 0)                                     AS all_debits,
+        COALESCE(SUM(amount_cents) FILTER (WHERE direction = 'CREDIT'), 0)                                    AS all_credits,
         COALESCE(SUM(amount_cents) FILTER (WHERE type = 'DEPOSIT' AND direction = 'CREDIT' AND NOT is_system), 0)
                                                                                                                AS deposits_in,
         COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount_cents ELSE -amount_cents END)
@@ -78,11 +89,18 @@ async function main() {
 
     const checks = [
       {
-        check: 'Total money in system = user balances + collected fees + PESONet pending',
+        check: 'Total system cash = user balances + collected fees + reserves (PESONet pending)',
         expected: peso(totalInSystem),
         actual: peso(heldInside),
         difference: peso(heldInside - totalInSystem),
         pass: heldInside === totalInSystem,
+      },
+      {
+        check: 'Ledger: SUM(debit) - SUM(credit) = 0',
+        expected: peso(0),
+        actual: peso(n.all_debits - n.all_credits),
+        difference: peso(n.all_debits - n.all_credits),
+        pass: n.all_debits === n.all_credits,
       },
       {
         check: 'All account balances (users + system) sum to 0',
@@ -111,9 +129,10 @@ async function main() {
         actual: `${n.overdrawn} overdrawn`,
         difference: '',
         pass: n.overdrawn === 0,
+        knownBug: RACE_BUG_EXPECTED, // the race-condition bug overdraws wallets (QA_NOTES.md)
       },
     ];
-    const ok = checks.every((c) => c.pass);
+    const ok = checks.every((c) => c.pass || c.knownBug);
 
     const breakdown = {
       topUpsPaidIn: peso(n.deposits_in),
@@ -124,6 +143,8 @@ async function main() {
       userBalances: peso(n.user_balances),
       feesCollected: peso(n.fees),
       pesonetPending: peso(n.pesonet_pending),
+      ledgerDebits: peso(n.all_debits),
+      ledgerCredits: peso(n.all_credits),
     };
 
     if (asJson) {
@@ -137,10 +158,10 @@ async function main() {
       console.log(`  + savings interest paid  ${breakdown.savingsInterestPaid}`);
       console.log(`  = total money in system  ${breakdown.totalMoneyInSystem}`);
       console.log(
-        `Held by: users ${breakdown.userBalances} + fees ${breakdown.feesCollected} + PESONet pending ${breakdown.pesonetPending}\n`,
+        `Held by: users ${breakdown.userBalances} + fees ${breakdown.feesCollected} + reserves (PESONet pending) ${breakdown.pesonetPending}\n`,
       );
       for (const c of checks) {
-        console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.check}`);
+        console.log(`${c.pass ? 'PASS' : c.knownBug ? 'KNOWN' : 'FAIL'}  ${c.check}${!c.pass && c.knownBug ? ' (known race-condition bug, RACE_BUG_EXPECTED=true)' : ''}`);
         if (!c.pass) console.log(`      expected ${c.expected}, actual ${c.actual}${c.difference ? ` (difference ${c.difference})` : ''}`);
       }
       for (const o of overdrawn.rows) console.log(`      ${o.account_number}: ${peso(Number(o.balance_cents))}`);
@@ -155,6 +176,6 @@ async function main() {
 main()
   .then((ok) => process.exit(ok ? 0 : 1))
   .catch((err) => {
-    console.error('assert-system-ledger failed to run:', err.message);
+    console.error('assert-ledger failed to run:', err.message);
     process.exit(2);
   });

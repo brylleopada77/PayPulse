@@ -1,8 +1,8 @@
 name: PayPulse QA Pipeline
 
-# Every push and pull request: PostgreSQL service container -> schema migration -> app ->
-# Playwright (API, browser E2E + resilience, visual regression) -> k6 (idempotency + race) ->
-# ledger / end-of-day reconciliation. The HTML report (screenshots + videos), k6 reports and logs
+# Every push and pull request: PostgreSQL service container -> schema migration -> app -> QA seed
+# accounts -> Playwright (API, browser E2E + resilience, visual regression; the ledger invariant
+# check runs as its global teardown) -> k6 (idempotency + race) -> ledger / end-of-day reconciliation. The HTML report (screenshots + videos), k6 reports and logs
 # are always published as workflow artifacts.
 on:
   push:
@@ -85,11 +85,14 @@ jobs:
           done
           echo "App did not start"; cat reports/app.log; exit 1
 
+      - name: Seed QA test accounts
+        run: npm run db:seed
+
       # One Playwright run so there is one HTML report: projects api, ui (E2E + resilience in the
       # preinstalled Google Chrome) and visual. Visual baselines are per OS; --update-snapshots=missing
       # writes Linux baselines the first time (they are uploaded below so they can be committed),
       # and compares against them once they are in the repository.
-      - name: Run Playwright (API, E2E, resilience, visual regression)
+      - name: Run Playwright (API, E2E, resilience, visual regression) + ledger invariant check
         id: playwright
         run: |
           google-chrome --version
@@ -118,11 +121,12 @@ jobs:
         continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
         run: npm run db:check
 
-      - name: System ledger assertion (money in system = balances + fees)
+      # Hard gate: the accounting checks always fail the build. Wallets overdrawn by the known race
+      # bug (k6 race test) are reported as KNOWN while RACE_BUG_EXPECTED is "true".
+      - name: System ledger assertion (cash = balances + fees + reserves, debits = credits)
         id: systemledger
         if: always() && steps.playwright.outcome != 'skipped'
-        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
-        run: node tests/assert-system-ledger.js
+        run: npm run db:assert-ledger
 
       - name: End-of-day reconciliation (trial balance + GL controls)
         id: eod
@@ -144,7 +148,7 @@ jobs:
             echo "| System ledger assertion | \`${{ steps.systemledger.outcome }}\` |"
             echo "| End-of-day reconciliation | \`${{ steps.eod.outcome }}\` |"
             echo ""
-            echo "Artifacts: **playwright-report** (HTML, screenshots, videos), **k6-and-logs**, **test-results**."
+            echo "Artifacts: **playwright-report** (HTML; failure screenshots, retry videos), **k6-and-logs**, **test-results**."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Playwright HTML report

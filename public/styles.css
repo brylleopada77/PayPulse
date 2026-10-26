@@ -562,6 +562,21 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .qa-more > summary { cursor: pointer; font-size: 0.85rem; color: #a9abc0; }
 .qa-more > *:not(summary) { margin-top: 10px; }
 .qa-status { margin: 0; min-height: 1.2em; font-size: 0.8rem; color: #8fe3c4; }
+/* Chaos Engine: a dev tool, so it keeps its own Sunset Orange & Warm Amber glass (not the brand theme) */
+.chaos-engine {
+  display: grid; gap: 12px; padding: 12px; border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255, 87, 34, 0.16), rgba(255, 179, 0, 0.08));
+  border: 1px solid rgba(255, 140, 60, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+.chaos-head { display: flex; align-items: center; gap: 8px; color: #ffd3a8; }
+.chaos-live {
+  margin-left: auto; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.08em; padding: 2px 7px;
+  border-radius: 999px; background: #ff5722; color: #fff; box-shadow: 0 0 12px rgba(255, 87, 34, 0.7);
+}
+.chaos-switch input:checked { background: linear-gradient(90deg, #ff5722, #ffb300); }
+.chaos-switch input:focus-visible { outline-color: #ffb300; }
 
 .net-indicator {
   position: fixed; inset: auto; margin: 0; top: 14px; right: 14px; padding: 8px 14px; border: 0; border-radius: 999px;
@@ -622,6 +637,38 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .receipt-amount { margin: 8px 0 2px; font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .receipt-date { margin: 0; color: var(--accent-ink-muted); font-size: 0.88rem; }
 .receipt-body { padding: 18px 24px 22px; display: grid; gap: 14px; }
+.receipt-body[hidden] { display: none; }
+/* Receipt | ISO 20022 tabs */
+.receipt-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 14px 24px 0; padding: 4px;
+  border-radius: 12px; background: var(--bg); border: 1px solid var(--border);
+}
+.receipt-tabs[hidden] { display: none; }
+.receipt-tabs [role="tab"] {
+  font: inherit; font-size: 0.86rem; font-weight: 600; padding: 8px; border: 0; border-radius: 9px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.receipt-tabs [role="tab"][aria-selected="true"] { background: var(--surface); color: var(--accent-ink); box-shadow: var(--shadow); }
+/* ISO 20022 Message Inspector */
+.iso-inspector { padding: 16px 24px 22px; display: grid; gap: 12px; }
+.iso-inspector[hidden] { display: none; }
+.iso-head { display: grid; gap: 2px; }
+.iso-head small { color: var(--muted); font-size: 0.78rem; }
+.iso-ids { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 0.78rem; }
+.iso-ids dt { color: var(--muted); }
+.iso-ids dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.iso-xml {
+  margin: 0; max-height: 46vh; overflow: auto; padding: 14px; border-radius: 12px;
+  background: #1f2937; color: #e5e7eb; border: 1px solid rgba(255, 255, 255, 0.08);
+  font: 0.74rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre;
+}
+.iso-xml:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.iso-xml .x-decl { color: #9ca3af; }
+.iso-xml .x-punct { color: #6b7280; }
+.iso-xml .x-tag { color: #7dd3fc; }
+.iso-xml .x-attr { color: #fcd34d; }
+.iso-xml .x-value { color: #86efac; }
+.iso-xml .x-text { color: #f9fafb; font-weight: 600; }
 .receipt-ref {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
   padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 0.9rem; color: var(--muted);
@@ -681,6 +728,13 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   box-shadow: var(--shadow); max-width: calc(100vw - 32px); font-weight: 500; z-index: 10;
 }
 .toast.error { background: var(--danger); }
+/* Chaos Engine fault toast: glass in Sunset Orange */
+.toast.chaos {
+  background: linear-gradient(135deg, rgba(255, 87, 34, 0.88), rgba(230, 74, 25, 0.88));
+  border: 1px solid rgba(255, 179, 0, 0.6);
+  backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  box-shadow: 0 10px 30px rgba(255, 87, 34, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
 .toast.success { background: var(--success); }
 
 @media (max-width: 420px) {
