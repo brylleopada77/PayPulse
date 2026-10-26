@@ -304,9 +304,6 @@
   background: #1c1f22;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
-:root[data-theme="dark"] body {
-  background: #1c1f22;
-}
 :root[data-theme="dark"] .balance-card,
 :root[data-theme="dark"] .balance-card.glass-card {
   background: radial-gradient(circle at 105% -10%, rgba(24, 26, 29, 0.3) 0 30%, transparent 31%),
@@ -359,7 +356,7 @@
   color: #ffb36b;
 }
 
-/* ===== Designed: Obsidian & Emerald dark glass. Brand colours are theme tokens (top of styles.css), never literals here. ===== */
+/* ===== Designed: obsidian dark glass with the brand accent. Brand colours are theme tokens (top of styles.css), never literals here. ===== */
 :root[data-theme="dark"] {
   color-scheme: dark;
   /* brand colours: see the dark tokens at the top of styles.css */
@@ -450,6 +447,7 @@
 :root[data-theme="dark"] .quick-icon { background: rgba(255, 255, 255, 0.06); color: var(--accent); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10); }
 :root[data-theme="dark"] .quick:hover .quick-icon { background: rgba(var(--accent-rgb), 0.12); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45), 0 0 16px rgba(var(--accent-rgb), 0.35); }
 :root[data-theme="dark"] .quick:active .quick-icon { background: var(--accent); color: var(--on-accent); }
-:root[data-theme="dark"] .rate-badge, :root[data-theme="dark"] #savings-add { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+:root[data-theme="dark"] #savings-add { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+:root[data-theme="dark"] .rate-badge { background: var(--reward); color: var(--on-reward); }
 :root[data-theme="dark"] .tx-amount { color: #ffffff; }
 :root[data-theme="dark"] .tx.in .tx-amount { color: var(--success); text-shadow: 0 0 10px rgba(14, 159, 110, 0.35); }

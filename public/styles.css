@@ -3,36 +3,48 @@
   color-scheme: light;
 
   /* ===== Brand theme: change these to re-colour the whole app =====
-     Active: "Monochrome Obsidian & Emerald" (Wise / Robinhood style). The app opens in DARK
-     (obsidian) by default; these are the matching LIGHT values. Dark values: just below :root. */
-  --accent: #00e676;              /* neon emerald: primary CTAs, positive amounts, cashback */
-  --accent-hover: #00c853;
-  --accent-strong: #00a344;       /* pressed / gradient end */
-  --accent-ink: #047857;          /* emerald text on light backgrounds (AA contrast) */
-  --accent-ink-muted: #4b7a66;
-  --on-accent: #121212;           /* text on emerald buttons (white would fail contrast) */
-  --accent-secondary: #00c853;
-  --accent-line: #a7f3d0;
-  --accent-tint: #c8f7dc;
-  --accent-soft: #e6fbef;         /* badges / soft fills */
-  --accent-softer: #f3fdf7;
-  --accent-rgb: 0, 230, 118;
-  --accent-deep-rgb: 0, 120, 60;
-  --accent-soft-rgb: 230, 251, 239;
-  --accent-secondary-rgb: 0, 200, 83;
-  --card-gradient: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);   /* slate card in both themes */
-  --card-border: rgba(0, 230, 118, 0.55);
-  --card-amount: #ffffff;          /* balance on the slate card */
-  --scan-gradient: radial-gradient(circle at 35% 30%, #00e676 0%, #00c853 100%);
-  --scan-border: #121212;
-  --bg-gradient: #ffffff;
-  --on-card-subtle: #e2e8f0;       /* crisp white sub-text on the slate card */
+     Active: "Sunset Orange & Warm Amber" (MariBank / ShopeePay / Maya style). The app opens in
+     LIGHT by default; dark values are just below :root. Alternatives are listed underneath. */
+  --accent: #ff5722;              /* Mari Sunset Orange: primary CTAs, active states, icons */
+  --accent-hover: #e64a19;        /* deep orange: hover / active */
+  --accent-strong: #e64a19;
+  --accent-ink: #c2410c;          /* orange text on white (AA contrast; #ff5722 text is too light) */
+  --accent-ink-muted: #9a5b3f;
+  --on-accent: #ffffff;           /* text on orange buttons: white, bold (large-text contrast) */
+  --accent-secondary: #ffb300;    /* warm amber: interest rates, rewards, glows */
+  --accent-line: #ffd3c2;
+  --accent-tint: #ffdccf;
+  --accent-soft: #ffebe5;         /* soft peach: badges, pill icons */
+  --accent-softer: #fff5ef;
+  --accent-rgb: 255, 87, 34;
+  --accent-deep-rgb: 230, 74, 25;
+  --accent-soft-rgb: 255, 235, 229;
+  --accent-secondary-rgb: 255, 179, 0;
+  --reward: #ffb300;              /* amber badges ("6.00% p.a.") */
+  --on-reward: #1f2937;           /* dark text on amber for high visibility */
+  --card-gradient: linear-gradient(135deg, #ff6b00 0%, #ff3d00 100%);
+  --card-border: rgba(255, 255, 255, 0.3);
+  --card-amount: #ffffff;
+  --scan-gradient: radial-gradient(circle at 35% 30%, #ff6b00 0%, #ff3d00 100%);
+  --scan-border: #ffffff;
+  --bg-gradient: linear-gradient(180deg, #fff5ef 0%, #ffffff 100%);
+  --on-card-subtle: #ffe08a;      /* warm amber sub-labels on the orange card */
 
+  /* --- Alternative: "Monochrome Obsidian & Emerald" (open in Dark; see the dark tokens too) ---
+  --accent: #00e676; --accent-hover: #00c853; --accent-strong: #00a344; --accent-ink: #047857;
+  --accent-ink-muted: #4b7a66; --on-accent: #121212; --accent-secondary: #00c853; --accent-line: #a7f3d0;
+  --accent-tint: #c8f7dc; --accent-soft: #e6fbef; --accent-softer: #f3fdf7; --accent-rgb: 0, 230, 118;
+  --accent-deep-rgb: 0, 120, 60; --accent-soft-rgb: 230, 251, 239; --accent-secondary-rgb: 0, 200, 83;
+  --reward: #00e676; --on-reward: #121212; --card-gradient: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  --card-border: rgba(0, 230, 118, 0.55); --card-amount: #ffffff; --scan-border: #121212; --on-card-subtle: #e2e8f0;
+  --scan-gradient: radial-gradient(circle at 35% 30%, #00e676 0%, #00c853 100%); --bg-gradient: #ffffff;
+  */
   /* --- Alternative: "Royal Electric Blue" ---
   --accent: #0052ff; --accent-hover: #0040cc; --accent-strong: #0036b3; --accent-ink: #0040cc; --on-accent: #ffffff;
   --accent-ink-muted: #4b6a9b; --accent-secondary: #00d1ff; --accent-line: #bcd2ff; --accent-tint: #d6e4ff;
   --accent-soft: #ebf2ff; --accent-softer: #f4f7ff; --accent-rgb: 0, 82, 255; --accent-deep-rgb: 0, 54, 179;
   --accent-soft-rgb: 235, 242, 255; --accent-secondary-rgb: 0, 209, 255; --on-card-subtle: #a5f0ff;
+  --reward: #0052ff; --on-reward: #ffffff;
   --card-gradient: linear-gradient(135deg, #0052ff 0%, #0036b3 100%); --card-border: rgba(255, 255, 255, 0.25);
   --card-amount: #ffffff; --scan-gradient: radial-gradient(circle at 35% 30%, #0052ff 0%, #0036b3 100%);
   --scan-border: #ffffff; --bg-gradient: linear-gradient(180deg, #f4f7ff 0%, #ffffff 100%);
@@ -42,20 +54,11 @@
   --accent-ink-muted: #6b63a8; --accent-secondary: #a29bfe; --accent-line: #c9c2ff; --accent-tint: #dcd6ff;
   --accent-soft: #eae6ff; --accent-softer: #f5f3ff; --accent-rgb: 108, 92, 231; --accent-deep-rgb: 72, 52, 212;
   --accent-soft-rgb: 234, 230, 255; --accent-secondary-rgb: 162, 155, 254; --on-card-subtle: #dcd6ff;
+  --reward: #6c5ce7; --on-reward: #ffffff;
   --on-accent: #ffffff; --card-border: rgba(255, 255, 255, 0.25); --card-amount: #ffffff; --scan-border: #ffffff;
   --card-gradient: linear-gradient(135deg, #4834d4 0%, #686de0 100%);
   --scan-gradient: radial-gradient(circle at 35% 30%, #6c5ce7 0%, #4834d4 100%);
   --bg-gradient: linear-gradient(180deg, #f3f0ff 0%, #ffffff 100%);
-  */
-  /* --- Alternative: "MariBank Sunset Orange" ---
-  --accent: #ff5722; --accent-hover: #e64a19; --accent-strong: #e64a19; --accent-ink: #c2410c;
-  --accent-ink-muted: #9a5b3f; --accent-secondary: #ffb300; --accent-line: #ffd3c2; --accent-tint: #ffdccf;
-  --accent-soft: #ffebe5; --accent-softer: #fff5ef; --accent-rgb: 255, 87, 34; --accent-deep-rgb: 230, 74, 25;
-  --accent-soft-rgb: 255, 235, 229; --accent-secondary-rgb: 255, 179, 0; --on-card-subtle: #ffe0c2;
-  --on-accent: #ffffff; --card-border: rgba(255, 255, 255, 0.25); --card-amount: #ffffff; --scan-border: #ffffff;
-  --card-gradient: linear-gradient(135deg, #ff6b00 0%, #ff3d00 100%);
-  --scan-gradient: radial-gradient(circle at 35% 30%, #ff6b00 0%, #e64a19 100%);
-  --bg-gradient: linear-gradient(180deg, #fff5ef 0%, #ffffff 100%);
   */
 
   /* Older names kept as aliases, so every rule follows the theme */
@@ -69,43 +72,43 @@
   --success-soft: #e3f8f0;
   --danger: #d93a4a;
 
-  --bg: #f1f5f4;            /* light grey for inner fills (chips, switches); the page itself is white */
+  --bg: #faf5f2;            /* warm off-white for inner fills (chips, switches) */
   --surface: #ffffff;
-  --text: #0f172a;          /* dark slate: headings and main text */
-  --muted: #64748b;         /* muted blue-gray: body / secondary text */
-  --border: #e2e8f0;
+  --text: #1f2937;          /* dark charcoal: headings and main text */
+  --muted: #6b7280;         /* muted warm gray: captions */
+  --border: #f1e4dc;
   --radius: 16px;
-  --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --shadow: 0 10px 30px rgba(31, 41, 55, 0.08);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--text);
 }
 
-/* Dark theme: "Monochrome Obsidian & Emerald" (the default look). Keep in step with the palette above. */
+/* Dark theme: Sunset Orange on obsidian (Appearance: Dark). Keep in step with the palette above. */
 :root[data-theme="dark"] {
-  --bg: #121212;                  /* deep obsidian */
+  --bg: #121212;
   --surface: #1e1e1e;
-  --text: #ffffff;                /* titles and balances */
-  --muted: #94a3b8;               /* labels and captions */
+  --text: #ffffff;
+  --muted: #a8a29e;
   --border: rgba(255, 255, 255, 0.08);
-  --accent: #00e676;
-  --accent-hover: #33eb91;
-  --accent-strong: #00c853;
-  --accent-ink: #00e676;
-  --accent-ink-muted: #7fcfa6;
-  --on-accent: #121212;
-  --accent-secondary: #00c853;
-  --accent-line: rgba(0, 230, 118, 0.35);
-  --accent-tint: rgba(0, 230, 118, 0.22);
-  --accent-soft: rgba(0, 230, 118, 0.15);   /* badges */
-  --accent-softer: rgba(0, 230, 118, 0.07);
-  --accent-rgb: 0, 230, 118;
+  --accent: #ff7043;
+  --accent-hover: #ff8a65;
+  --accent-strong: #ff5722;
+  --accent-ink: #ffab91;
+  --accent-ink-muted: #d6a08c;
+  --on-accent: #ffffff;
+  --accent-secondary: #ffb300;
+  --accent-line: rgba(255, 112, 67, 0.40);
+  --accent-tint: rgba(255, 112, 67, 0.25);
+  --accent-soft: rgba(255, 112, 67, 0.16);
+  --accent-softer: rgba(255, 112, 67, 0.08);
+  --accent-rgb: 255, 112, 67;
   --accent-deep-rgb: 0, 0, 0;
-  --accent-soft-rgb: 0, 60, 30;
-  --accent-secondary-rgb: 0, 200, 83;
-  --badge-neutral: #263238;
-  --on-card-subtle: #e2e8f0;
-  --success: #00e676;
-  --success-soft: rgba(0, 230, 118, 0.15);
+  --accent-soft-rgb: 80, 30, 10;
+  --accent-secondary-rgb: 255, 179, 0;
+  --reward: #ffb300;
+  --on-reward: #1f2937;
+  --badge-neutral: #2b2522;
+  --on-card-subtle: #ffe08a;
 }
 
 * { box-sizing: border-box; }
@@ -1223,8 +1226,8 @@ body {
 /* =====================================================================================
    Brand components (colours come from the theme tokens above)
    ===================================================================================== */
-/* Light theme page: plain natural white (no tinted glow) */
-body { background: #ffffff; }
+/* Light theme page: soft peach fading to white */
+body { background: var(--bg-gradient); background-attachment: fixed; }
 
 /* Top balance card: indigo gradient, crisp white text */
 .balance-card,
@@ -1269,7 +1272,7 @@ body { background: #ffffff; }
   background: var(--scan-gradient);
   border: 4px solid var(--scan-border);
   color: var(--on-accent);
-  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.6), 0 12px 26px rgba(var(--accent-rgb), 0.30);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.6), 0 12px 26px rgba(var(--accent-rgb), 0.40);
   -webkit-backdrop-filter: none; backdrop-filter: none;
 }
 
@@ -1324,7 +1327,7 @@ body { background: #ffffff; }
 .quick:active .quick-icon { transform: scale(0.9); background: var(--accent); color: var(--on-accent); }
 
 /* PayPulse Save / Instant Loan: solid blue % badge and primary action */
-.rate-badge { background: var(--accent); color: var(--on-accent); }
+.rate-badge { background: var(--reward); color: var(--on-reward); font-weight: 800; }
 #savings-add { background: var(--accent); border-color: var(--accent); color: var(--on-accent); box-shadow: 0 6px 14px rgba(var(--accent-rgb), 0.25); }
 #savings-add:hover { background: var(--accent-hover); }
 .product-icon { background: var(--accent-soft); color: var(--accent); }
@@ -1389,3 +1392,10 @@ h1, h2, h3, .who-name, .product-title, .tx-title { color: var(--text); }
 
 /* MPIN status under every MPIN entry */
 .mpin-status { margin: -4px 0 -8px; font-size: 0.85rem; }
+
+/* ----- Sunset Orange details ----- */
+/* white text on orange: bold, so it meets the large-text contrast level */
+.btn.primary, #savings-add, .approved-chip { font-weight: 700; }
+/* cashback / reward highlights in warm amber */
+.cashback-banner { border-color: var(--reward); }
+.cashback-stamp { border-color: var(--reward); }

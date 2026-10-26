@@ -143,7 +143,7 @@ function emit(nodes, indent = '') {
 
 // ---------- hand-designed dark glass details (after the generated rules, so they win) ----------
 const DESIGNED = `
-/* ===== Designed: Obsidian & Emerald dark glass. Brand colours are theme tokens (top of styles.css), never literals here. ===== */
+/* ===== Designed: obsidian dark glass with the brand accent. Brand colours are theme tokens (top of styles.css), never literals here. ===== */
 ${SCOPE} {
   color-scheme: dark;
   /* brand colours: see the dark tokens at the top of styles.css */
@@ -234,7 +234,8 @@ ${SCOPE} .form input::placeholder, ${SCOPE} .form textarea::placeholder { color:
 ${SCOPE} .quick-icon { background: rgba(255, 255, 255, 0.06); color: var(--accent); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10); }
 ${SCOPE} .quick:hover .quick-icon { background: rgba(var(--accent-rgb), 0.12); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45), 0 0 16px rgba(var(--accent-rgb), 0.35); }
 ${SCOPE} .quick:active .quick-icon { background: var(--accent); color: var(--on-accent); }
-${SCOPE} .rate-badge, ${SCOPE} #savings-add { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+${SCOPE} #savings-add { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+${SCOPE} .rate-badge { background: var(--reward); color: var(--on-reward); }
 ${SCOPE} .tx-amount { color: #ffffff; }
 ${SCOPE} .tx.in .tx-amount { color: var(--success); text-shadow: 0 0 10px rgba(14, 159, 110, 0.35); }
 `;

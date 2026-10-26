@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PayPulse Wallet</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2300e676'/><path d='M6 17h5l3-7 4 13 3-6h5' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23ff5722'/><path d='M6 17h5l3-7 4 13 3-6h5' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#121212">
+  <meta name="theme-color" content="#fff5ef">
   <!-- Theme before first paint (no flash): saved choice, or the system's light/dark setting -->
   <script>
     (function () {
-      var pref = 'dark'; // default look: Obsidian & Emerald
-      try { pref = localStorage.getItem('paypulse.theme') || 'dark'; } catch (e) {}
+      var pref = 'light'; // default look: Sunset Orange (light)
+      try { pref = localStorage.getItem('paypulse.theme') || 'light'; } catch (e) {}
       var dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
       document.documentElement.dataset.themePref = pref;
