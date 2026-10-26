@@ -16,7 +16,9 @@
     "eod:reconcile": "node scripts/reconcile-eod.js",
     "pesonet:worker": "node scripts/pesonet-worker.js",
     "admin:set": "node scripts/set-role.js",
-    "theme:dark": "node scripts/build-dark-theme.js"
+    "theme:dark": "node scripts/build-dark-theme.js",
+    "postman:build": "node scripts/build-postman.js",
+    "postman:test": "newman run postman/PayPulse.postman_collection.json -e postman/PayPulse-local.postman_environment.json --reporters cli,junit --reporter-junit-export reports/newman-junit.xml"
   },
   "engines": {
     "node": ">=20"
@@ -37,6 +39,7 @@
     "@playwright/test": "^1.64.0",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
+    "newman": "^6.2.1",
     "socket.io-client": "^4.8.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

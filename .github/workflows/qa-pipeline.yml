@@ -72,6 +72,10 @@ jobs:
           npm run theme:dark
           git diff --exit-code -- public/theme-dark.css || { echo "Run: npm run theme:dark"; exit 1; }
 
+      # postman/ is generated from src/docs/openapi.js: fail if it no longer matches the API.
+      - name: Postman collection is up to date
+        run: node scripts/build-postman.js --check
+
       - name: Apply database migrations (db/schema.sql)
         run: npm run db:init
 
@@ -115,6 +119,13 @@ jobs:
         continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
         run: k6 run tests/load/race-transfer.js
 
+      # The Postman collection end to end (every endpoint, in order) through newman. Runs before the
+      # ledger checks, so the money it moves is covered by them too.
+      - name: Postman collection (newman)
+        id: newman
+        if: always() && steps.playwright.outcome != 'skipped'
+        run: npm run postman:test -- --env-var "baseUrl=$BASE_URL" --env-var "webhookSecret=$WEBHOOK_SECRET"
+
       - name: Database ledger check
         id: dbcheck
         if: always() && steps.playwright.outcome != 'skipped'
@@ -144,6 +155,7 @@ jobs:
             echo "| Playwright (API, E2E, resilience, visual, a11y) | \`${{ steps.playwright.outcome }}\` |"
             echo "| k6 idempotency (gate) | \`${{ steps.k6idem.outcome }}\` |"
             echo "| k6 race condition (known bug: \`${RACE_BUG_EXPECTED}\`) | \`${{ steps.k6race.outcome }}\` |"
+            echo "| Postman collection (newman) | \`${{ steps.newman.outcome }}\` |"
             echo "| Database ledger check | \`${{ steps.dbcheck.outcome }}\` |"
             echo "| System ledger assertion | \`${{ steps.systemledger.outcome }}\` |"
             echo "| End-of-day reconciliation | \`${{ steps.eod.outcome }}\` |"

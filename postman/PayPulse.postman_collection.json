@@ -1,0 +1,3271 @@
+{
+  "info": {
+    "name": "PayPulse API",
+    "description": "Every PayPulse REST endpoint (generated from `src/docs/openapi.js` by `npm run postman:build`). Interactive docs: /api-docs.\n\n**Start:** pick the **PayPulse (live)** or **PayPulse (local)** environment, then run the collection (Runner) or start with the **0. Setup** folder.\n\n- Empty `email`: Setup registers a new customer for you. Fill in your own `email` / `password` (an ADMIN account on the live server) to use that account.\n- Requests save what the next ones need (`token`, `mpin`, `transactionId`, `cardToken`, `loanId`...).\n- A collection script logs in again when needed, gets a fresh MPIN (valid 5 minutes) and spaces money requests 3.5 s apart (anti-spam: 3 per 10 s).\n- Play money only.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const env = pm.environment;",
+          "const OUTGOING = /^\\/api\\/(transfers(\\/bank)?|v1\\/bills\\/pay|v1\\/load\\/purchase|v1\\/cards\\/[^/]+\\/payments)$/;",
+          "const isPublic = pm.request.auth && pm.request.auth.type === 'noauth';",
+          "const raw = (pm.request.body && pm.request.body.raw) || '';",
+          "const send = (req) => new Promise((resolve, reject) => pm.sendRequest(req, (err, res) => (err ? reject(err) : resolve(res))));",
+          "const post = (p, body) => send({",
+          "  url: env.get('baseUrl') + p,",
+          "  method: 'POST',",
+          "  header: [{ key: 'Content-Type', value: 'application/json' }, { key: 'Authorization', value: `Bearer ${env.get('token')}` }],",
+          "  body: { mode: 'raw', raw: JSON.stringify(body) },",
+          "});",
+          "",
+          "(async () => {",
+          "  if (isPublic || !env.get('email')) return;",
+          "  if (!env.get('token') || Number(env.get('tokenExpiresAt') || 0) < Date.now()) {",
+          "    const res = await post('/api/auth/login', { email: env.get('email'), password: env.get('password') });",
+          "    if (res.code !== 200) throw new Error(`Auto-login failed (${res.code}): check email / password in the environment`);",
+          "    env.set('token', res.json().token);",
+          "    env.set('tokenExpiresAt', String(Date.now() + 55 * 60 * 1000));",
+          "  }",
+          "  // the MPIN is valid 5 minutes: get a new one (with the password) when it is missing or about to expire",
+          "  if (raw.includes('{{mpin}}') && Number(env.get('mpinExpiresAt') || 0) < Date.now() + 30000) {",
+          "    const res = await post('/api/accounts/me/mpin/reset', { password: env.get('password') });",
+          "    if (res.code !== 200) throw new Error(`MPIN reset failed (${res.code})`);",
+          "    env.set('mpin', res.json().mpin);",
+          "    env.set('mpinExpiresAt', String(Date.now() + res.json().mpinExpiresInSeconds * 1000));",
+          "  }",
+          "  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));",
+          "  // AML velocity rule: more than 5 outgoing payments in 60 s puts the account on hold",
+          "  if (OUTGOING.test(pm.request.url.getPath())) {",
+          "    const recent = JSON.parse(env.get('outgoingAt') || '[]').filter((t) => t > Date.now() - 61000);",
+          "    if (recent.length >= 5) {",
+          "      console.log(`AML velocity rule: waiting ${Math.ceil((recent[0] + 61000 - Date.now()) / 1000)} s`);",
+          "      await sleep(recent[0] + 61000 - Date.now());",
+          "    }",
+          "  }",
+          "  // anti-spam: at most 3 money moves per 10 seconds",
+          "  if (pm.request.headers.has('Idempotency-Key')) {",
+          "    const wait = Number(env.get('lastMoneyAt') || 0) + 3500 - Date.now();",
+          "    if (wait > 0) await sleep(wait);",
+          "    env.set('lastMoneyAt', String(Date.now()));",
+          "  }",
+          "})();"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const OUTGOING = /^\\/api\\/(transfers(\\/bank)?|v1\\/bills\\/pay|v1\\/load\\/purchase|v1\\/cards\\/[^/]+\\/payments)$/;",
+          "if (pm.response.code === 201 && OUTGOING.test(pm.request.url.getPath()) && pm.response.headers.get('Idempotent-Replayed') !== 'true') {",
+          "  const recent = JSON.parse(pm.environment.get('outgoingAt') || '[]').filter((t) => t > Date.now() - 61000);",
+          "  pm.environment.set('outgoingAt', JSON.stringify([...recent, Date.now()]));",
+          "}",
+          "",
+          "if (pm.response.code >= 400 && pm.response.code !== 404 && pm.response.headers.get('Content-Type')?.includes('json')) {",
+          "  pm.test('Error body: { error: { code, message } }', () => {",
+          "    const { error } = pm.response.json();",
+          "    pm.expect(error.code).to.be.a('string');",
+          "    pm.expect(error.message).to.be.a('string');",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Setup",
+      "description": "Run first. Registers a recipient (and you, when the environment has no email), logs in and adds ₱20,000 play money to your wallet.",
+      "item": [
+        {
+          "name": "Register the recipient (Bob)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('recipientEmail', `bob.${Date.now()}@paypulse.test`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.account?.accountNumber !== undefined) pm.environment.set('recipientAccount', String(body.account?.accountNumber));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{recipientEmail}}\",\n  \"password\": \"QaPassw0rd!\",\n  \"fullName\": \"Bob Recipient\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Register me (only when the environment has no email)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(!pm.environment.get('email'))) { console.log('Skipped: the environment already has an email: logging in with it'); pm.execution.skipRequest(); }",
+                  "pm.environment.set('newEmail', `me.${Date.now()}@paypulse.test`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('email', pm.environment.get('newEmail'));",
+                  "  pm.environment.set('password', 'QaPassw0rd!');",
+                  "  pm.environment.set('mpin', pm.response.json().mpin);",
+                  "  pm.environment.set('mpinExpiresAt', String(Date.now() + pm.response.json().mpinExpiresInSeconds * 1000));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{newEmail}}\",\n  \"password\": \"QaPassw0rd!\",\n  \"fullName\": \"Postman Tester\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Log in (saves the token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.token !== undefined) pm.environment.set('token', String(body.token));",
+                  "}",
+                  "pm.environment.set('tokenExpiresAt', String(Date.now() + 55 * 60 * 1000));",
+                  "pm.test('JWT returned', () => pm.expect(pm.response.json().token).to.match(/^ey/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "My account (saves accountNumber and role)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.accountNumber !== undefined) pm.environment.set('accountNumber', String(body.accountNumber));",
+                  "  if (body.role !== undefined) pm.environment.set('role', String(body.role));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Fund my wallet: signed payment webhook (needs webhookSecret)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('webhookSecret'))) { console.log('Skipped: no webhookSecret in the environment'); pm.execution.skipRequest(); }",
+                  "const body = JSON.stringify({ paymentId: `postman-${Date.now()}`, accountNumber: pm.environment.get('accountNumber'), amount: 20000, status: 'SUCCESS' });",
+                  "pm.request.body.raw = body;",
+                  "pm.request.headers.upsert({ key: 'X-PayPulse-Signature', value: require('crypto-js').HmacSHA256(body, pm.environment.get('webhookSecret')).toString() });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('Credited', () => pm.expect(pm.response.json().received).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"set by the pre-request script\": true }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/webhooks/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "payments"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Fund my wallet: Add money (ADMIN accounts)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('role') === 'ADMIN' && !pm.environment.get('webhookSecret'))) { console.log('Skipped: not an ADMIN account (or the webhook already funded the wallet)'); pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 20000,\n  \"outcome\": \"approve\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/payments/mock-checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "mock-checkout"
+              ]
+            },
+            "description": "Checks the top-up limits (₱1,000,000/day for admins, AML), then simulates the provider's signed callback through the same handler as the webhook.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. System",
+      "description": "",
+      "item": [
+        {
+          "name": "Health check (app + database)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('Database up', () => pm.expect(pm.response.json().database).to.eql('up'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Public feature flags for the web UI",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "config"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Accounts",
+      "description": "",
+      "item": [
+        {
+          "name": "My wallet: balance (from the ledger), KYC level, MPIN status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.balanceCents !== undefined) pm.environment.set('balanceBefore', String(body.balanceCents));",
+                  "}",
+                  "pm.test('Balance is a peso string', () => pm.expect(pm.response.json().balance).to.match(/^\\d+\\.\\d{2}$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "My AML status (CLEAR / UNDER_REVIEW), the rules and my alerts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me/compliance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me",
+                "compliance"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add or change my mobile number (for Express Send by mobile)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('mobileNumber', '0917' + String(Date.now()).slice(-7));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobileNumber\": \"{{mobileNumber}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me/mobile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me",
+                "mobile"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get a new MPIN (needs the password)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.mpin !== undefined) pm.environment.set('mpin', String(body.mpin));",
+                  "}",
+                  "if (pm.response.code === 200) pm.environment.set('mpinExpiresAt', String(Date.now() + pm.response.json().mpinExpiresInSeconds * 1000));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me/mpin/reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me",
+                "mpin",
+                "reset"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Change my MPIN",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('newMpin', String(Math.floor(Math.random() * 900000) + 100000).replace(/(\\d)\\1{2,}/g, '$1' + '7'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('mpin', pm.environment.get('newMpin'));",
+                  "  pm.environment.set('mpinExpiresAt', String(Date.now() + pm.response.json().mpinExpiresInSeconds * 1000));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentMpin\": \"{{mpin}}\",\n  \"newMpin\": \"{{newMpin}}\",\n  \"confirmMpin\": \"{{newMpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me/mpin/change",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me",
+                "mpin",
+                "change"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Transfers",
+      "description": "Express Send (PayPulse to PayPulse), OTP for amounts above ₱1,000, idempotent retries, Bank Transfer (InstaPay / PESONet).",
+      "item": [
+        {
+          "name": "Daily limit used / remaining and the anti-spam rule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers",
+                "limits"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Express Send ₱250 (saves transactionId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.transactionId !== undefined) pm.environment.set('transactionId', String(body.transactionId));",
+                  "}",
+                  "pm.test('Reference REF-YYYYMMDD-NNNN', () => pm.expect(pm.response.json().reference).to.match(/^REF-\\d{8}-\\d+$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"{{recipientAccount}}\",\n  \"amount\": 250,\n  \"description\": \"Lunch\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Express Send ₱1,500: answers 202 with an OTP challenge",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 202', () => pm.expect(pm.response.code).to.be.oneOf([202]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.challengeId !== undefined) pm.environment.set('otpChallengeId', String(body.challengeId));",
+                  "  if (body.demoCode !== undefined) pm.environment.set('otp', String(body.demoCode));",
+                  "}",
+                  "pm.test('OTP required', () => pm.expect(pm.response.json().otpRequired).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"{{recipientAccount}}\",\n  \"amount\": 1500,\n  \"description\": \"Rent share\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Express Send ₱1,500: confirm with the OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"{{recipientAccount}}\",\n  \"amount\": 1500,\n  \"description\": \"Rent share\",\n  \"mpin\": \"{{mpin}}\",\n  \"otpChallengeId\": \"{{otpChallengeId}}\",\n  \"otp\": \"{{otp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Idempotency: send ₱100 with a fixed key",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('idemKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.transactionId !== undefined) pm.environment.set('idemTransactionId', String(body.transactionId));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"{{recipientAccount}}\",\n  \"amount\": 100,\n  \"description\": \"Idempotency check\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Idempotency: retry with the same key (replayed, no second debit)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "pm.test('Idempotent-Replayed: true', () => pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('true'));",
+                  "pm.test('Same transaction as the first call', () => pm.expect(String(pm.response.json().transactionId)).to.eql(pm.environment.get('idemTransactionId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"{{recipientAccount}}\",\n  \"amount\": 100,\n  \"description\": \"Idempotency check\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Banks / e-wallets, rails and the bank transfer fee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers/banks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers",
+                "banks"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Bank Transfer ₱500 via InstaPay (saves bankTransactionId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.transactionId !== undefined) pm.environment.set('bankTransactionId', String(body.transactionId));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bankCode\": \"BDO\",\n  \"accountNumber\": \"001234567890\",\n  \"accountName\": \"Juan Dela Cruz\",\n  \"amount\": 500,\n  \"rail\": \"INSTAPAY\",\n  \"description\": \"Rent\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers/bank",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers",
+                "bank"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Bank Transfer ₱300 via PESONet (queued until the cut-off)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bankCode\": \"BPI\",\n  \"accountNumber\": \"9876543210\",\n  \"accountName\": \"Maria Santos\",\n  \"amount\": 300,\n  \"rail\": \"PESONET\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers/bank",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers",
+                "bank"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "My PESONet transfers (QUEUED / SETTLED) and the next cut-off",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers/pesonet",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers",
+                "pesonet"
+              ]
+            }
+          }
+        },
+        {
+          "name": "The pacs.008 message the payment switch sent for one of my bank transfers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('pacs.008', () => pm.expect(JSON.stringify(pm.response.json())).to.include('pacs.008'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers/bank/{{bankTransactionId}}/iso20022",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers",
+                "bank",
+                "{{bankTransactionId}}",
+                "iso20022"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. History, receipts and ISO 20022",
+      "description": "",
+      "item": [
+        {
+          "name": "My transaction history (newest first, paged)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('At most 5 rows', () => pm.expect(pm.response.json().transactions.length).to.be.at.most(5));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me/transactions?limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Receipt of one of my transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me/transactions/{{transactionId}}/receipt",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me",
+                "transactions",
+                "{{transactionId}}",
+                "receipt"
+              ]
+            }
+          }
+        },
+        {
+          "name": "ISO 20022 pacs.008 of the Express Send (JSON)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('pacs.008.001.08', () => pm.expect(pm.response.json().messageType).to.eql('pacs.008.001.08'));",
+                  "pm.test('XML included', () => pm.expect(pm.response.json().xml).to.include('<Document'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions/{{transactionId}}/iso20022",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "{{transactionId}}",
+                "iso20022"
+              ]
+            },
+            "description": "Bank transfers: the stored payment-switch message. Others: serialised from the double-entry ledger entries (debited wallet = debtor, fee = credit to SYS-FEE-INCOME, SttlmMtd INDA). Identifiers are derived from the transaction, so the message is always the same."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Bills",
+      "description": "",
+      "item": [
+        {
+          "name": "Bill categories, billers, convenience fee and today's cashback status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bills",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bills"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Pay a bill (₱5 cashback on bills of ₱100 or more, 3 a day)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.transactionId !== undefined) pm.environment.set('billTransactionId', String(body.transactionId));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"billerCode\": \"MERALCO\",\n  \"accountNumber\": \"1234567890\",\n  \"accountName\": \"Juan Dela Cruz\",\n  \"amount\": 500,\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bills/pay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bills",
+                "pay"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Load",
+      "description": "",
+      "item": [
+        {
+          "name": "Networks, brands, regular amounts, promos and today's cashback status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/load",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "load"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Detect the network of a mobile number",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('Globe', () => pm.expect(JSON.stringify(pm.response.json())).to.include('GLOBE'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/load/detect?mobile=09171234567",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "load",
+                "detect"
+              ],
+              "query": [
+                {
+                  "key": "mobile",
+                  "value": "09171234567"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Buy load: Globe ₱100 regular",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.transactionId !== undefined) pm.environment.set('loadTransactionId', String(body.transactionId));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobileNumber\": \"09171234567\",\n  \"brand\": \"GLOBE\",\n  \"productType\": \"REGULAR\",\n  \"amount\": 100,\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/load/purchase",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "load",
+                "purchase"
+              ]
+            },
+            "description": "The price is taken from the catalog (a promo's price), never from the client, before AML and the daily limit run.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Savings",
+      "description": "PayPulse Save vault (6.00% p.a.).",
+      "item": [
+        {
+          "name": "Vault balance, 6.00% rate, interest earned and activity",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/savings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "savings"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Move money from the wallet to the vault",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/savings/deposit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "savings",
+                "deposit"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Move money from the vault to the wallet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 200\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/savings/withdraw",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "savings",
+                "withdraw"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Loans",
+      "description": "One open loan at a time: on a second run \"Apply\" answers 409 and the open loan is used.",
+      "item": [
+        {
+          "name": "Quote: interest, total and monthly installment (nothing is booked)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5000,\n  \"termMonths\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/quote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "loans",
+                "quote"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Apply & disburse: credits the wallet immediately",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5000,\n  \"termMonths\": 3,\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "loans"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Credit line, rate, terms and my open loan with its schedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const loan = pm.response.json().activeLoan || pm.response.json().loan || pm.response.json().openLoan;",
+                  "if (loan) pm.environment.set('loanId', String(loan.id ?? loan.loanId));",
+                  "pm.test('An open loan', () => pm.expect(loan).to.be.an('object'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "loans"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Repay from the wallet (interest first, then principal)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500,\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loans/{{loanId}}/repay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "loans",
+                "{{loanId}}",
+                "repay"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Cards",
+      "description": "Virtual Visa: issue, view, reveal, pay, lock (payment refused), unlock.",
+      "item": [
+        {
+          "name": "Issue a tokenized virtual Visa card",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.token !== undefined) pm.environment.set('cardToken', String(body.token));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cards/generate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "generate"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "My virtual cards (token + masked PAN only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const cards = pm.response.json().cards;",
+                  "if (!pm.environment.get('cardToken') && cards.length) pm.environment.set('cardToken', cards[0].token);",
+                  "pm.test('PAN masked', () => cards.forEach((c) => pm.expect(JSON.stringify(c)).not.to.match(/\\d{16}/)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards"
+              ]
+            }
+          }
+        },
+        {
+          "name": "One card (masked)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cards/{{cardToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{cardToken}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Full PAN, expiry and CVV, for the cardholder only",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cards/{{cardToken}}/reveal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{cardToken}}",
+                "reveal"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Online purchase ₱150",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 150,\n  \"merchant\": \"Lazada\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cards/{{cardToken}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{cardToken}}",
+                "payments"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Lock the card (FROZEN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"FROZEN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cards/{{cardToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{cardToken}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Purchase with a locked card: 403 CARD_FROZEN",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.expect(pm.response.code).to.be.oneOf([403]));",
+                  "pm.test('CARD_FROZEN', () => pm.expect(pm.response.json().error.code).to.eql('CARD_FROZEN'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 150,\n  \"merchant\": \"Lazada\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cards/{{cardToken}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{cardToken}}",
+                "payments"
+              ]
+            },
+            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Unlock the card (ACTIVE, needs the MPIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cards/{{cardToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{cardToken}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. QR",
+      "description": "",
+      "item": [
+        {
+          "name": "My QR Ph code (\"Receive via QR\")",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/qr/me?amount=150",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qr",
+                "me"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "150"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Decode the recipient's account number",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('Recipient found', () => pm.expect(pm.response.json().accountNumber).to.eql(pm.environment.get('recipientAccount')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payload\": \"{{recipientAccount}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/qr/decode",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qr",
+                "decode"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Profile",
+      "description": "",
+      "item": [
+        {
+          "name": "KYC level and tiers, security preferences, linked accounts, support tickets",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profile"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Upgrade to KYC Level 2 (409 when already verified)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idType\": \"PHILSYS\",\n  \"idNumber\": \"PSN1234567890\",\n  \"birthDate\": \"1995-06-15\",\n  \"selfieConfirmed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profile/kyc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profile",
+                "kyc"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Link a bank account or card",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.id !== undefined) pm.environment.set('linkedAccountId', String(body.id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"BANK\",\n  \"bankCode\": \"BDO\",\n  \"accountNumber\": \"001234567890\",\n  \"holderName\": \"Postman Tester\",\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profile/linked-accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profile",
+                "linked-accounts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unlink a linked account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.expect(pm.response.code).to.be.oneOf([204]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profile/linked-accounts/{{linkedAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profile",
+                "linked-accounts",
+                "{{linkedAccountId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Security preferences (SMS 2FA on every send, biometric login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"smsTwoFactor\": false,\n  \"biometricLogin\": true,\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profile/security",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profile",
+                "security"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Open a support ticket",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"TRANSFER\",\n  \"subject\": \"Postman test ticket\",\n  \"message\": \"Opened from the Postman collection.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profile/support/tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profile",
+                "support",
+                "tickets"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Notifications",
+      "description": "",
+      "item": [
+        {
+          "name": "Notifications with unread counts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Mark notifications as read",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('Nothing unread', () => pm.expect(pm.response.json().unreadCount).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"all\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "read"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. Top-ups (ADMIN)",
+      "description": "Adding money is admin-only: a customer account gets 403.",
+      "item": [
+        {
+          "name": "How much can still be added today / held (ADMIN, MOCK_PAYMENTS=true)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const isAdmin = pm.environment.get('role') === 'ADMIN';",
+                  "pm.test(isAdmin ? 'Status 200 (admin)' : 'Status 403 (admin only)', () => pm.expect(pm.response.code).to.eql(isAdmin ? 200 : 403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/payments/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "limits"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "14. QA Sandbox (ADMIN)",
+      "description": "QA_SANDBOX servers only; admin-only (a customer gets 403). \"Reset\" is last: it sets your wallet to ₱100,000 and hides your history.",
+      "item": [
+        {
+          "name": "My QA switches and balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const isAdmin = pm.environment.get('role') === 'ADMIN';",
+                  "pm.test(isAdmin ? 'Status 200 (admin)' : 'Status 403 (admin only)', () => pm.expect(pm.response.code).to.eql(isAdmin ? 200 : 403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/qa/state",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qa",
+                "state"
+              ]
+            },
+            "description": "Available only when the server runs with `QA_SANDBOX=true`; ADMIN accounts only. Affects the caller's own account."
+          }
+        },
+        {
+          "name": "Turn every QA switch off",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const isAdmin = pm.environment.get('role') === 'ADMIN';",
+                  "pm.test(isAdmin ? 'Status 200 (admin)' : 'Status 403 (admin only)', () => pm.expect(pm.response.code).to.eql(isAdmin ? 200 : 403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slowNetwork\": false,\n  \"failNextTransaction\": false,\n  \"frozen\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/qa/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qa",
+                "settings"
+              ]
+            },
+            "description": "Available only when the server runs with `QA_SANDBOX=true`; ADMIN accounts only. Affects the caller's own account."
+          }
+        },
+        {
+          "name": "Settle my queued PESONet transfers now",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const isAdmin = pm.environment.get('role') === 'ADMIN';",
+                  "pm.test(isAdmin ? 'Status 200 (admin)' : 'Status 403 (admin only)', () => pm.expect(pm.response.code).to.eql(isAdmin ? 200 : 403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/qa/pesonet/run-cutoff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qa",
+                "pesonet",
+                "run-cutoff"
+              ]
+            },
+            "description": "Available only when the server runs with `QA_SANDBOX=true`; ADMIN accounts only. Affects the caller's own account."
+          }
+        },
+        {
+          "name": "Act as the compliance officer: close my alerts, release the hold",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const isAdmin = pm.environment.get('role') === 'ADMIN';",
+                  "pm.test(isAdmin ? 'Status 200 (admin)' : 'Status 403 (admin only)', () => pm.expect(pm.response.code).to.eql(isAdmin ? 200 : 403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/qa/compliance/clear",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qa",
+                "compliance",
+                "clear"
+              ]
+            },
+            "description": "Available only when the server runs with `QA_SANDBOX=true`; ADMIN accounts only. Affects the caller's own account."
+          }
+        },
+        {
+          "name": "Simulate N days (1-31) of savings interest",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const isAdmin = pm.environment.get('role') === 'ADMIN';",
+                  "pm.test(isAdmin ? 'Status 200 (admin)' : 'Status 403 (admin only)', () => pm.expect(pm.response.code).to.eql(isAdmin ? 200 : 403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"days\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/qa/savings/accrue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qa",
+                "savings",
+                "accrue"
+              ]
+            },
+            "description": "Available only when the server runs with `QA_SANDBOX=true`; ADMIN accounts only. Affects the caller's own account."
+          }
+        },
+        {
+          "name": "Reset my QA account (skipped unless runQaReset = true)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('runQaReset') === 'true')) { console.log('Skipped: set runQaReset = true in the environment to run it'); pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const isAdmin = pm.environment.get('role') === 'ADMIN';",
+                  "pm.test(isAdmin ? 'Status 200 (admin)' : 'Status 403 (admin only)', () => pm.expect(pm.response.code).to.eql(isAdmin ? 200 : 403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/qa/reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qa",
+                "reset"
+              ]
+            },
+            "description": "Available only when the server runs with `QA_SANDBOX=true`; ADMIN accounts only. Affects the caller's own account."
+          }
+        }
+      ]
+    },
+    {
+      "name": "15. Negative cases",
+      "description": "Requests that must be refused. Nothing is moved.",
+      "item": [
+        {
+          "name": "No token: 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.expect(pm.response.code).to.be.oneOf([401]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/accounts/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Negative amount: 400 INVALID_AMOUNT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.expect(pm.response.code).to.be.oneOf([400]));",
+                  "pm.test('INVALID_AMOUNT', () => pm.expect(pm.response.json().error.code).to.eql('INVALID_AMOUNT'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"{{recipientAccount}}\",\n  \"amount\": -5,\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Unknown recipient: 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.expect(pm.response.code).to.be.oneOf([404]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"PP9999999999\",\n  \"amount\": 10,\n  \"mpin\": \"{{mpin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Wrong MPIN: refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 or 401 or 403', () => pm.expect(pm.response.code).to.be.oneOf([400, 401, 403]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"{{recipientAccount}}\",\n  \"amount\": 10,\n  \"mpin\": \"000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "Wrong OTP: refused",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('badOtpChallenge', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.expect(pm.response.code).to.be.oneOf([403]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toAccountNumber\": \"{{recipientAccount}}\",\n  \"amount\": 1500,\n  \"mpin\": \"{{mpin}}\",\n  \"otpChallengeId\": \"{{badOtpChallenge}}\",\n  \"otp\": \"000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transfers"
+              ]
+            },
+            "description": "Guards in order: idempotency replay → frozen account (423) → QA forced error → AML hold (403) → daily limit / anti-spam (429). Above ₱1,000 the first call answers 202 with an OTP challenge.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "ISO 20022 of a transaction that is not mine: 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.expect(pm.response.code).to.be.oneOf([404]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions/999999999/iso20022",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "999999999",
+                "iso20022"
+              ]
+            },
+            "description": "Bank transfers: the stored payment-switch message. Others: serialised from the double-entry ledger entries (debited wallet = debtor, fee = credit to SYS-FEE-INCOME, SttlmMtd INDA). Identifiers are derived from the transaction, so the message is always the same."
+          }
+        }
+      ]
+    },
+    {
+      "name": "16. Auth (password reset)",
+      "description": "Run last: sets the same password again, so the environment keeps working.",
+      "item": [
+        {
+          "name": "Start a password reset (same answer for unknown emails)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.resetId !== undefined) pm.environment.set('resetId', String(body.resetId));",
+                  "  if (body.demoCode !== undefined) pm.environment.set('resetCode', String(body.demoCode));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/password/forgot",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password",
+                "forgot"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Finish a password reset with the emailed code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resetId\": \"{{resetId}}\",\n  \"code\": \"{{resetCode}}\",\n  \"newPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/password/reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password",
+                "reset"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
