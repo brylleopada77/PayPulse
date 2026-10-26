@@ -82,6 +82,7 @@ flowchart TB
 | Visual regression | `toHaveScreenshot` | 19 | The glassmorphic iOS dock and Home layout on iPhone SE, iPhone 15, Pixel 7, iPad mini and desktop, plus the dark glass theme |
 | Accessibility | `@axe-core/playwright` | 15 | WCAG 2.0 / 2.1 / 2.2 A + AA on login, Home, Send, Pay Bills, Buy Load, receipt + ISO inspector, notifications, profile, logout and the QA panel, in **light and dark**; keyboard-only login, dialog focus trap / focus return, ARIA tabs |
 | API contract | OpenAPI 3 + Playwright | 4 | Every Express route is documented at `/api-docs` and every documented operation exists; `$ref`s resolve; documented GETs answer with a documented status |
+| Postman collection | Postman / newman | 72 requests | Every endpoint chained end to end (register → fund → send, OTP, idempotent replay, bank, bills, load, savings, loan, cards, QR, profile, negative cases); ~100 assertions; generated from the OpenAPI document |
 | Load / concurrency | k6 1.3 | 2 | The overdraft race (expected to fail until fixed) and the idempotency guarantee (must pass) |
 | Accounting | Node + SQL | 3 | Debits = credits, total system cash = balances + fees + reserves (also run automatically after every Playwright run), GL control accounts vs. sub-ledgers at end of day |
 
@@ -189,7 +190,8 @@ flowchart LR
   D --> E[Playwright<br>API · E2E · chaos · visual<br>+ ledger invariant check]
   E --> F[k6 idempotency<br>gate]
   F --> G[k6 race<br>known bug]
-  G --> H[ledger + EOD<br>reconciliation]
+  G --> P[Postman collection<br>newman]
+  P --> H[ledger + EOD<br>reconciliation]
   H --> I[artifacts:<br>HTML report, videos,<br>k6 reports, logs]
   A --> J[Docker image<br>smoke test]
 ```
@@ -319,6 +321,7 @@ tests/resilience.spec.ts  chaos tests                 scripts/        ledger ass
 
 - **[QA_NOTES.md](QA_NOTES.md):** the race condition: root cause, reproduction, fix.
 - **Interactive API docs:** **`/api-docs`** on the running app (Swagger UI: Authorize with your JWT and *Try it out*), raw OpenAPI 3 at `/api-docs/openapi.json`. Live: https://paypulse-4cqi.onrender.com/api-docs
+- **Postman:** import [`postman/PayPulse.postman_collection.json`](postman/PayPulse.postman_collection.json) and an environment ([live](postman/PayPulse-live.postman_environment.json) or [local](postman/PayPulse-local.postman_environment.json)), then run **0. Setup** or the whole collection. With an empty `email` Setup registers a new customer; on the live server fill in your ADMIN account's `email` / `password` so Setup can add play money. Tokens, a fresh MPIN, transaction ids and pacing for the anti-spam / AML rules are handled by the collection's scripts. Regenerate after an API change with `npm run postman:build`; `npm run postman:test` runs it with newman.
 - **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md):** full API reference, business rules, error codes, chart of accounts, every feature in detail.
 
 ---
