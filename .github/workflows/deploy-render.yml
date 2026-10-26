@@ -1,0 +1,41 @@
+name: Deploy to Render
+
+# Every push to main (a merged PR) redeploys the public link on Render, then waits until it is live.
+# Needs the repository secret RENDER_API_KEY and the variable RENDER_SERVICE_ID
+# (Settings -> Secrets and variables -> Actions). PAYPULSE_URL is the health-checked public URL.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-render
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Trigger and wait for the Render deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE: ${{ vars.RENDER_SERVICE_ID }}
+          PAYPULSE_URL: ${{ vars.PAYPULSE_URL }}
+        run: |
+          api="https://api.render.com/v1/services/$SERVICE/deploys"
+          auth="Authorization: Bearer $RENDER_API_KEY"
+          id=$(curl -fsS -X POST "$api" -H "$auth" -H 'Content-Type: application/json' \
+            -d "{\"commitId\":\"$GITHUB_SHA\"}" | jq -r '.id // .deploy.id')
+          echo "deploy $id for $GITHUB_SHA"
+          for i in $(seq 1 90); do
+            status=$(curl -fsS "$api/$id" -H "$auth" | jq -r '.status // .deploy.status')
+            echo "$(date +%T) $status"
+            case "$status" in
+              live) break ;;
+              build_failed|update_failed|canceled|deactivated|pre_deploy_failed) exit 1 ;;
+            esac
+            sleep 10
+          done
+          [ "$status" = live ] || exit 1
+          curl -fsS --retry 6 --retry-delay 10 --retry-all-errors "$PAYPULSE_URL/health"
