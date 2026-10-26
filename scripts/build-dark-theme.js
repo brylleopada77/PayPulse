@@ -143,20 +143,20 @@ function emit(nodes, indent = '') {
 
 // ---------- hand-designed dark glass details (after the generated rules, so they win) ----------
 const DESIGNED = `
-/* ===== Designed: obsidian dark glass with the brand accent. Brand colours are theme tokens (top of styles.css), never literals here. ===== */
+/* ===== Designed: deep-navy dark glass with the brand accent. Brand colours are theme tokens (top of styles.css), never literals here. ===== */
 ${SCOPE} {
   color-scheme: dark;
   /* brand colours: see the dark tokens at the top of styles.css */
   --success: #3ddc97;
   --success-soft: rgba(14, 159, 110, 0.18);
-  --bg: #121212;
-  --surface: #1e1e1e;
+  --bg: #0a0f1a;
+  --surface: #131a28;
   --text: #ffffff;
   --muted: #94a3b8;
   --border: rgba(255, 255, 255, 0.10);
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   --accent-orange: #ff9f43;
-  /* Dark glass: rgba(18, 18, 18, 0.75) + blur, hairline highlight, deep ambient shadow */
+  /* Dark glass: rgba(10, 15, 26, 0.75) + blur, hairline highlight, deep ambient shadow */
   --glass-bg: rgba(255, 255, 255, 0.05);
   --glass-border: 1px solid rgba(255, 255, 255, 0.08);
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
@@ -167,11 +167,11 @@ ${SCOPE} body {
   background:
     radial-gradient(circle at 15% 5%, rgba(var(--accent-rgb), 0.08), transparent 40%),
     radial-gradient(circle at 90% 90%, rgba(var(--accent-rgb), 0.05), transparent 40%),
-    #121212;
+    #0a0f1a;
   background-attachment: fixed;
 }
 /* Dialogs: a darker glass sheet */
-${SCOPE} .sheet { background: #1e1e1e; color: var(--text); border: 1px solid rgba(255, 255, 255, 0.08); }
+${SCOPE} .sheet { background: #131a28; color: var(--text); border: 1px solid rgba(255, 255, 255, 0.08); }
 ${SCOPE} .sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
 /* White glowing text */
 ${SCOPE} .receipt-amount, ${SCOPE} .loan-owed strong, ${SCOPE} .assets-total,
@@ -179,7 +179,7 @@ ${SCOPE} .who-name, ${SCOPE} .product-amount, ${SCOPE} .activity-head-btn {
   color: #fff; text-shadow: 0 0 18px rgba(255, 255, 255, 0.28);
 }
 ${SCOPE} .sub-amount { color: #fff; text-shadow: 0 0 12px rgba(255, 255, 255, 0.2); }
-/* The indigo balance card keeps its gradient and white text on dark */
+/* The brand balance card keeps its gradient and white text on dark */
 ${SCOPE} .balance-card, ${SCOPE} .balance-card.glass-card {
   background: radial-gradient(circle at 105% -10%, rgba(255, 255, 255, 0.06) 0 30%, transparent 31%), var(--card-gradient);
   border: 1px solid rgba(var(--accent-rgb), 0.55);
@@ -188,7 +188,7 @@ ${SCOPE} .balance-card, ${SCOPE} .balance-card.glass-card {
 ${SCOPE} .balance-card .balance { color: #fff; text-shadow: 0 0 20px rgba(255, 255, 255, 0.3); }
 ${SCOPE} .balance-card .sub-label, ${SCOPE} .balance-card .label { color: rgba(255, 255, 255, 0.85); }
 ${SCOPE} .assets-pill, ${SCOPE} .assets-pill.glass-btn { background: rgba(255, 255, 255, 0.18); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
-/* Primary action: luminous indigo */
+/* Primary action: luminous brand blue */
 ${SCOPE} .btn.primary {
   background: var(--accent); color: var(--on-accent); border: 1px solid var(--accent);
   box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.35);
@@ -196,29 +196,29 @@ ${SCOPE} .btn.primary {
 ${SCOPE} .btn.primary:hover { background: var(--accent-hover); }
 ${SCOPE} .btn.primary:disabled { background: rgba(255, 255, 255, 0.06); color: #64748b; border-color: transparent; box-shadow: none; }
 ${SCOPE} .btn.secondary { background: var(--badge-neutral); color: var(--accent-ink); }
-/* Accents: indigo for links / selections / focus, orange for rewards */
+/* Accents: brand blue for links / selections / focus, cyan for rewards */
 ${SCOPE} .btn.link, ${SCOPE} .badge-action, ${SCOPE} .see-all { color: var(--accent-ink); }
 ${SCOPE} .notif-chip[aria-selected="true"], ${SCOPE} .term-picker input:checked + span, ${SCOPE} .segmented input:checked + span {
   border-color: var(--accent); background: rgba(var(--accent-rgb), 0.22); color: var(--accent-ink);
 }
 ${SCOPE} :focus-visible { outline-color: var(--accent-secondary) !important; }
-${SCOPE} #loan-amount { background: linear-gradient(to right, var(--accent) var(--fill), #2a2a2a var(--fill)); }
-${SCOPE} #loan-amount::-webkit-slider-thumb { background: #1e1e1e; border-color: var(--accent); }
+${SCOPE} #loan-amount { background: linear-gradient(to right, var(--accent) var(--fill), #1c2536 var(--fill)); }
+${SCOPE} #loan-amount::-webkit-slider-thumb { background: #131a28; border-color: var(--accent); }
 ${SCOPE} .meter-fill, ${SCOPE} .slot.used { background: linear-gradient(90deg, var(--accent), var(--accent-secondary)); }
 ${SCOPE} .cashback-banner, ${SCOPE} .cashback-stamp, ${SCOPE} .cashback-hint {
-  background: rgba(255, 159, 67, 0.14); color: #ffc58f; border-color: rgba(255, 159, 67, 0.55);
+  background: rgba(var(--accent-secondary-rgb), 0.12); color: #a5f0ff; border-color: rgba(var(--accent-secondary-rgb), 0.5);
 }
-${SCOPE} .live-toast.cashback .live-toast-icon, ${SCOPE} .tx.savings .tx-icon { background: rgba(255, 159, 67, 0.18); }
+${SCOPE} .live-toast.cashback .live-toast-icon, ${SCOPE} .tx.savings .tx-icon { background: rgba(var(--accent-secondary-rgb), 0.16); }
 ${SCOPE} .promo-text strong { color: #fff; text-shadow: 0 0 14px rgba(var(--accent-secondary-rgb), 0.45); }
-${SCOPE} .bell-dot, ${SCOPE} .chip-count { border-color: #121212; }
+${SCOPE} .bell-dot, ${SCOPE} .chip-count { border-color: #0a0f1a; }
 /* Glass dock and Scan & Pay */
 ${SCOPE} .bottom-nav.glass-dock {
-  background: linear-gradient(180deg, rgba(30, 30, 30, 0.88) 0%, rgba(18, 18, 18, 0.75) 100%);
+  background: linear-gradient(180deg, rgba(19, 26, 40, 0.88) 0%, rgba(10, 15, 26, 0.75) 100%);
   box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 0 1px rgba(var(--accent-rgb), 0.22);
 }
 ${SCOPE} .glass-dock .scan-bubble, ${SCOPE} .scan-bubble {
   background: var(--scan-gradient);
-  border: 4px solid #121212;
+  border: 4px solid #0a0f1a;
   color: var(--on-accent);
   box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.7), 0 10px 26px rgba(var(--accent-rgb), 0.30), 0 0 30px rgba(var(--accent-rgb), 0.35);
 }
@@ -228,9 +228,9 @@ ${SCOPE} .glass-dock .nav-item.active svg, ${SCOPE} .glass-dock .nav-item.active
 ${SCOPE} .glass-dock .nav-item:not(.nav-scan):hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.10); }
 /* Form fields */
 ${SCOPE} .form input, ${SCOPE} .form select, ${SCOPE} .form textarea, ${SCOPE} .chat-input input,
-${SCOPE} .card-pay select, ${SCOPE} .card-pay input { background: #171717; color: var(--text); border-color: rgba(255, 255, 255, 0.12); }
+${SCOPE} .card-pay select, ${SCOPE} .card-pay input { background: #0f1522; color: var(--text); border-color: rgba(255, 255, 255, 0.12); }
 ${SCOPE} .form input::placeholder, ${SCOPE} .form textarea::placeholder { color: #64748b; }
-/* Quick action icons: dark discs with an indigo glyph and glow */
+/* Quick action icons: dark discs with a brand glyph and glow */
 ${SCOPE} .quick-icon { background: rgba(255, 255, 255, 0.06); color: var(--accent); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10); }
 ${SCOPE} .quick:hover .quick-icon { background: rgba(var(--accent-rgb), 0.12); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45), 0 0 16px rgba(var(--accent-rgb), 0.35); }
 ${SCOPE} .quick:active .quick-icon { background: var(--accent); color: var(--on-accent); }

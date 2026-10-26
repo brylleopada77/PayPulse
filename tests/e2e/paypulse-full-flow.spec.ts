@@ -134,12 +134,12 @@ test.describe('PayPulse full flow', () => {
 test.describe('Appearance (iOS dark glass)', () => {
   test.use({ colorScheme: 'dark' });
 
-  test('Light (Sunset Orange) is the default even on a dark device; Dark is remembered; Auto follows the device', async ({ page, request }) => {
+  test('Light (Royal Blue) is the default even on a dark device; Dark is remembered; Auto follows the device', async ({ page, request }) => {
     const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
     await login(page, await createUser(request, 'Theme Tester'));
-    expect(await theme()).toBe('light'); // default look: Sunset Orange
+    expect(await theme()).toBe('light'); // default look: Royal Blue
     await expect(page.getByTestId('profile-dialog')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-    await expect(page.getByTestId('savings-rate')).toHaveCSS('background-color', 'rgb(255, 179, 0)'); // amber rate badge
+    await expect(page.getByTestId('savings-rate')).toHaveCSS('background-color', 'rgb(0, 82, 255)'); // solid blue rate badge
 
     await page.getByTestId('open-profile').click();
     const appearance = page.getByTestId('menu-appearance');
@@ -153,7 +153,7 @@ test.describe('Appearance (iOS dark glass)', () => {
     expect(await theme()).toBe('dark'); // remembered on this device
 
     await page.getByTestId('open-profile').click();
-    await expect(page.getByTestId('balance')).toHaveCSS('color', 'rgb(255, 255, 255)'); // white balance on the orange card
+    await expect(page.getByTestId('balance')).toHaveCSS('color', 'rgb(255, 255, 255)'); // white balance on the blue card
 
     await page.getByTestId('menu-appearance').getByText('Auto').click();
     await page.emulateMedia({ colorScheme: 'light' }); // the device switches to light
