@@ -45,6 +45,14 @@ export default defineConfig({
       },
     },
     {
+      // Accessibility: axe-core WCAG 2.2 AA scans of every screen and dialog (light + dark) and
+      // keyboard checks, in the installed Google Chrome.
+      name: 'a11y',
+      testDir: './tests/a11y',
+      timeout: 60_000,
+      use: { channel: 'chrome', viewport: { width: 390, height: 844 }, trace: 'retain-on-failure' },
+    },
+    {
       // Visual regression of the glass dock across viewports (baselines per OS, see the spec).
       name: 'visual',
       testDir: './tests/visual',

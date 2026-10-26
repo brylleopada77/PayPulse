@@ -1,5 +1,6 @@
 const path = require('path');
 const express = require('express');
+const swaggerUi = require('swagger-ui-express');
 const config = require('./config');
 const { pool } = require('./db/pool');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
@@ -20,6 +21,7 @@ const notificationsV1Routes = require('./routes/v1/notifications');
 const loadV1Routes = require('./routes/v1/load');
 const transactionsV1Routes = require('./routes/v1/transactions');
 const { chaos } = require('./middleware/chaos');
+const openapi = require('./docs/openapi');
 
 const app = express();
 
@@ -76,6 +78,17 @@ app.use('/api/v1/transactions', transactionsV1Routes);
 if (config.qaSandbox) {
   app.use('/api/qa', qaRoutes);
 }
+
+// Interactive API documentation (Swagger UI) and the raw OpenAPI 3 document
+app.get('/api-docs/openapi.json', (req, res) => res.json(openapi));
+app.use(
+  '/api-docs',
+  swaggerUi.serve,
+  swaggerUi.setup(openapi, {
+    customSiteTitle: 'PayPulse API docs',
+    swaggerOptions: { persistAuthorization: true, displayRequestDuration: true, tryItOutEnabled: true },
+  }),
+);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

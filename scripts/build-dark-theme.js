@@ -42,6 +42,7 @@ const LINE = {
   '#c9cce0': 'rgba(255, 255, 255, 0.18)',
 };
 
+const ALWAYS_DARK = /\.(qa-(fab|panel|head|badge|note|primary|select|more|status|actions)|chaos-)/;
 const HEX = /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|\bwhite\b/g;
 const RGBA = /rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\s*\)/g;
 const round = (n) => Math.round(n * 100) / 100;
@@ -129,6 +130,9 @@ function emit(nodes, indent = '') {
       if (inner.trim()) out += `${indent}${n.at} {\n${inner}${indent}}\n`;
       continue;
     }
+    // The QA Sandbox panel and the Chaos Engine are dark by design in both themes: leave them alone
+    // (translating them turned the panel's dark ink into light ink on its amber buttons).
+    if (ALWAYS_DARK.test(n.selector)) continue;
     const changed = declarations(n.body)
       .filter(([prop, value]) => !prop.startsWith('--') && !value.includes('url('))
       .map(([prop, value]) => [prop, translate(prop, value)])

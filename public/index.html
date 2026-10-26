@@ -196,7 +196,7 @@
           </section>
 
           <!-- Right bottom: Instant Loan (₱50,000 credit line) -->
-          <button type="button" class="product product-button glass-card" id="loan-open" aria-label="Instant Loan" data-testid="loan-open">
+          <button type="button" class="product product-button glass-card" id="loan-open" data-testid="loan-open">
             <span class="product-title">
               <span class="product-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5c-.5-1-1.5-1.5-2.5-1.5-1.4 0-2.5.8-2.5 2s1.1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-2-.5-2.5-1.5M12 6.5V8m0 8v1.5"/></svg>
@@ -456,7 +456,7 @@
         <div class="brand-chips" id="load-all-brands" role="radiogroup" aria-label="All brands"></div>
       </details>
 
-      <div class="segmented" role="tablist" aria-label="Product type" id="load-tabs">
+      <div class="segmented" role="radiogroup" aria-label="Product type" id="load-tabs">
         <label><input type="radio" name="productType" value="REGULAR" checked data-testid="load-tab-regular"><span>Regular Load</span></label>
         <label><input type="radio" name="productType" value="PROMO" data-testid="load-tab-promo"><span>Data &amp; Promo Packages</span></label>
       </div>
@@ -1002,7 +1002,7 @@
         <button type="button" class="btn primary" id="iso-done" data-testid="iso-done">Done</button>
       </div>
     </section>
-    <div class="receipt-body" id="receipt-body" role="tabpanel" aria-labelledby="receipt-tab-receipt">
+    <div class="receipt-body" id="receipt-body" role="tabpanel" aria-labelledby="receipt-tab-receipt" data-testid="receipt-body">
       <div class="receipt-ref">
         <span>Reference No.</span>
         <strong id="receipt-ref" data-testid="receipt-ref"></strong>
