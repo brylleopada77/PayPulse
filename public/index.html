@@ -985,7 +985,24 @@
       <p class="receipt-amount" id="receipt-amount" data-testid="receipt-amount"></p>
       <p class="receipt-date" id="receipt-date" data-testid="receipt-date"></p>
     </div>
-    <div class="receipt-body">
+    <div class="receipt-tabs" role="tablist" aria-label="Receipt views" id="receipt-tabs" data-testid="receipt-tabs" hidden>
+      <button type="button" role="tab" id="receipt-tab-receipt" aria-controls="receipt-body" aria-selected="true" data-testid="receipt-tab-receipt">Receipt</button>
+      <button type="button" role="tab" id="receipt-tab-iso" aria-controls="iso-inspector" aria-selected="false" tabindex="-1" data-testid="receipt-tab-iso">ISO 20022</button>
+    </div>
+    <section class="iso-inspector" id="iso-inspector" role="tabpanel" aria-labelledby="receipt-tab-iso" data-testid="iso-inspector" hidden>
+      <header class="iso-head">
+        <strong>ISO 20022 Message Inspector</strong>
+        <small id="iso-meta" data-testid="iso-meta">pacs.008.001.08</small>
+      </header>
+      <dl class="iso-ids" id="iso-ids" data-testid="iso-ids"></dl>
+      <pre class="iso-xml" tabindex="0" aria-label="pacs.008 XML payload"><code id="iso-xml" data-testid="iso-xml"></code></pre>
+      <p class="form-error" id="iso-error" role="alert" data-testid="iso-error"></p>
+      <div class="receipt-actions">
+        <button type="button" class="btn secondary" id="iso-copy" data-testid="iso-copy">Copy Payload</button>
+        <button type="button" class="btn primary" id="iso-done" data-testid="iso-done">Done</button>
+      </div>
+    </section>
+    <div class="receipt-body" id="receipt-body" role="tabpanel" aria-labelledby="receipt-tab-receipt">
       <div class="receipt-ref">
         <span>Reference No.</span>
         <strong id="receipt-ref" data-testid="receipt-ref"></strong>
@@ -993,7 +1010,6 @@
       <p class="cashback-stamp" id="receipt-cashback" data-testid="receipt-cashback" hidden></p>
       <dl class="review receipt-rows" id="receipt-rows" data-testid="receipt-rows"></dl>
       <p class="receipt-note">PayPulse demo receipt. Amounts are play money.</p>
-      <button type="button" class="btn link" id="receipt-iso" data-testid="receipt-iso" hidden>View ISO 20022 message (pacs.008)</button>
       <div class="receipt-actions">
         <button type="button" class="btn secondary" id="receipt-download" data-testid="receipt-download">Download / Save Receipt</button>
         <button type="button" class="btn primary" id="receipt-done" data-testid="receipt-done">Done</button>
@@ -1162,10 +1178,21 @@
       Reset DB State
       <small>Wallet ₱100,000 · savings ₱0 · open loan written off · activity cleared</small>
     </button>
-    <label class="switch">
-      <input type="checkbox" id="qa-slow" data-testid="qa-slow">
-      <span><strong>Simulate 3s Network Latency</strong><small>Every API call (Express Send included) waits 3 seconds</small></span>
-    </label>
+    <section class="chaos-engine" aria-labelledby="chaos-engine-title" data-testid="chaos-engine">
+      <header class="chaos-head">
+        <span class="chaos-icon" aria-hidden="true">🎛️</span>
+        <strong id="chaos-engine-title">Chaos Engine</strong>
+        <span class="chaos-live" id="chaos-live" data-testid="chaos-live" hidden>LIVE</span>
+      </header>
+      <label class="switch chaos-switch">
+        <input type="checkbox" id="qa-slow" data-testid="qa-slow">
+        <span><strong>Simulate 3s Network Latency</strong><small>Every API call (Express Send included) waits 3 seconds</small></span>
+      </label>
+      <label class="switch chaos-switch">
+        <input type="checkbox" id="qa-fault" data-testid="qa-fault">
+        <span><strong>Fault Injection: random HTTP 500</strong><small>20% of transfers and payments fail before they run; the app retries them safely</small></span>
+      </label>
+    </section>
     <label class="switch">
       <input type="checkbox" id="qa-fail" data-testid="qa-fail">
       <span><strong>Trigger HTTP 500 Error</strong><small>The next transfer, top-up, savings move or loan fails with 500 and no money moves</small></span>

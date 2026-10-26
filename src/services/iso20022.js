@@ -32,7 +32,9 @@ function newIdentifiers(createdAt) {
  * @param {string} p.uetr           PmtId/UETR
  * @param {string} p.instructionId  PmtId/InstrId (our bank reference, BT-...)
  * @param {string} p.endToEndId     PmtId/EndToEndId (our transaction reference, REF-...)
- * @param {string} p.rail           'INSTAPAY' | 'PESONET' (clearing system)
+ * @param {string} [p.rail]        'INSTAPAY' | 'PESONET' (clearing system); omitted for an on-us
+ *                                  book transfer inside PayPulse (settled on our books: INDA)
+ * @param {string} [p.localInstrument] PmtTpInf/LclInstrm/Prtry (default 'CTR')
  * @param {Date}   p.createdAt
  * @param {Date}   p.settlementDate interbank settlement date (PESONet: the batch date)
  * @param {number} p.amountCents    amount the creditor receives
@@ -50,10 +52,7 @@ function buildPacs008(p) {
         NbOfTxs: '1',
         TtlIntrBkSttlmAmt: amount(p.amountCents),
         IntrBkSttlmDt: isoDate(p.settlementDate),
-        SttlmInf: {
-          SttlmMtd: 'CLRG',
-          ClrSys: { Prtry: p.rail },
-        },
+        SttlmInf: p.rail ? { SttlmMtd: 'CLRG', ClrSys: { Prtry: p.rail } } : { SttlmMtd: 'INDA' },
         InstgAgt: { FinInstnId: { BICFI: PAYPULSE_BIC } },
         InstdAgt: { FinInstnId: { BICFI: p.creditor.bic } },
       },
@@ -64,8 +63,8 @@ function buildPacs008(p) {
           UETR: p.uetr,
         },
         PmtTpInf: {
-          SvcLvl: { Prtry: p.rail },
-          LclInstrm: { Prtry: 'CTR' },
+          ...(p.rail && { SvcLvl: { Prtry: p.rail } }),
+          LclInstrm: { Prtry: p.localInstrument ?? 'CTR' },
         },
         IntrBkSttlmAmt: amount(p.amountCents),
         ChrgBr: 'DEBT',

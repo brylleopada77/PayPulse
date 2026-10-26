@@ -16,6 +16,8 @@
   // ---------- API helper ----------
 
   const CHAOS_KEY = 'paypulse.chaos';
+  const CHAOS_FAULT_KEY = 'paypulse.chaos.fault'; // Chaos Engine fault injection: 'on' | 'off'
+  const CHAOS_FAULT_RATE = '0.2';
   const MAX_RETRIES = 3;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -25,8 +27,19 @@
     return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
   }
 
-  /** QA Sandbox "Chaos mode": extra x-chaos-* headers for every API call (dev servers only). */
-  function chaosHeaders() {
+  const faultInjectionOn = () => {
+    try { return localStorage.getItem(CHAOS_FAULT_KEY) === 'on'; } catch { return false; }
+  };
+
+  /**
+   * QA Sandbox chaos: extra x-chaos-* headers for API calls (dev servers only). Chaos Engine fault
+   * injection asks for a random HTTP 500 on 20% of POSTs (the server applies it only to transfers
+   * and payments); otherwise the "Chaos mode" picker applies to every call.
+   */
+  function chaosHeaders(method) {
+    if (method === 'POST' && faultInjectionOn()) {
+      return { 'x-chaos-mode': 'true', 'x-chaos-fault': 'error-500', 'x-chaos-rate': CHAOS_FAULT_RATE };
+    }
     let mode = 'off';
     try { mode = localStorage.getItem(CHAOS_KEY) || 'off'; } catch { /* storage unavailable */ }
     switch (mode) {
@@ -40,7 +53,7 @@
 
   /** One HTTP call. Throws an Error with .status/.code/.details (status 0 + .network on no connection). */
   async function apiOnce(path, { method, body, idempotencyKey }) {
-    const headers = { 'Content-Type': 'application/json', ...chaosHeaders() };
+    const headers = { 'Content-Type': 'application/json', ...chaosHeaders(method) };
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
@@ -76,7 +89,10 @@
     return { ...data, httpStatus: res.status, replayed: res.headers.get('Idempotent-Replayed') === 'true' };
   }
 
-  const isTransient = (err) => err.network || err.status === 502 || err.status === 503 || err.status === 504;
+  // Chaos Engine 500s are injected BEFORE the request runs (no money moved), so they are safe to retry.
+  const isChaosFault = (err) => err.code === 'CHAOS_FAULT_INJECTED';
+  const isTransient = (err) =>
+    err.network || err.status === 502 || err.status === 503 || err.status === 504 || isChaosFault(err);
 
   /**
    * API call with automatic retries for temporary failures (503 / no connection): up to 3 retries
@@ -85,20 +101,30 @@
    */
   async function api(path, { method = 'GET', body, idempotencyKey } = {}) {
     const canRetry = method === 'GET' || Boolean(idempotencyKey);
+    let lastFaultWasChaos = false;
     for (let attempt = 1; ; attempt += 1) {
       try {
         const result = await apiOnce(path, { method, body, idempotencyKey });
-        if (attempt > 1 && method !== 'GET') toast('Connection restored. Done.', 'success');
+        if (attempt > 1 && method !== 'GET') {
+          toast(lastFaultWasChaos ? '✅ Chaos Engine: recovered. Transaction completed once.' : 'Connection restored. Done.', 'success');
+        }
         return result;
       } catch (err) {
+        lastFaultWasChaos = isChaosFault(err);
         if (!isTransient(err) || !canRetry || attempt > MAX_RETRIES) {
-          if (isTransient(err)) {
+          if (isChaosFault(err)) {
+            err.message = 'Chaos Engine: the server kept failing, so nothing was sent. No money moved. Please try again.';
+          } else if (isTransient(err)) {
             err.code = err.code || 'SERVICE_UNAVAILABLE';
             err.unconfirmed = method !== 'GET'; // a POST may or may not have gone through
           }
           throw err;
         }
-        toast(`Connection problem. Retrying (${attempt}/${MAX_RETRIES})…`, 'warn');
+        if (isChaosFault(err)) {
+          toast(`⚠️ Chaos Engine: Server Fault Injected. Retrying transaction… (${attempt}/${MAX_RETRIES})`, 'chaos');
+        } else {
+          toast(`Connection problem. Retrying (${attempt}/${MAX_RETRIES})…`, 'warn');
+        }
         await sleep(600 * 2 ** (attempt - 1));
       }
     }
@@ -3319,9 +3345,20 @@
     $('#qa-fail').checked = state.failNextTransaction;
     $('#qa-freeze').checked = state.frozen;
     const chaos = $('#qa-chaos').value !== 'off';
-    qaFab.classList.toggle('active', state.slowNetwork || state.failNextTransaction || state.frozen || chaos);
+    $('#qa-fault').checked = faultInjectionOn();
+    $('#chaos-live').hidden = !(state.slowNetwork || faultInjectionOn());
+    qaFab.classList.toggle('active', state.slowNetwork || state.failNextTransaction || state.frozen || chaos || faultInjectionOn());
     return state;
   }
+
+  // Chaos Engine fault injection is a browser-side setting too (x-chaos-* headers on POSTs).
+  $('#qa-fault').addEventListener('change', (event) => {
+    try { localStorage.setItem(CHAOS_FAULT_KEY, event.target.checked ? 'on' : 'off'); } catch { /* not remembered */ }
+    qaStatus(event.target.checked
+      ? 'Chaos Engine: 20% of transfers and payments will fail with HTTP 500 (and be retried)'
+      : 'Chaos Engine: fault injection off');
+    refreshQaState().catch(() => {});
+  });
 
   // Chaos mode is a browser-side setting: it adds x-chaos-* headers to every API call.
   try { $('#qa-chaos').value = localStorage.getItem(CHAOS_KEY) || 'off'; } catch { /* storage unavailable */ }
@@ -3366,6 +3403,7 @@
       try {
         await api('/api/qa/settings', { method: 'PUT', body: { [setting]: on } });
         qaStatus(`${label}: ${on ? 'ON' : 'off'}`);
+        refreshQaState().catch(() => {});
         await loadWallet();
       } catch (err) {
         event.target.checked = !on;
@@ -3496,7 +3534,11 @@
           Object.assign(document.createElement('dd'), { textContent: value, className: isTotal ? 'total' : '' }),
         ]),
       );
-      $('#receipt-iso').hidden = !(r.iso20022 && r.direction === 'SENT');
+      // ISO 20022 tab: transfers, bills and load (bank transfers once the switch has sent the message)
+      const hasIso = ISO_TYPES.has(r.type) && (r.type !== 'BANK_TRANSFER' || Boolean(r.iso20022));
+      $('#receipt-tabs').hidden = !hasIso;
+      isoMessage = null;
+      showReceiptTab('receipt');
       $('#receipt-cashback').hidden = !r.cashback;
       $('#receipt-cashback').textContent = r.cashback ? `🎁 Cashback Earned: ${money(r.cashback)}` : '';
       if (!receiptDialog.open) receiptDialog.showModal();
@@ -3507,21 +3549,81 @@
 
   $('#receipt-done').addEventListener('click', () => receiptDialog.close());
 
-  // Open the outbound ISO 20022 pacs.008 XML in a new tab (for QA / ops inspection).
-  $('#receipt-iso').addEventListener('click', async () => {
-    if (!currentReceipt) return;
-    const tab = window.open('', '_blank');
+  // ---------- ISO 20022 Message Inspector (receipt tab) ----------
+
+  const ISO_TYPES = new Set(['TRANSFER', 'BILL_PAYMENT', 'LOAD_PURCHASE', 'BANK_TRANSFER']);
+  let isoMessage = null; // the loaded message of the receipt on screen
+
+  function showReceiptTab(which) {
+    const iso = which === 'iso';
+    for (const [tab, selected] of [[$('#receipt-tab-receipt'), !iso], [$('#receipt-tab-iso'), iso]]) {
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    }
+    $('#receipt-body').hidden = iso;
+    $('#iso-inspector').hidden = !iso;
+    if (iso && !isoMessage) loadIsoMessage();
+  }
+
+  async function loadIsoMessage() {
+    const transactionId = currentReceipt?.transactionId;
+    $('#iso-error').textContent = '';
+    $('#iso-xml').replaceChildren('Loading pacs.008 message…');
+    $('#iso-ids').replaceChildren();
     try {
-      const res = await fetch(`/api/transfers/bank/${currentReceipt.transactionId}/iso20022?format=xml`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const xml = await res.text();
-      const url = URL.createObjectURL(new Blob([xml], { type: 'text/plain;charset=utf-8' }));
-      if (tab) tab.location.href = url;
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const m = await api(`/api/v1/transactions/${transactionId}/iso20022`);
+      if (currentReceipt?.transactionId !== transactionId) return; // another receipt was opened meanwhile
+      isoMessage = m;
+      $('#iso-meta').textContent = `${m.messageType} · ${m.source === 'PAYMENT_SWITCH' ? 'sent by the payment switch' : 'built from the ledger'}`;
+      $('#iso-ids').replaceChildren(
+        ...[['MsgId', m.msgId], ['EndToEndId', m.endToEndId], ['UETR', m.uetr], ['Settlement', `${m.rail} · ${m.status}`]]
+          .flatMap(([label, value]) => [
+            Object.assign(document.createElement('dt'), { textContent: label }),
+            Object.assign(document.createElement('dd'), { textContent: value ?? '—' }),
+          ]),
+      );
+      $('#iso-xml').replaceChildren(...highlightXml(m.xml));
+    } catch (err) {
+      $('#iso-xml').replaceChildren();
+      $('#iso-error').textContent = err.message || 'Could not load the ISO 20022 message.';
+    }
+  }
+
+  /** XML -> syntax-highlighted nodes (text nodes only, never innerHTML, so payload text can't inject markup). */
+  function highlightXml(xml) {
+    const span = (cls, text) => Object.assign(document.createElement('span'), { className: `x-${cls}`, textContent: text });
+    const nodes = [];
+    const token = /(<\?[^?]*\?>)|(<\/?)([\w:.-]+)((?:\s+[\w:.-]+="[^"]*")*)(\s*\/?>)|([^<]+)/g;
+    for (const [, decl, open, name, attrs, close, text] of xml.matchAll(token)) {
+      if (decl) nodes.push(span('decl', decl));
+      else if (name) {
+        nodes.push(span('punct', open), span('tag', name));
+        for (const [, space, attr, value] of attrs.matchAll(/(\s+)([\w:.-]+)=("[^"]*")/g)) {
+          nodes.push(space, span('attr', attr), span('punct', '='), span('value', value));
+        }
+        nodes.push(span('punct', close));
+      } else if (text) nodes.push(text.trim() ? span('text', text) : text);
+    }
+    return nodes;
+  }
+
+  $('#receipt-tab-receipt').addEventListener('click', () => showReceiptTab('receipt'));
+  $('#receipt-tab-iso').addEventListener('click', () => showReceiptTab('iso'));
+  $('#receipt-tabs').addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    const next = $('#receipt-tab-iso').getAttribute('aria-selected') === 'true' ? 'receipt' : 'iso';
+    showReceiptTab(next);
+    $(next === 'iso' ? '#receipt-tab-iso' : '#receipt-tab-receipt').focus();
+  });
+  $('#iso-done').addEventListener('click', () => receiptDialog.close());
+
+  $('#iso-copy').addEventListener('click', async () => {
+    if (!isoMessage) return;
+    try {
+      await navigator.clipboard.writeText(isoMessage.xml);
+      toast('pacs.008 payload copied to the clipboard', 'success');
     } catch {
-      tab?.close();
-      toast('Could not load the ISO 20022 message.', 'error');
+      toast('Could not copy. Select the XML and copy it manually.', 'error');
     }
   });
 
