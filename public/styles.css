@@ -123,19 +123,19 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .pp-logo.sm { --pp-size: 24px; }
 .pp-logo.md { --pp-size: 36px; }
 .pp-logo.lg { --pp-size: 48px; }
-.pp-mark { width: var(--pp-size); height: var(--pp-size); flex: none; filter: drop-shadow(0 3px 8px rgba(255, 61, 0, 0.28)); }
+.pp-mark { width: var(--pp-size); height: var(--pp-size); flex: none; filter: drop-shadow(0 3px 8px rgba(var(--accent-deep-rgb), 0.28)); }
 /* the logo keeps its own colours: no icon stroke inherited into the symbol (.app-shell svg) */
 .app-shell svg.pp-mark, svg.pp-mark, svg.receipt-watermark { fill: none; stroke: none; }
 .pp-wordmark { font-weight: 800; font-size: calc(var(--pp-size) * 0.56); letter-spacing: -0.03em; color: var(--text); line-height: 1; }
 
-/* App loading screen: the pulse line draws itself and the amber dot beats */
+/* App loading screen: the pulse line draws itself and the cyan dot beats */
 .boot-loader {
   position: fixed; inset: 0; z-index: 100;
   display: grid; place-content: center; justify-items: center; gap: 14px;
   background: var(--bg); transition: opacity 0.25s ease, visibility 0.25s;
 }
 .boot-loader.done { opacity: 0; visibility: hidden; pointer-events: none; }
-.boot-mark { width: 88px; height: 88px; filter: drop-shadow(0 8px 22px rgba(255, 61, 0, 0.32)); }
+.boot-mark { width: 88px; height: 88px; filter: drop-shadow(0 8px 22px rgba(var(--accent-deep-rgb), 0.32)); }
 .boot-pulse { stroke-dasharray: 100; animation: boot-draw 1.4s ease-in-out infinite; }
 .boot-dot { transform-box: fill-box; transform-origin: center; animation: boot-beat 1.4s ease-in-out infinite; }
 .boot-text { color: var(--muted); font-size: 0.9rem; font-weight: 600; }
