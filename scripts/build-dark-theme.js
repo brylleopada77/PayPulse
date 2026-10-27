@@ -213,6 +213,8 @@ ${SCOPE} .cashback-banner, ${SCOPE} .cashback-stamp, ${SCOPE} .cashback-hint {
   background: rgba(var(--accent-secondary-rgb), 0.12); color: #a5f0ff; border-color: rgba(var(--accent-secondary-rgb), 0.5);
 }
 ${SCOPE} .live-toast.cashback .live-toast-icon, ${SCOPE} .tx.savings .tx-icon { background: rgba(var(--accent-secondary-rgb), 0.16); }
+/* --text is white here, so the plain toast (var(--text) background) would be white on white */
+${SCOPE} .toast:not(.error):not(.chaos):not(.success):not(.warn) { background: #1e2738; border: 1px solid rgba(255, 255, 255, 0.14); }
 ${SCOPE} .promo-text strong { color: #fff; text-shadow: 0 0 14px rgba(var(--accent-secondary-rgb), 0.45); }
 ${SCOPE} .bell-dot, ${SCOPE} .chip-count { border-color: #0a0f1a; }
 /* Glass dock and Scan & Pay */

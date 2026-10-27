@@ -846,10 +846,6 @@ button.tx:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px;
   box-shadow: 0 10px 30px rgba(255, 87, 34, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .toast.success { background: var(--success); }
-/* In the dark theme --text is white: keep the plain toast a dark pill with white text */
-:root[data-theme="dark"] .toast:not(.error):not(.chaos):not(.success):not(.warn) {
-  background: #1e2738; border: 1px solid rgba(255, 255, 255, 0.14);
-}
 
 /* Balance refresh: the PayPulse mark pulsing where the toast would appear */
 .refresh-indicator {
