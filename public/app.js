@@ -1136,7 +1136,8 @@
         updateBankForm();
       }
       showSendStep(btn.dataset.method);
-      sendDialog.querySelector(`[data-step="${btn.dataset.method}"] input, [data-step="${btn.dataset.method}"] select`)?.focus();
+      const step = `[data-step="${btn.dataset.method}"]`;
+      sendDialog.querySelector(`${step} [role="combobox"], ${step} input:not([type="hidden"]), ${step} select`)?.focus();
     });
   });
   sendDialog.querySelectorAll('[data-back]').forEach((btn) => btn.addEventListener('click', () => showSendStep('choose')));
@@ -1144,7 +1145,7 @@
 
   // ----- Bank list + fee (from GET /api/transfers/banks) -----
 
-  let bankInfo = null; // { feeCents, categories, banks: [{ code, name, category, accountType, rails }] }
+  let bankInfo = null; // { feeCents, categories, banks: [{ code, name, category, accountType, rails, badge }] }
 
   const CUTOFF_TIME = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
 
@@ -1156,25 +1157,9 @@
     } catch {
       bankInfo ??= { feeCents: 1500, banks: [], pesonetNextCutoffAt: null };
     }
-    if (firstLoad) {
-      // One <optgroup> per category (E-wallets & digital banks, Banks); each option shows its routes.
-      const categories = bankInfo.categories ?? {};
-      bankForm.elements.bankCode.replaceChildren(
-        ...Object.entries(categories).map(([category, label]) => {
-          const group = Object.assign(document.createElement('optgroup'), { label });
-          group.append(
-            ...bankInfo.banks
-              .filter((b) => b.category === category)
-              .map((b) => Object.assign(document.createElement('option'), {
-                value: b.code,
-                textContent: `${b.name} · ${b.rails.map((r) => RAIL_SHORT[r]).join(' / ')}`,
-              })),
-          );
-          return group;
-        }),
-      );
-      updateBankForm();
-    }
+    if (firstLoad) bankPicker.render(bankInfo);
+    // The form was reset when the dialog opened: start on the first destination again.
+    if (!selectedBank() && bankInfo.banks[0]) bankPicker.choose(bankInfo.banks[0].code);
     if (bankInfo.pesonetNextCutoffAt) {
       bankForm.elements.rail.querySelector('option[value="PESONET"]').textContent =
         `PESONet: batch, next cut-off ${CUTOFF_TIME.format(new Date(bankInfo.pesonetNextCutoffAt))}`;
@@ -1210,8 +1195,189 @@
     $('#bank-fee').textContent = money(fee);
     $('#bank-total').textContent = validAmount(amount) ? money(Number(amount) + fee) : money(fee);
   }
-  bankForm.elements.bankCode.addEventListener('change', updateBankForm);
   bankForm.elements.amount.addEventListener('input', updateBankForm);
+
+  // ----- Bank picker: select-only combobox (WAI-ARIA APG) with a badge, name and network tags -----
+  //
+  // The combobox keeps focus; aria-activedescendant points at the highlighted option. Keys: Up / Down,
+  // Home / End, PageUp / PageDown move; Enter / Space / Tab choose; Escape closes the list (not the
+  // dialog); typing jumps to the first name starting with the typed letters. The value lives in the
+  // hidden input "bankCode", so the form reads it like any other field.
+
+  const bankPicker = (() => {
+    const picker = $('#bank-picker');
+    const trigger = $('#bank-trigger');
+    const listbox = $('#bank-listbox');
+    const hidden = bankForm.elements.bankCode;
+    let options = []; // the option <li>s, in order
+    let active = -1;
+    let typed = '';
+    let typedAt = 0;
+
+    /** The bank's avatar: its logo when the catalog has one (the badge if it fails to load), else the badge. */
+    function avatar(bank, el = document.createElement('span')) {
+      el.className = 'bank-avatar';
+      el.setAttribute('aria-hidden', 'true');
+      const badge = () => {
+        const initials = bank.badge?.initials ?? bank.name.slice(0, 2).toUpperCase();
+        el.replaceChildren(initials);
+        el.style.background = bank.badge?.color ?? 'var(--accent)';
+        el.classList.toggle('long', initials.length > 2);
+      };
+      if (bank.logo) {
+        const img = Object.assign(document.createElement('img'), { src: bank.logo, alt: '', loading: 'lazy' });
+        img.addEventListener('error', badge, { once: true });
+        el.style.background = '';
+        el.classList.remove('long');
+        el.replaceChildren(img);
+      } else {
+        badge();
+      }
+      return el;
+    }
+
+    function railTags(bank, el = document.createElement('span')) {
+      el.className = 'bank-rails';
+      el.replaceChildren(...bank.rails.map((r) => Object.assign(document.createElement('span'), { className: 'rail-tag', textContent: RAIL_SHORT[r] })));
+      return el;
+    }
+
+    function render(info) {
+      options = [];
+      listbox.replaceChildren(
+        ...Object.entries(info.categories ?? {}).map(([category, label]) => {
+          const group = document.createElement('li');
+          group.setAttribute('role', 'group');
+          const heading = Object.assign(document.createElement('span'), { className: 'bank-group-label', id: `bank-group-${category}`, textContent: label });
+          heading.setAttribute('role', 'presentation');
+          group.setAttribute('aria-labelledby', heading.id);
+          const list = document.createElement('ul');
+          list.setAttribute('role', 'none');
+          for (const bank of info.banks.filter((b) => b.category === category)) {
+            const li = document.createElement('li');
+            li.id = `bank-option-${bank.code}`;
+            li.className = 'bank-option';
+            li.dataset.code = bank.code;
+            li.dataset.testid = 'bank-option';
+            li.setAttribute('role', 'option');
+            li.setAttribute('aria-selected', 'false');
+            // accessible name = the visible text: "BDO InstaPay PESONet" (the badge is decorative)
+            li.append(
+              avatar(bank),
+              Object.assign(document.createElement('span'), { className: 'bank-name', textContent: bank.name }),
+              railTags(bank),
+            );
+            li.addEventListener('click', () => {
+              choose(bank.code);
+              close();
+            });
+            li.addEventListener('pointermove', () => highlight(options.indexOf(li), false));
+            options.push(li);
+            list.append(li);
+          }
+          group.append(heading, list);
+          return group;
+        }),
+      );
+    }
+
+    /** Make `code` the value: the trigger shows its badge, name and routes; the form updates. */
+    function choose(code) {
+      const bank = bankInfo?.banks.find((b) => b.code === code);
+      if (!bank) return;
+      hidden.value = code;
+      for (const li of options) li.setAttribute('aria-selected', String(li.dataset.code === code));
+      avatar(bank, $('#bank-trigger-avatar'));
+      $('#bank-trigger-name').textContent = bank.name;
+      railTags(bank, $('#bank-trigger-rails')).setAttribute('aria-hidden', 'true');
+      updateBankForm();
+    }
+
+    function highlight(index, scroll = true) {
+      if (!options.length) return;
+      active = Math.max(0, Math.min(options.length - 1, index));
+      options.forEach((li, i) => li.classList.toggle('active', i === active));
+      trigger.setAttribute('aria-activedescendant', options[active].id);
+      if (scroll) options[active].scrollIntoView({ block: 'nearest' });
+    }
+
+    function open(index) {
+      if (!options.length) return;
+      typed = '';
+      listbox.hidden = false;
+      picker.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+      const selected = options.findIndex((li) => li.dataset.code === hidden.value);
+      highlight(index ?? (selected >= 0 ? selected : 0));
+    }
+
+    function close() {
+      typed = '';
+      listbox.hidden = true;
+      picker.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.removeAttribute('aria-activedescendant');
+      options.forEach((li) => li.classList.remove('active'));
+    }
+
+    const isOpen = () => !listbox.hidden;
+    const isPrintable = (event) => event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey;
+
+    /** Type-ahead: the next name starting with the typed letters (a pause starts a new search). */
+    function typeAhead(char) {
+      const now = Date.now();
+      typed = now - typedAt > 700 ? char : typed + char;
+      typedAt = now;
+      const current = isOpen() ? active : options.findIndex((li) => li.dataset.code === hidden.value);
+      const from = current + (typed.length === 1 ? 1 : 0); // a new letter moves on; more letters refine
+      const ordered = [...options.slice(from), ...options.slice(0, from)];
+      const match = ordered.find((li) => li.querySelector('.bank-name').textContent.toLowerCase().startsWith(typed));
+      if (!match) return;
+      if (isOpen()) highlight(options.indexOf(match));
+      else choose(match.dataset.code);
+    }
+
+    const chooseActive = () => {
+      choose(options[active].dataset.code);
+      close();
+    };
+
+    trigger.addEventListener('click', () => (isOpen() ? close() : open()));
+    trigger.addEventListener('keydown', (event) => {
+      const { key, altKey } = event;
+      if (!isOpen()) {
+        if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(key)) open();
+        else if (key === 'Home') open(0);
+        else if (key === 'End') open(options.length - 1);
+        else if (isPrintable(event)) typeAhead(key.toLowerCase());
+        else return;
+        event.preventDefault();
+        return;
+      }
+      if (key === 'Tab') return chooseActive(); // choose, and let focus move on
+      if (key === 'ArrowDown') highlight(active + 1);
+      else if (key === 'ArrowUp' && altKey) chooseActive();
+      else if (key === 'ArrowUp') highlight(active - 1);
+      else if (key === 'Home') highlight(0);
+      else if (key === 'End') highlight(options.length - 1);
+      else if (key === 'PageDown') highlight(active + 10);
+      else if (key === 'PageUp') highlight(active - 10);
+      else if (key === 'Enter' || key === ' ') chooseActive();
+      else if (key === 'Escape') {
+        event.stopPropagation();
+        close(); // the list, not the dialog
+      } else if (isPrintable(event)) typeAhead(key.toLowerCase());
+      else return;
+      event.preventDefault();
+    });
+    // Clicking a row must not take focus from the combobox; leaving the picker closes the list.
+    listbox.addEventListener('mousedown', (event) => event.preventDefault());
+    trigger.addEventListener('blur', () => setTimeout(() => {
+      if (!picker.contains(document.activeElement)) close();
+    }));
+
+    return { render, choose, close };
+  })();
 
   // ----- Step 2 -> Review -----
 

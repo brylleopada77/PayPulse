@@ -87,7 +87,7 @@ test.describe('Bank Transfer (₱15 fee)', () => {
     const body = await response.json();
 
     expect(body.feeCents).toBe(1500);
-    expect(body.categories).toEqual({ EWALLET: 'E-wallets & digital banks', BANK: 'Banks' });
+    expect(body.categories).toEqual({ EWALLET: 'E-wallets & digital banks', BANK: 'Universal & commercial banks' });
     const names = (category: string) =>
       body.banks.filter((b: { category: string }) => b.category === category).map((b: { name: string }) => b.name);
     expect(names('EWALLET')).toEqual(['GCash', 'Maya', 'GoTyme', 'MariBank', 'CIMB', 'Tonik', 'UnionDigital', 'Komo']);

@@ -76,6 +76,18 @@ for (const theme of ['light', 'dark'] as const) {
       }
     });
 
+    test('Bank Transfer: the bank picker, closed and open', async ({ page, request }, testInfo) => {
+      await login(page, await userWithHistory(request));
+      await page.getByTestId('open-send').click();
+      await page.getByTestId('method-bank').click();
+      await expect(page.getByTestId('bank-trigger-name')).toHaveText('GCash');
+      await expectNoViolations(page, testInfo, `${theme}-bank-picker`, '[data-testid="send-dialog"]');
+      await page.getByTestId('bank-trigger').click();
+      await expect(page.getByTestId('bank-listbox')).toBeVisible();
+      await page.keyboard.press('ArrowDown'); // a highlighted row too
+      await expectNoViolations(page, testInfo, `${theme}-bank-picker-open`, '[data-testid="send-dialog"]');
+    });
+
     test('receipt and the ISO 20022 Message Inspector tab', async ({ page, request }, testInfo) => {
       await login(page, await userWithHistory(request));
       await page.getByTestId('tx-item').first().click();

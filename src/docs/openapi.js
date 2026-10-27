@@ -200,7 +200,7 @@ module.exports = {
         responses: {
           200: ok('Banks', { type: 'object' }, {
             fee: '15.00',
-            categories: { EWALLET: 'E-wallets & digital banks', BANK: 'Banks' },
+            categories: { EWALLET: 'E-wallets & digital banks', BANK: 'Universal & commercial banks' },
             banks: [
               { code: 'GCASH', name: 'GCash', category: 'EWALLET', accountType: 'MOBILE', rails: ['INSTAPAY'], bic: 'GXCHPHM2XXX' },
               { code: 'BDO', name: 'BDO', category: 'BANK', accountType: 'BANK', rails: ['INSTAPAY', 'PESONET'], bic: 'BNORPHMMXXX' },
