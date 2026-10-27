@@ -27,12 +27,23 @@ const CATEGORIES = {
 const INSTAPAY_ONLY = ['INSTAPAY'];
 const BOTH_RAILS = ['INSTAPAY', 'PESONET'];
 
-// `badge`: the avatar the Bank Transfer picker shows (no logo images: initials on a brand-tinted
-// colour, every one at least 4.5:1 against its white initials).
+// Avatars in the Bank Transfer picker: `logo`, the institution's icon (self-hosted in
+// public/img/banks/, taken from its website favicon; trademarks of their owners, shown only to
+// identify the destination), and `badge`, the fallback when there is no logo or it fails to load
+// (initials on a brand-tinted colour, at least 4.5:1 against the white initials).
+const LOGO_FILES = {
+  GCASH: 'gcash.png', MAYA: 'maya.png', GOTYME: 'gotyme.png', MARIBANK: 'maribank.png', CIMB: 'cimb.png',
+  TONIK: 'tonik.png', UNIONDIGITAL: 'uniondigital.png', KOMO: 'komo.jpg', BDO: 'bdo.png', BPI: 'bpi.png',
+  METROBANK: 'metrobank.png', UNIONBANK: 'unionbank.png', SECURITYBANK: 'securitybank.png', RCBC: 'rcbc.png',
+  CHINABANK: 'chinabank.ico', EASTWEST: 'eastwest.png', AUB: 'aub.png', LANDBANK: 'landbank.png',
+  // PNB: no icon available (its site blocks downloads), so it shows the badge
+};
+const logo = (code) => (LOGO_FILES[code] ? { logo: `/img/banks/${LOGO_FILES[code]}` } : {});
+
 const ewallet = (code, name, accountType, bic, initials, color) =>
-  ({ code, name, category: 'EWALLET', accountType, rails: INSTAPAY_ONLY, bic, badge: { initials, color } });
+  ({ code, name, category: 'EWALLET', accountType, rails: INSTAPAY_ONLY, bic, ...logo(code), badge: { initials, color } });
 const bank = (code, name, bic, initials, color) =>
-  ({ code, name, category: 'BANK', accountType: 'BANK', rails: BOTH_RAILS, bic, badge: { initials, color } });
+  ({ code, name, category: 'BANK', accountType: 'BANK', rails: BOTH_RAILS, bic, ...logo(code), badge: { initials, color } });
 
 const BANKS = [
   ewallet('GCASH', 'GCash', 'MOBILE', 'GXCHPHM2XXX', 'GC', '#0057d9'),

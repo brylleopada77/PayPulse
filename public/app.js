@@ -1161,34 +1161,56 @@
     // The form was reset when the dialog opened: start on the first destination again.
     if (!selectedBank() && bankInfo.banks[0]) bankPicker.choose(bankInfo.banks[0].code);
     if (bankInfo.pesonetNextCutoffAt) {
-      bankForm.elements.rail.querySelector('option[value="PESONET"]').textContent =
-        `PESONet: batch, next cut-off ${CUTOFF_TIME.format(new Date(bankInfo.pesonetNextCutoffAt))}`;
+      $('#pesonet-detail').textContent =
+        `Same-day batch (cut-off ${CUTOFF_TIME.format(new Date(bankInfo.pesonetNextCutoffAt))}) · above ₱50,000`;
     }
   }
 
   const RAIL_NAMES = { INSTAPAY: 'InstaPay (instant)', PESONET: 'PESONet (batch)' };
   const RAIL_SHORT = { INSTAPAY: 'InstaPay', PESONET: 'PESONet' };
+  const INSTAPAY_MAX = 50_000; // pesos per transfer (the server answers 400 INSTAPAY_LIMIT_EXCEEDED above it)
 
   const selectedBank = () => bankInfo?.banks.find((b) => b.code === bankForm.elements.bankCode.value);
+
+  /** The InstaPay cap message for the current choice, or '' when the amount is fine. */
+  function instapayLimitMessage() {
+    const bank = selectedBank();
+    const amount = bankForm.elements.amount.value.trim();
+    if (bankForm.elements.rail.value !== 'INSTAPAY' || !validAmount(amount) || Number(amount) <= INSTAPAY_MAX) return '';
+    return bank?.rails.includes('PESONET')
+      ? 'InstaPay limit is ₱50,000. Switch to PESONet for higher amounts.'
+      : `InstaPay limit is ₱50,000 per transfer, and ${bank?.name ?? 'this destination'} receives InstaPay only. Send it in parts.`;
+  }
 
   function updateBankForm() {
     const bank = selectedBank();
     const input = bankForm.elements.accountNumber;
     if (bank?.accountType === 'MOBILE') {
       $('#bank-account-label').textContent = `${bank.name} mobile number`;
-      input.placeholder = '09171234567';
+      input.placeholder = `09XXXXXXXXX (registered with ${bank.name})`;
       input.inputMode = 'tel';
     } else {
       $('#bank-account-label').textContent = `${bank?.name ?? 'Bank'} account number`;
-      input.placeholder = '10 to 16 digits';
+      input.placeholder = `10 to 16 digits for ${bank?.name ?? 'the bank'}`;
       input.inputMode = 'numeric';
     }
-    // Route tags: PESONet only where the destination accepts it (e-wallets / digital banks: InstaPay).
+
+    // Transfer channel: PESONet only where the destination accepts it; otherwise locked to InstaPay.
     const rails = bank?.rails ?? ['INSTAPAY', 'PESONET'];
-    const railSelect = bankForm.elements.rail;
-    for (const option of railSelect.options) option.disabled = !rails.includes(option.value);
-    if (!rails.includes(railSelect.value)) railSelect.value = rails[0];
-    $('#bank-rail-hint').textContent = rails.length === 1 && bank ? `${bank.name} receives ${RAIL_SHORT[rails[0]]} only` : '';
+    for (const radio of bankForm.querySelectorAll('input[name="rail"]')) {
+      radio.disabled = !rails.includes(radio.value);
+      radio.closest('.channel-option').classList.toggle('unavailable', radio.disabled);
+    }
+    if (!rails.includes(bankForm.elements.rail.value)) bankForm.elements.rail.value = rails[0];
+    const tag = $('#bank-rail-hint');
+    tag.textContent = rails.length === 1 && bank ? `${bank.name}: ${RAIL_SHORT[rails[0]]} only` : '';
+    tag.hidden = !tag.textContent;
+
+    // Inline InstaPay cap warning (with a one-tap switch when PESONet is possible)
+    const warning = instapayLimitMessage();
+    $('#bank-limit-text').textContent = warning;
+    $('#bank-limit-warning').classList.toggle('show', Boolean(warning));
+    $('#bank-use-pesonet').hidden = !warning || !rails.includes('PESONET');
 
     const fee = (bankInfo?.feeCents ?? 1500) / 100;
     const amount = bankForm.elements.amount.value.trim();
@@ -1196,6 +1218,12 @@
     $('#bank-total').textContent = validAmount(amount) ? money(Number(amount) + fee) : money(fee);
   }
   bankForm.elements.amount.addEventListener('input', updateBankForm);
+  bankForm.querySelectorAll('input[name="rail"]').forEach((radio) => radio.addEventListener('change', updateBankForm));
+  $('#bank-use-pesonet').addEventListener('click', () => {
+    bankForm.elements.rail.value = 'PESONET';
+    updateBankForm();
+    bankForm.querySelector('input[name="rail"][value="PESONET"]').focus();
+  });
 
   // ----- Bank picker: select-only combobox (WAI-ARIA APG) with a badge, name and network tags -----
   //
@@ -1222,6 +1250,7 @@
         const initials = bank.badge?.initials ?? bank.name.slice(0, 2).toUpperCase();
         el.replaceChildren(initials);
         el.style.background = bank.badge?.color ?? 'var(--accent)';
+        el.classList.remove('has-logo');
         el.classList.toggle('long', initials.length > 2);
       };
       if (bank.logo) {
@@ -1229,6 +1258,7 @@
         img.addEventListener('error', badge, { once: true });
         el.style.background = '';
         el.classList.remove('long');
+        el.classList.add('has-logo');
         el.replaceChildren(img);
       } else {
         badge();
@@ -1289,7 +1319,6 @@
       for (const li of options) li.setAttribute('aria-selected', String(li.dataset.code === code));
       avatar(bank, $('#bank-trigger-avatar'));
       $('#bank-trigger-name').textContent = bank.name;
-      railTags(bank, $('#bank-trigger-rails')).setAttribute('aria-hidden', 'true');
       updateBankForm();
     }
 
@@ -1426,6 +1455,8 @@
     setFormError(bankForm);
 
     if (!bank) return setFormError(bankForm, 'Choose a bank or e-wallet.');
+    const overLimit = instapayLimitMessage();
+    if (overLimit) return setFormError(bankForm, overLimit);
     if (!accountNumber.trim()) return setFormError(bankForm, `Enter the ${$('#bank-account-label').textContent.toLowerCase()}.`);
     if (accountName.trim().length < 2) return setFormError(bankForm, "Enter the account holder's name.");
     if (!validAmount(amount.trim())) return setFormError(bankForm, 'Enter a valid amount, e.g. 250 or 99.50.');

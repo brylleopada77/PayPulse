@@ -678,28 +678,42 @@
              data-testid="bank-trigger">
           <span class="bank-avatar" id="bank-trigger-avatar" aria-hidden="true"></span>
           <span class="bank-name" id="bank-trigger-name" data-testid="bank-trigger-name">Choose a bank</span>
-          <span class="bank-rails" id="bank-trigger-rails" aria-hidden="true"></span>
           <svg class="bank-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
         </div>
         <ul class="bank-listbox" id="bank-listbox" role="listbox" aria-labelledby="bank-picker-label" tabindex="-1"
             data-testid="bank-listbox" hidden></ul>
         <input type="hidden" name="bankCode" data-testid="bank-code">
       </div>
+      <!-- Transfer channel: chosen separately from the bank. E-wallets / digital banks are InstaPay
+           only (PESONet disabled, with the tag below). -->
+      <fieldset class="channel-picker" data-testid="bank-channel">
+        <legend class="picker-label">Transfer channel
+          <span class="channel-tag" id="bank-rail-hint" data-testid="bank-rail-hint" hidden></span>
+        </legend>
+        <label class="channel-option" data-testid="channel-instapay">
+          <input type="radio" name="rail" value="INSTAPAY" checked>
+          <span class="channel-icon" aria-hidden="true">⚡</span>
+          <span class="channel-text"><strong>InstaPay</strong><small>Real-time credit · up to ₱50,000</small></span>
+        </label>
+        <label class="channel-option" data-testid="channel-pesonet">
+          <input type="radio" name="rail" value="PESONET">
+          <span class="channel-icon" aria-hidden="true">🏦</span>
+          <span class="channel-text"><strong>PESONet</strong><small id="pesonet-detail">Same-day batch · for amounts above ₱50,000</small></span>
+        </label>
+      </fieldset>
       <label><span id="bank-account-label">Account number</span>
         <input name="accountNumber" autocomplete="off" required data-testid="bank-account">
-      </label>
-      <label>Transfer speed <span class="hint" id="bank-rail-hint" data-testid="bank-rail-hint"></span>
-        <select name="rail" data-testid="bank-rail">
-          <option value="INSTAPAY">InstaPay: instant (up to ₱50,000)</option>
-          <option value="PESONET">PESONet: batch, settles at the next cut-off</option>
-        </select>
       </label>
       <label>Account name <span class="hint">as registered with the bank</span>
         <input name="accountName" autocomplete="off" maxlength="100" required data-testid="bank-account-name">
       </label>
       <label>Amount (₱)
-        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="bank-amount">
+        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="bank-amount" aria-describedby="bank-limit-warning">
       </label>
+      <p class="limit-warning" id="bank-limit-warning" role="status" data-testid="bank-limit-warning">
+        <span id="bank-limit-text"></span>
+        <button type="button" class="link-btn" id="bank-use-pesonet" data-testid="bank-use-pesonet" hidden>Switch to PESONet</button>
+      </p>
       <p class="fee-preview" data-testid="bank-fee-preview">
         <span>Transfer fee <strong id="bank-fee">₱15.00</strong></span>
         <span>Total deducted <strong id="bank-total">₱0.00</strong></span>
