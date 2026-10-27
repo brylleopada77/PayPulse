@@ -46,14 +46,14 @@ test.describe('Bank Transfer: banks and e-wallets', () => {
     await page.getByTestId('open-send').click();
     await page.getByTestId('method-bank').click();
 
-    await page.getByTestId('bank-select').selectOption('SEABANK');
+    await page.getByTestId('bank-select').selectOption('MARIBANK');
     await page.getByTestId('bank-account').fill('012345678901');
     await page.getByTestId('bank-account-name').fill('Ana Reyes');
     await page.getByTestId('bank-amount').fill('250');
     await page.getByTestId('bank-submit').click();
 
     const review = page.locator('#send-review');
-    await expect(review).toContainText('SeaBank');
+    await expect(review).toContainText('MariBank');
     await expect(review).toContainText('InstaPay (instant)');
   });
 });
