@@ -90,7 +90,7 @@ test.describe('Bank Transfer (₱15 fee)', () => {
     expect(body.categories).toEqual({ EWALLET: 'E-wallets & digital banks', BANK: 'Banks' });
     const names = (category: string) =>
       body.banks.filter((b: { category: string }) => b.category === category).map((b: { name: string }) => b.name);
-    expect(names('EWALLET')).toEqual(['GCash', 'Maya', 'GoTyme', 'SeaBank', 'CIMB', 'Tonik', 'UnionDigital', 'Komo']);
+    expect(names('EWALLET')).toEqual(['GCash', 'Maya', 'GoTyme', 'MariBank', 'CIMB', 'Tonik', 'UnionDigital', 'Komo']);
     expect(names('BANK')).toEqual([
       'BDO', 'BPI', 'Metrobank', 'UnionBank', 'Security Bank', 'RCBC', 'China Bank', 'PNB', 'EastWest', 'AUB', 'Landbank',
     ]);
@@ -134,6 +134,21 @@ test.describe('Bank Transfer (₱15 fee)', () => {
 
     const iso = await request.get(`/api/transfers/bank/${transactionId}/iso20022?format=xml`, { headers: authHeader(alice.token) });
     expect(await iso.text()).toContain('<BICFI>GOTYPHM2XXX</BICFI>');
+  });
+
+  test('SeaBank is now MariBank: the old code SEABANK still works and is shown as MariBank', async ({ request }) => {
+    const alice = await createFundedUser(request, 1000);
+
+    const sent = await bankTransfer(request, alice, {
+      bankCode: 'SEABANK', accountNumber: '012345678901', accountName: 'Ana Reyes', amount: 100,
+    });
+    expect(sent.status(), await sent.text()).toBe(201);
+    const { transactionId, bank } = await sent.json();
+    expect(bank).toEqual({ code: 'MARIBANK', name: 'MariBank' });
+
+    const receipt = await (await request.get(`/api/accounts/me/transactions/${transactionId}/receipt`, { headers: authHeader(alice.token) })).json();
+    expect(JSON.stringify(receipt)).toContain('MariBank');
+    expect(JSON.stringify(receipt)).not.toContain('SeaBank');
   });
 
   test('deducts amount + ₱15 fee and records "Bank Transfer to BDO"', async ({ request }) => {

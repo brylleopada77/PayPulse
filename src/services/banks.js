@@ -34,7 +34,7 @@ const BANKS = [
   ewallet('GCASH', 'GCash', 'MOBILE', 'GXCHPHM2XXX'),
   ewallet('MAYA', 'Maya', 'MOBILE', 'PAPHPHM1XXX'),
   ewallet('GOTYME', 'GoTyme', 'BANK', 'GOTYPHM2XXX'),
-  ewallet('SEABANK', 'SeaBank', 'BANK', 'SEAPPHM2XXX'),
+  ewallet('MARIBANK', 'MariBank', 'BANK', 'SEAPPHM2XXX'), // formerly SeaBank (same bank, renamed)
   ewallet('CIMB', 'CIMB', 'BANK', 'CIPHPHMMXXX'),
   ewallet('TONIK', 'Tonik', 'BANK', 'TODIPHM2XXX'),
   ewallet('UNIONDIGITAL', 'UnionDigital', 'BANK', 'UDBIPHM2XXX'),
@@ -55,8 +55,13 @@ const BANKS = [
 // Bank account numbers: digits only, 10 to 16 long (dashes/spaces are removed first).
 const BANK_ACCOUNT_PATTERN = /^\d{10,16}$/;
 
+// Old codes of renamed destinations: transfers saved under them still show the current name, and
+// API clients that send the old code keep working.
+const RENAMED_CODES = { SEABANK: 'MARIBANK' };
+
 function findBank(code) {
-  return BANKS.find((bank) => bank.code === code) || null;
+  const current = RENAMED_CODES[code] ?? code;
+  return BANKS.find((bank) => bank.code === current) || null;
 }
 
 module.exports = { BANKS, CATEGORIES, RAILS, BANK_TRANSFER_FEE_CENTS, BANK_ACCOUNT_PATTERN, PAYPULSE_BIC, findBank };
