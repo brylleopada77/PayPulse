@@ -8,7 +8,7 @@ const transferService = require('../services/transferService');
 const limitsService = require('../services/limitsService');
 const paymentSwitch = require('../services/paymentSwitch');
 const pesonetService = require('../services/pesonetService');
-const { BANKS, RAILS, BANK_TRANSFER_FEE_CENTS } = require('../services/banks');
+const { BANKS, CATEGORIES, RAILS, BANK_TRANSFER_FEE_CENTS } = require('../services/banks');
 const { fromCents } = require('../utils/money');
 
 const router = express.Router();
@@ -36,6 +36,7 @@ router.get('/banks', requireAuth, (req, res) => {
     fee: fromCents(BANK_TRANSFER_FEE_CENTS),
     feeCents: BANK_TRANSFER_FEE_CENTS,
     banks: BANKS,
+    categories: CATEGORIES,
     rails: Object.values(RAILS).map((r) => ({ ...r, max: r.maxCents === null ? null : fromCents(r.maxCents) })),
     pesonetNextCutoffAt: pesonetService.nextCutoff(),
   });

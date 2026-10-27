@@ -196,7 +196,18 @@ module.exports = {
       }),
     },
     '/api/transfers/banks': {
-      get: op('Transfers', 'Banks / e-wallets, rails and the bank transfer fee', { responses: { 200: ok('Banks') } }),
+      get: op('Transfers', 'Banks and e-wallets by category, with their routes (InstaPay / PESONet), and the fee', {
+        responses: {
+          200: ok('Banks', { type: 'object' }, {
+            fee: '15.00',
+            categories: { EWALLET: 'E-wallets & digital banks', BANK: 'Banks' },
+            banks: [
+              { code: 'GCASH', name: 'GCash', category: 'EWALLET', accountType: 'MOBILE', rails: ['INSTAPAY'], bic: 'GXCHPHM2XXX' },
+              { code: 'BDO', name: 'BDO', category: 'BANK', accountType: 'BANK', rails: ['INSTAPAY', 'PESONET'], bic: 'BNORPHMMXXX' },
+            ],
+          }),
+        },
+      }),
     },
     '/api/transfers/limits': {
       get: op('Transfers', 'Daily limit used / remaining and the anti-spam rule', {
@@ -214,9 +225,10 @@ module.exports = {
     '/api/transfers/bank': {
       post: op('Transfers', 'Bank Transfer via InstaPay (instant) or PESONet (batch), ₱15 fee', {
         money: 'guarded',
+        description: 'Destinations and their routes come from GET /api/transfers/banks: every bank and e-wallet is on InstaPay; PESONet goes to the banks only (otherwise 400 RAIL_NOT_SUPPORTED).',
         requestBody: body(
           {
-            bankCode: str('From GET /api/transfers/banks', { example: 'BDO' }),
+            bankCode: str('From GET /api/transfers/banks (e.g. GCASH, MAYA, GOTYME, BDO, UNIONBANK, LANDBANK)', { example: 'BDO' }),
             accountNumber: str('Recipient bank account'),
             accountName: str('Recipient name'),
             amount: AMOUNT,
