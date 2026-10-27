@@ -6,6 +6,10 @@
 //
 // When a rule fires, the transfer is NOT executed, a compliance alert is opened, and the account
 // goes UNDER_REVIEW: every further outgoing transfer is held too, until compliance clears it.
+//
+// The screen runs twice: in the amlMonitor middleware (fail fast) and again inside the payment's
+// database transaction, after the wallet row lock (walletLock.js), so a burst of simultaneous
+// requests is screened one at a time and can't all read "0 recent transfers".
 const { pool, withTransaction } = require('../db/pool');
 const { AppError } = require('../utils/errors');
 const { fromCents } = require('../utils/money');
@@ -21,8 +25,8 @@ function heldError(details) {
 }
 
 /** Completed outgoing transfers and bill payments in the velocity window (after any QA sandbox reset). */
-async function recentTransferCount(userId) {
-  const { rows } = await pool.query(
+async function recentTransferCount(userId, db = pool) {
+  const { rows } = await db.query(
     `SELECT COUNT(*)::int AS n
      FROM ledger_entries le
      JOIN transactions t ON t.id = le.transaction_id
@@ -54,9 +58,20 @@ async function flag(userId, { rule, amountCents, endpoint, details }) {
 /**
  * Check an outgoing transfer of `amountCents`. Throws 403 TRANSACTION_HELD_FOR_REVIEW when the
  * account is already under review or when a rule fires (which also opens an alert).
+ *
+ * `db` is the pool, or the payment's transaction client (under the wallet lock). Inside a
+ * transaction the alert can't be written there (the hold rolls the transaction back), and a second
+ * connection could wait on the pool forever while every connection waits on this lock: the error
+ * carries the alert instead (`pendingAlert`) and walletLock.js opens it after the rollback.
  */
-async function screenTransfer(userId, amountCents, endpoint) {
-  const { rows } = await pool.query('SELECT aml_status FROM users WHERE id = $1', [userId]);
+async function screenTransfer(userId, amountCents, endpoint, db = pool) {
+  const raise = async (rule, details) => {
+    if (db !== pool) throw Object.assign(heldError(details), { pendingAlert: { userId, rule, amountCents, endpoint, details } });
+    const alertId = await flag(userId, { rule, amountCents, endpoint, details });
+    throw heldError({ ...details, alertId });
+  };
+
+  const { rows } = await db.query('SELECT aml_status FROM users WHERE id = $1', [userId]);
   if (rows[0]?.aml_status === 'UNDER_REVIEW') {
     throw heldError({
       rule: 'ACCOUNT_UNDER_REVIEW',
@@ -71,11 +86,10 @@ async function screenTransfer(userId, amountCents, endpoint) {
       threshold: fromCents(LARGE_TRANSFER_CENTS),
       amount: fromCents(amountCents),
     };
-    const alertId = await flag(userId, { rule: 'LARGE_TRANSFER', amountCents, endpoint, details });
-    throw heldError({ ...details, alertId });
+    await raise('LARGE_TRANSFER', details);
   }
 
-  const recent = await recentTransferCount(userId);
+  const recent = await recentTransferCount(userId, db);
   if (recent >= VELOCITY_MAX_TRANSFERS) {
     const details = {
       rule: 'VELOCITY',
@@ -84,9 +98,16 @@ async function screenTransfer(userId, amountCents, endpoint) {
       maxTransfers: VELOCITY_MAX_TRANSFERS,
       windowSeconds: VELOCITY_WINDOW_SECONDS,
     };
-    const alertId = await flag(userId, { rule: 'VELOCITY', amountCents, endpoint, details });
-    throw heldError({ ...details, alertId });
+    await raise('VELOCITY', details);
   }
+}
+
+/** After a held payment's transaction rolled back: open the alert it carries (see screenTransfer). */
+async function openPendingAlert(err) {
+  if (!err?.pendingAlert) return;
+  const { userId, ...alert } = err.pendingAlert;
+  err.details = { ...err.details, alertId: await flag(userId, alert) };
+  delete err.pendingAlert;
 }
 
 /** The user's own compliance status and alerts (GET /api/accounts/me/compliance). */
@@ -130,6 +151,7 @@ async function clear(userId) {
 
 module.exports = {
   screenTransfer,
+  openPendingAlert,
   getStatus,
   clear,
   LARGE_TRANSFER_CENTS,

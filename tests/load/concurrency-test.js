@@ -1,13 +1,18 @@
 /**
- * k6 concurrency test: 10 virtual users send the same transfer at the same moment.
+ * k6 concurrency test: 10 virtual users send the SAME transfer at the same moment (no Idempotency-Key,
+ * so they are 10 separate payments, like a user hammering "Send").
  *
- * Sender starts with 100.00 and each transfer is 30.00, so at most 3 may succeed and the sender
- * must never go below 0. Balances are computed from the immutable ledger, so money can't be
- * created; the race-condition bug shows up as extra transfers that overdraw the sender. The
- * thresholds fail the run when that happens (money_created_cents stays as a safety net).
+ * The sender starts with ₱100.00 and each transfer is ₱60.00: only ONE fits. With the row lock on the
+ * sender's wallet (src/services/walletLock.js) exactly 1 request succeeds (201) and the other 9 are
+ * refused with 422 INSUFFICIENT_FUNDS; the sender ends at ₱40.00 and never below zero. The
+ * thresholds fail the run on any double spend, overdraft, created money or unexpected answer.
+ * (Before the lock this was the intentional race bug: 2 to 10 transfers went through. QA_NOTES.md.)
+ *
+ * The ledger invariants (debits = credits, cash = balances + fees + reserves, no overdrawn wallet)
+ * are checked right after the run:  npm run test:concurrency  (k6 + scripts/assert-ledger.js)
  *
  * Run with Docker:  docker compose run --rm k6
- * Run locally:      k6 run -e BASE_URL=http://localhost:3000 tests/load/race-transfer.js
+ * Run locally:      k6 run -e BASE_URL=http://localhost:3000 tests/load/concurrency-test.js
  */
 import http from 'k6/http';
 import crypto from 'k6/crypto';
@@ -18,17 +23,19 @@ import { summaryFor } from './summary.js';
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
 const WEBHOOK_SECRET = __ENV.WEBHOOK_SECRET || 'dev-webhook-secret';
 const PARALLEL_REQUESTS = 10;
-const STARTING_BALANCE_CENTS = 10000;
-const TRANSFER_AMOUNT = 30;
+const STARTING_BALANCE_CENTS = 10000; // ₱100.00
+const TRANSFER_AMOUNT = 60; // ₱60.00: only one fits
 
 const successfulTransfers = new Counter('successful_transfers');
+const insufficientFunds = new Counter('insufficient_funds_rejections');
+const extraTransfers = new Counter('double_spent_transfers');
 const moneyCreatedCents = new Counter('money_created_cents');
-const overspentTransfers = new Counter('overspent_transfers');
 const overdrawnCents = new Counter('overdrawn_cents');
+const balanceMismatchCents = new Counter('balance_mismatch_cents');
 
 export const options = {
   scenarios: {
-    double_click: {
+    simultaneous_send: {
       executor: 'per-vu-iterations',
       vus: PARALLEL_REQUESTS,
       iterations: 1,
@@ -36,13 +43,15 @@ export const options = {
     },
   },
   thresholds: {
-    // Money must never appear from nowhere.
-    money_created_cents: ['count==0'],
-    // No more transfers may succeed than the balance allows.
-    overspent_transfers: ['count==0'],
-    // The sender's wallet must never go below zero.
+    // Exactly one transfer succeeds, the other nine are refused for insufficient funds.
+    successful_transfers: ['count==1'],
+    insufficient_funds_rejections: [`count==${PARALLEL_REQUESTS - 1}`],
+    // No double spend, no overdraft, no money from nowhere, and the sender ends at exactly ₱40.00.
+    double_spent_transfers: ['count==0'],
     overdrawn_cents: ['count==0'],
-    // Every request must get a clean answer (201 or 422), never a 5xx.
+    money_created_cents: ['count==0'],
+    balance_mismatch_cents: ['count==0'],
+    // Every request gets a clean answer (201 or 422 INSUFFICIENT_FUNDS), never a 5xx.
     checks: ['rate==1'],
   },
 };
@@ -94,25 +103,27 @@ export default function ({ sender, receiver }) {
     auth(sender.token),
   );
 
-  // 422 = insufficient funds, 429 = anti-spam rule (more than 3 transfers in 10 seconds)
-  check(res, { 'status is 201, 422 or 429': (r) => [201, 422, 429].includes(r.status) });
+  const refused = res.status === 422 && res.json('error.code') === 'INSUFFICIENT_FUNDS';
+  check(res, { 'status is 201 or 422 INSUFFICIENT_FUNDS': (r) => r.status === 201 || refused });
   if (res.status === 201) successfulTransfers.add(1);
+  if (refused) insufficientFunds.add(1);
 }
 
-// Runs once after all VUs finish: verify money is conserved.
+// Runs once after all VUs finish: verify the money.
 export function teardown({ sender, receiver }) {
   const senderBalance = balanceCents(sender);
   const receiverBalance = balanceCents(receiver);
   const total = senderBalance + receiverBalance;
   const receivedTransfers = receiverBalance / (TRANSFER_AMOUNT * 100);
-  const maxAllowed = Math.floor(STARTING_BALANCE_CENTS / (TRANSFER_AMOUNT * 100));
+  const expectedSender = STARTING_BALANCE_CENTS - TRANSFER_AMOUNT * 100;
 
-  console.log(`sender=${senderBalance / 100} receiver=${receiverBalance / 100} total=${total / 100} (expected 100)`);
+  console.log(`sender=${senderBalance / 100} (expected ${expectedSender / 100}) receiver=${receiverBalance / 100} total=${total / 100} (expected 100)`);
 
-  moneyCreatedCents.add(Math.max(0, total - STARTING_BALANCE_CENTS));
-  overspentTransfers.add(Math.max(0, receivedTransfers - maxAllowed));
+  extraTransfers.add(Math.max(0, receivedTransfers - 1));
   overdrawnCents.add(Math.max(0, -senderBalance));
+  moneyCreatedCents.add(Math.max(0, total - STARTING_BALANCE_CENTS));
+  balanceMismatchCents.add(Math.abs(senderBalance - expectedSender));
 }
 
 // HTML + JSON report in reports/ (also written when thresholds fail).
-export const handleSummary = summaryFor('k6-race', 'Race condition: 10 parallel transfers without an Idempotency-Key (known bug)');
+export const handleSummary = summaryFor('k6-concurrency', 'Concurrency: 10 identical ₱60 transfers from ₱100 (row lock: exactly 1 succeeds)');

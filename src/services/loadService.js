@@ -8,12 +8,13 @@
 // Both journals are written in ONE database transaction under a lock on the wallet (no overdraft,
 // a purchase never ends up without its cashback). Cashback guardrails: loads of ₱50 or more, at
 // most 3 load cashbacks per customer per day (Manila); separate from the Pay Bills cashback.
-const { pool, withTransaction } = require('../db/pool');
-const { recordTransaction, getBalanceCents } = require('./ledgerService');
+const { pool } = require('../db/pool');
+const { recordTransaction } = require('./ledgerService');
+const { lockWallet, checkOutgoing, withPaymentTransaction } = require('./walletLock');
 const { formatReference } = require('./receiptService');
 const mpinService = require('./mpinService');
 const telcos = require('./telcos');
-const { badRequest, notFound, unprocessable } = require('../utils/errors');
+const { badRequest, unprocessable } = require('../utils/errors');
 const { toCents, fromCents } = require('../utils/money');
 
 const CASHBACK_CENTS = 500; // ₱5.00
@@ -96,11 +97,9 @@ async function purchase(userId, body = {}) {
   const { number, brand, productCode, productName, amountCents } = validate(body);
   await mpinService.verifyMpin(userId, body.mpin);
 
-  return withTransaction(async (client) => {
-    const wallet = await client.query('SELECT id FROM accounts WHERE user_id = $1 FOR UPDATE', [userId]);
-    if (!wallet.rows[0]) throw notFound('ACCOUNT_NOT_FOUND', 'Account not found');
-    const walletId = wallet.rows[0].id;
-    const balanceBefore = await getBalanceCents(client, walletId);
+  return withPaymentTransaction(async (client) => {
+    const { id: walletId, balanceCents: balanceBefore } = await lockWallet(client, userId);
+    await checkOutgoing(client, userId, amountCents, 'POST /api/v1/load/purchase');
     if (balanceBefore < amountCents) throw unprocessable('INSUFFICIENT_FUNDS', 'Your wallet balance is too low for this load');
 
     const transactionId = await recordTransaction(client, {

@@ -17,12 +17,12 @@ const TIME_ZONE = 'Asia/Manila';
 /**
  * How much the account has sent today, and its transfers in the last WINDOW_SECONDS.
  *
- * NOTE: like the balance check, this is a plain read without a lock. Sequential requests are
- * limited correctly, but a burst of truly simultaneous requests can all read the same numbers
- * and get past both limits (see QA_NOTES.md). The intentional race-condition tests rely on this.
+ * `db` is the pool, or a payment's transaction client holding the wallet row lock: the limits
+ * are checked again there (walletLock.js), so a burst of simultaneous requests is counted one at a
+ * time instead of all reading "0 so far" (the old race, QA_NOTES.md).
  */
-async function getUsage(accountId) {
-  const { rows } = await pool.query(
+async function getUsage(accountId, db = pool) {
+  const { rows } = await db.query(
     `SELECT
        COALESCE(SUM(CASE WHEN t.type = 'BANK_TRANSFER' THEN bt.amount_cents ELSE le.amount_cents END)
                 FILTER (WHERE t.created_at >= date_trunc('day', now() AT TIME ZONE $2) AT TIME ZONE $2), 0)
@@ -57,8 +57,8 @@ async function accountIdFor(userId) {
 }
 
 /** The wallet id and the owner's KYC level (which sets the daily limit). */
-async function accountFor(userId) {
-  const { rows } = await pool.query(
+async function accountFor(userId, db = pool) {
+  const { rows } = await db.query(
     'SELECT a.id, u.kyc_level FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.user_id = $1',
     [userId],
   );
@@ -71,10 +71,10 @@ async function accountFor(userId) {
  *   429 TOO_MANY_TRANSFERS   - already MAX_TRANSFERS_PER_WINDOW transfers in the last WINDOW_SECONDS
  *   400 DAILY_LIMIT_EXCEEDED - today's sent total + this amount would be over ₱50,000
  */
-async function assertWithinLimits(userId, amountCents) {
-  const account = await accountFor(userId);
+async function assertWithinLimits(userId, amountCents, db = pool) {
+  const account = await accountFor(userId, db);
   const limitCents = dailyLimitFor(account.kyc_level);
-  const usage = await getUsage(account.id);
+  const usage = await getUsage(account.id, db);
 
   if (usage.recentCount >= MAX_TRANSFERS_PER_WINDOW) {
     const freeAt = new Date(usage.oldestRecentAt).getTime() + WINDOW_SECONDS * 1000;

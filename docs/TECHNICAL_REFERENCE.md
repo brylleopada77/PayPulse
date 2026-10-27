@@ -8,8 +8,9 @@ A small e-wallet app (Node.js + Express + PostgreSQL, with a web wallet UI) buil
 - A **web wallet UI** at http://localhost:3000 (sign up, add money, send money, history)
 - A Playwright + k6 test suite and a GitHub Actions pipeline
 
-> ⚠️ This app contains an **intentional race-condition bug** in the transfer endpoint, for QA
-> training. Never use it with real money. Details (spoilers!) are in [QA_NOTES.md](../QA_NOTES.md).
+> ⚠️ Demo app for QA training: never use it with real money. It shipped with an intentional
+> race-condition bug in the transfer endpoint, now fixed with row-level locking; the write-up is in
+> [QA_NOTES.md](../QA_NOTES.md).
 
 ---
 
@@ -103,15 +104,18 @@ every transaction balances, all balances sum to 0, the trial balance debits equa
 no wallet is overdrawn. Exit code 0 = consistent, 1 = not, 2 = could not run. Add `--json` for
 machine-readable output. For the full end-of-day audit see `npm run eod:reconcile` (section 6).
 
-Because of the intentional bug, expect these results:
+With the race fixed (wallet row lock, `src/services/walletLock.js`), every one of these is a hard gate:
 
-| Command | Result while the bug exists |
-|---------|-----------------------------|
-| `npx playwright test` | All pass. The concurrency test is marked as an *expected failure* |
-| `docker compose run --rm k6` | Thresholds **fail** (too many transfers succeeded; the sender was overdrawn) |
-| `npm run db:check` | **FAIL** after the concurrency tests have run (overdrawn wallets) |
-| `npm run db:assert-ledger` | **FAIL** after the concurrency tests have run (lists the overdrawn wallets; the money totals still match) |
-| `npm run eod:reconcile` | **EXCEPTIONS** after the concurrency tests have run (`OD-1` overdrafts; all GL controls reconcile) |
+| Command | Expected result |
+|---------|-----------------|
+| `npx playwright test` | All pass, incl. `tests/api/concurrency.spec.ts` (10 simultaneous payments: only what the balance covers succeeds) |
+| `npm run test:concurrency` | k6 (`tests/load/concurrency-test.js`): 10 identical ₱60 transfers from ₱100, **exactly 1** succeeds, 9 × `422 INSUFFICIENT_FUNDS`; then `assert-ledger.js` passes |
+| `npm run db:check` / `npm run db:assert-ledger` | PASS, including "no customer wallet is overdrawn" |
+| `npm run eod:reconcile` | No exceptions (`OD-1` clean) |
+
+A database used before the fix may still hold wallets overdrawn back then: `npm run
+db:remediate-overdrafts` lists them, and `-- --apply` brings each back to ₱0.00 with one balanced
+`QA_ADJUSTMENT` journal (nothing is edited or deleted).
 
 ### End-to-end browser suite
 
@@ -265,8 +269,7 @@ when there is extra data. Unknown routes return `404 ROUTE_NOT_FOUND`, broken JS
 Every customer has a savings vault (account `SV…`, GL **2030 Customer Savings Deposits**) next to
 the main wallet. `GET /api/v1/savings` shows the balance, rate, interest earned and estimated daily
 interest; `POST /api/v1/savings/deposit` and `/withdraw` with `{ amount }` move money as a
-`SAVINGS_TRANSFER` journal. These moves lock both accounts first, so (unlike Send) parallel moves
-can't overdraw anything.
+`SAVINGS_TRANSFER` journal. These moves lock both accounts first, so parallel moves can't overdraw anything.
 
 **Interest:** `jobs/daily-interest.js` accrues each vault's closing balance × 6% ÷ 365 for one
 business day (Manila), compounding daily, and posts whole centavos as an `INTEREST` journal (DEBIT GL
@@ -366,8 +369,8 @@ Flow: category grid or search → biller → account number, account name and am
   wallet ₱5.00). History shows "Bill Payment - Meralco" and "Cashback Reward - Bills Payment".
 - **Cashback rules:** ₱5.00 on bills of **₱100 or more**, at most **3 cashbacks per customer per
   day** (Manila). Without these, paying ₱1 "bills" would earn ₱4 each time.
-- **Guards (same as a transfer):** the wallet is locked during the payment (no overdraft, unlike
-  Send), frozen accounts get `423`, AML screening, and bill payments count toward the ₱50,000
+- **Guards (same as a transfer):** the wallet is locked during the payment (no overdraft; the limit and AML
+  checks run again under the lock), frozen accounts get `423`, AML screening, and bill payments count toward the ₱50,000
   daily send limit and the 3-per-10-seconds anti-spam rule. The QA "Trigger HTTP 500" switch applies.
 - **Card billers:** only the last 4 digits of a credit card number are stored and shown.
 - **Errors:** `400 UNKNOWN_BILLER`, `400 INVALID_BILLER_ACCOUNT` (names the biller's account label,
@@ -433,7 +436,8 @@ Because an answer can be lost *after* money moved, money-moving POSTs accept an
 retry with the same key gets it back (`Idempotent-Replayed: true`) instead of running again
 (`409 IDEMPOTENCY_IN_PROGRESS`, `422 IDEMPOTENCY_KEY_REUSED`). The web wallet sends one key per user
 action and retries 503 / network failures up to 3 times with "Retrying (1/3)…" toasts. A
-double-click is two actions with two keys, so the intentional race condition is still reproducible.
+double-click is two actions with two keys: the wallet row lock makes the second one wait and then
+check the new balance, so it can't overspend either.
 The QA panel has a **Chaos mode** selector that adds these headers to every call.
 
 **`tests/resilience.spec.ts`** (Playwright project `ui`, real Chrome) asserts that under 503 drops,
@@ -556,8 +560,8 @@ uses the same API as the tests:
 - **Recent activity**: the wallet's ledger entries; refreshes every 10 seconds.
 
 The MPIN **Confirm** button is deliberately **not** disabled while a request is in flight, so a
-fast double-click can reproduce the race-condition bug from the browser (for amounts up to
-₱1,000; above that the single-use OTP blocks duplicates). Elements carry `data-testid`
+fast double-click sends two transfers: the wallet row lock runs them one after the other, and the
+second only succeeds if the balance still covers it (above ₱1,000 the single-use OTP blocks duplicates). Elements carry `data-testid`
 attributes for UI automation.
 
 ### Error codes (general)
@@ -720,5 +724,5 @@ PayPulse/
 5. On failure, uploads the Playwright HTML report, JUnit XML, k6 summary, DB report and container logs
    as the **paypulse-test-reports** artifact
 
-While `RACE_BUG_EXPECTED` is `"true"`, the known bug doesn't block pull requests. See
-[QA_NOTES.md](../QA_NOTES.md) for what to change once it's fixed.
+The concurrency checks are hard gates: `npm run test:concurrency` runs the k6 row-lock test and then the
+system ledger assertion. See [QA_NOTES.md](../QA_NOTES.md) for the bug and the fix.

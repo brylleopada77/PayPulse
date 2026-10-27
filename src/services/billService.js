@@ -5,16 +5,17 @@
 // Cashback:      DEBIT  Marketing Expense - Cashback (GL 5020)          ₱5.00
 //                CREDIT customer wallet                                 ₱5.00
 //
-// Both journals are written in ONE database transaction under a lock on the wallet, so the
-// balance check can't be raced (unlike Send) and a payment never ends up without its cashback.
+// Both journals are written in ONE database transaction under a lock on the wallet (walletLock.js),
+// so the balance, limit and AML checks can't be raced and a payment never ends up without its cashback.
 // Cashback guardrails (otherwise paying ₱1 "bills" would earn ₱4 each time): only on bills of
 // ₱100 or more, and at most 3 cashbacks per customer per day (Manila).
-const { pool, withTransaction } = require('../db/pool');
-const { recordTransaction, getBalanceCents } = require('./ledgerService');
+const { pool } = require('../db/pool');
+const { recordTransaction } = require('./ledgerService');
+const { lockWallet, checkOutgoing, withPaymentTransaction } = require('./walletLock');
 const { formatReference } = require('./receiptService');
 const mpinService = require('./mpinService');
 const { findBiller, catalog } = require('./billers');
-const { badRequest, notFound, unprocessable } = require('../utils/errors');
+const { badRequest, unprocessable } = require('../utils/errors');
 const { toCents, fromCents } = require('../utils/money');
 const { maskAccount } = require('../utils/privacy');
 
@@ -99,12 +100,9 @@ async function pay(userId, body = {}) {
   const { biller, accountRef, name, amountCents } = validate(body);
   await mpinService.verifyMpin(userId, body.mpin);
 
-  return withTransaction(async (client) => {
-    const wallet = await client.query('SELECT id FROM accounts WHERE user_id = $1 FOR UPDATE', [userId]);
-    if (!wallet.rows[0]) throw notFound('ACCOUNT_NOT_FOUND', 'Account not found');
-    const walletId = wallet.rows[0].id;
-
-    const balanceBefore = await getBalanceCents(client, walletId);
+  return withPaymentTransaction(async (client) => {
+    const { id: walletId, balanceCents: balanceBefore } = await lockWallet(client, userId);
+    await checkOutgoing(client, userId, amountCents, 'POST /api/v1/bills/pay');
     if (balanceBefore < amountCents + FEE_CENTS) {
       throw unprocessable('INSUFFICIENT_FUNDS', 'Your wallet balance is too low for this bill');
     }
