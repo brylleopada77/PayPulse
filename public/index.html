@@ -1297,6 +1297,17 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" data-testid="toast" popover="manual"></div>
 
+  <!-- Balance refresh: the animated logo stands in for a toast while the wallet reloads -->
+  <div id="refresh-indicator" class="refresh-indicator" role="status" data-testid="refresh-indicator" popover="manual">
+    <svg class="refresh-mark" viewBox="0 0 48 48" aria-hidden="true">
+      <rect x="2" y="8" width="44" height="32" rx="8" fill="url(#pp-card-fill)"/>
+      <path d="M2 16a8 8 0 0 1 8-8h28a8 8 0 0 1 8 8v1H2z" fill="#fff" opacity="0.14"/>
+      <path class="boot-pulse" d="M8 25h7l3.2-7 5 14 3.6-9.5 2.4 2.5H34" pathLength="100" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle class="boot-dot" cx="38.5" cy="25" r="3.2" fill="#00d1ff" style="fill: var(--accent-secondary)"/>
+    </svg>
+    <span class="visually-hidden">Refreshing balance…</span>
+  </div>
+
   <!-- Socket.IO client, served by the PayPulse server itself (real-time notifications) -->
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>

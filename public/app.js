@@ -733,8 +733,22 @@
     btn.addEventListener('click', () => btn.closest('dialog').close());
   });
 
-  $('#refresh-btn').addEventListener('click', () => {
-    loadWallet().then(() => toast('Balance updated')).catch((err) => toast(err.message, 'error'));
+  // Refresh shows the pulsing logo (at least one beat, so it never just flickers), then the new balance.
+  const REFRESH_BEAT_MS = 900;
+  $('#refresh-btn').addEventListener('click', async () => {
+    const btn = $('#refresh-btn');
+    const indicator = $('#refresh-indicator');
+    if (btn.getAttribute('aria-busy') === 'true') return;
+    btn.setAttribute('aria-busy', 'true');
+    showPopover(indicator);
+    try {
+      await Promise.all([loadWallet(), new Promise((r) => setTimeout(r, REFRESH_BEAT_MS))]);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      hidePopover(indicator);
+      btn.removeAttribute('aria-busy');
+    }
   });
 
   /** Copy text to the clipboard; falls back to the older method where the Clipboard API is blocked. */

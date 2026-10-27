@@ -847,6 +847,21 @@ button.tx:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px;
 }
 .toast.success { background: var(--success); }
 
+/* Balance refresh: the PayPulse mark pulsing where the toast would appear */
+.refresh-indicator {
+  position: fixed; inset: auto; margin: 0; left: 50%; bottom: 96px; transform: translateX(-50%);
+  place-items: center; width: 64px; height: 64px; padding: 0;
+  border-radius: 20px; border: 1px solid rgba(var(--accent-deep-rgb), 0.18);
+  background: var(--surface); box-shadow: var(--shadow); z-index: 10;
+}
+.refresh-indicator:popover-open { display: grid; } /* only while open: a closed popover stays display:none */
+.refresh-mark { width: 44px; height: 44px; filter: drop-shadow(0 4px 12px rgba(var(--accent-deep-rgb), 0.32)); }
+#refresh-btn[aria-busy="true"] svg { animation: refresh-spin 0.9s linear infinite; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  #refresh-btn[aria-busy="true"] svg { animation: none; }
+}
+
 @media (max-width: 420px) {
   .balance { font-size: 1.75rem; }
   .auth-card { padding: 24px 20px; }

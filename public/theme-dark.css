@@ -417,6 +417,8 @@
   background: rgba(var(--accent-secondary-rgb), 0.12); color: #a5f0ff; border-color: rgba(var(--accent-secondary-rgb), 0.5);
 }
 :root[data-theme="dark"] .live-toast.cashback .live-toast-icon, :root[data-theme="dark"] .tx.savings .tx-icon { background: rgba(var(--accent-secondary-rgb), 0.16); }
+/* --text is white here, so the plain toast (var(--text) background) would be white on white */
+:root[data-theme="dark"] .toast:not(.error):not(.chaos):not(.success):not(.warn) { background: #1e2738; border: 1px solid rgba(255, 255, 255, 0.14); }
 :root[data-theme="dark"] .promo-text strong { color: #fff; text-shadow: 0 0 14px rgba(var(--accent-secondary-rgb), 0.45); }
 :root[data-theme="dark"] .bell-dot, :root[data-theme="dark"] .chip-count { border-color: #0a0f1a; }
 /* Glass dock and Scan & Pay */
