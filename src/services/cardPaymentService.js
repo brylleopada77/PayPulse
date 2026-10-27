@@ -4,11 +4,11 @@
 //                CREDIT Card Settlement - Payable to Merchants (GL 2050)  amount
 //
 // A locked (FROZEN) card is declined with 403 CARD_FROZEN, an expired one with 403 CARD_EXPIRED.
-// The card row and the wallet are locked during the authorization, so the balance check can't
-// be raced. Card payments count toward the daily limit, anti-spam and AML like any spending.
+// The card row and the wallet are locked during the authorization (walletLock.js), so the balance,
+// limit and AML checks can't be raced. Card payments count toward the daily limit, anti-spam and AML.
 const crypto = require('crypto');
-const { withTransaction } = require('../db/pool');
-const { recordTransaction, getBalanceCents } = require('./ledgerService');
+const { recordTransaction } = require('./ledgerService');
+const { lockWallet, checkOutgoing, withPaymentTransaction } = require('./walletLock');
 const mpinService = require('./mpinService');
 const { referenceFor } = require('./receiptService');
 const { AppError, badRequest, notFound, unprocessable } = require('../utils/errors');
@@ -28,7 +28,7 @@ async function pay(userId, token, { amount, merchant, mpin } = {}) {
   const shop = String(merchant ?? 'Online store').trim().replace(/\s+/g, ' ');
   if (shop.length < 2 || shop.length > 60) throw badRequest('INVALID_MERCHANT', 'Merchant name must be 2 to 60 characters');
 
-  return withTransaction(async (client) => {
+  return withPaymentTransaction(async (client) => {
     const { rows: [card] } = await client.query(
       `SELECT vc.*, (make_date(vc.expiry_year, vc.expiry_month, 1) + interval '1 month') <= now() AS is_expired
        FROM virtual_cards vc WHERE vc.user_id = $1 AND vc.token = $2 FOR UPDATE`,
@@ -42,8 +42,8 @@ async function pay(userId, token, { amount, merchant, mpin } = {}) {
     // Money leaves the wallet: confirm it is the cardholder (a locked card is declined above first).
     await mpinService.verifyMpin(userId, mpin);
 
-    await client.query('SELECT id FROM accounts WHERE id = $1 FOR UPDATE', [card.account_id]);
-    const balance = await getBalanceCents(client, card.account_id);
+    const { balanceCents: balance } = await lockWallet(client, userId);
+    await checkOutgoing(client, userId, amountCents, 'POST /api/v1/cards/:token/payments');
     if (balance < amountCents) throw unprocessable('INSUFFICIENT_FUNDS', 'Payment declined: your wallet balance is too low');
 
     const settlement = await client.query('SELECT id FROM accounts WHERE account_number = $1', [SETTLEMENT_ACCOUNT]);

@@ -2,7 +2,8 @@ name: PayPulse QA Pipeline
 
 # Every push and pull request: PostgreSQL service container -> schema migration -> app -> QA seed
 # accounts -> Playwright (API, browser E2E + resilience, visual regression; the ledger invariant
-# check runs as its global teardown) -> k6 (idempotency + race) -> ledger / end-of-day reconciliation. The HTML report (screenshots + videos), k6 reports and logs
+# check runs as its global teardown) -> k6 (idempotency + concurrency, the latter followed by the ledger
+# assertion) -> Postman -> ledger / end-of-day reconciliation. The HTML report (screenshots + videos), k6 reports and logs
 # are always published as workflow artifacts.
 on:
   push:
@@ -14,10 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # PayPulse has a KNOWN, intentional race-condition bug in POST /api/transfers (see QA_NOTES.md).
-  # While this is "true", the race checks are reported but don't block the pipeline. After the bug
-  # is fixed, set it to "false" so they become hard gates.
-  RACE_BUG_EXPECTED: "true"
   NODE_VERSION: 24
   K6_VERSION: 1.3.0
   PORT: 3000
@@ -113,11 +110,13 @@ jobs:
         if: always() && steps.playwright.outcome != 'skipped'
         run: k6 run tests/load/idempotent-transfer.js
 
-      - name: k6 race-condition test (known bug)
-        id: k6race
+      # Row-level locking gate: 10 identical simultaneous transfers, exactly 1 may succeed. The ledger
+      # invariants are asserted immediately after (debits = credits, cash = balances + fees + reserves,
+      # no overdrawn wallet).
+      - name: k6 concurrency test (10 identical transfers, exactly 1 succeeds) + ledger assertion
+        id: k6concurrency
         if: always() && steps.playwright.outcome != 'skipped'
-        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
-        run: k6 run tests/load/race-transfer.js
+        run: npm run test:concurrency
 
       # The Postman collection end to end (every endpoint, in order) through newman. Runs before the
       # ledger checks, so the money it moves is covered by them too.
@@ -129,11 +128,9 @@ jobs:
       - name: Database ledger check
         id: dbcheck
         if: always() && steps.playwright.outcome != 'skipped'
-        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
         run: npm run db:check
 
-      # Hard gate: the accounting checks always fail the build. Wallets overdrawn by the known race
-      # bug (k6 race test) are reported as KNOWN while RACE_BUG_EXPECTED is "true".
+      # Hard gate: the accounting checks (incl. "no overdrawn wallet") fail the build.
       - name: System ledger assertion (cash = balances + fees + reserves, debits = credits)
         id: systemledger
         if: always() && steps.playwright.outcome != 'skipped'
@@ -142,7 +139,6 @@ jobs:
       - name: End-of-day reconciliation (trial balance + GL controls)
         id: eod
         if: always() && steps.playwright.outcome != 'skipped'
-        continue-on-error: ${{ env.RACE_BUG_EXPECTED == 'true' }}
         run: node scripts/reconcile-eod.js
 
       - name: Test summary
@@ -154,7 +150,7 @@ jobs:
             echo "|------|--------|"
             echo "| Playwright (API, E2E, resilience, visual, a11y) | \`${{ steps.playwright.outcome }}\` |"
             echo "| k6 idempotency (gate) | \`${{ steps.k6idem.outcome }}\` |"
-            echo "| k6 race condition (known bug: \`${RACE_BUG_EXPECTED}\`) | \`${{ steps.k6race.outcome }}\` |"
+            echo "| k6 concurrency: row lock, exactly 1 of 10 (gate) + ledger assertion | \`${{ steps.k6concurrency.outcome }}\` |"
             echo "| Postman collection (newman) | \`${{ steps.newman.outcome }}\` |"
             echo "| Database ledger check | \`${{ steps.dbcheck.outcome }}\` |"
             echo "| System ledger assertion | \`${{ steps.systemledger.outcome }}\` |"

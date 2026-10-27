@@ -19,14 +19,14 @@
  * balances (debits = credits), all balances sum to 0, the trial balance debits equal its
  * credits, and no customer wallet is overdrawn (< 0).
  *
- * The overdraft check is the symptom of the KNOWN race-condition bug in POST /api/transfers (see
- * QA_NOTES.md). While RACE_BUG_EXPECTED is not "false" it is reported as KNOWN and does not fail
- * the run; the accounting checks always do. Playwright runs this script after every test run
- * (tests/global-teardown.ts).
+ * The overdraft check guards the wallet row lock (src/services/walletLock.js): an overdrawn wallet
+ * means two payments raced past the balance check (the old race bug, QA_NOTES.md). Every check
+ * fails the run. Playwright runs this script after every test run (tests/global-teardown.ts) and
+ * npm run test:concurrency right after the k6 concurrency test.
  *
  * Usage:   node scripts/assert-ledger.js          (or: npm run db:assert-ledger)
  *          node scripts/assert-ledger.js --json   (machine-readable output)
- * Env:     DATABASE_URL (read from .env if present), RACE_BUG_EXPECTED (default "true")
+ * Env:     DATABASE_URL (read from .env if present)
  * Exit:    0 = all checks pass, 1 = a check failed, 2 = could not run
  */
 require('dotenv').config({ quiet: true });
@@ -34,7 +34,6 @@ const { Client } = require('pg');
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://paypulse:paypulse@localhost:5432/paypulse';
 const asJson = process.argv.includes('--json');
-const RACE_BUG_EXPECTED = process.env.RACE_BUG_EXPECTED !== 'false';
 
 const peso = (cents) =>
   `${cents < 0 ? '-' : ''}₱${(Math.abs(cents) / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -129,10 +128,9 @@ async function main() {
         actual: `${n.overdrawn} overdrawn`,
         difference: '',
         pass: n.overdrawn === 0,
-        knownBug: RACE_BUG_EXPECTED, // the race-condition bug overdraws wallets (QA_NOTES.md)
       },
     ];
-    const ok = checks.every((c) => c.pass || c.knownBug);
+    const ok = checks.every((c) => c.pass);
 
     const breakdown = {
       topUpsPaidIn: peso(n.deposits_in),
@@ -161,7 +159,7 @@ async function main() {
         `Held by: users ${breakdown.userBalances} + fees ${breakdown.feesCollected} + reserves (PESONet pending) ${breakdown.pesonetPending}\n`,
       );
       for (const c of checks) {
-        console.log(`${c.pass ? 'PASS' : c.knownBug ? 'KNOWN' : 'FAIL'}  ${c.check}${!c.pass && c.knownBug ? ' (known race-condition bug, RACE_BUG_EXPECTED=true)' : ''}`);
+        console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.check}`);
         if (!c.pass) console.log(`      expected ${c.expected}, actual ${c.actual}${c.difference ? ` (difference ${c.difference})` : ''}`);
       }
       for (const o of overdrawn.rows) console.log(`      ${o.account_number}: ${peso(Number(o.balance_cents))}`);

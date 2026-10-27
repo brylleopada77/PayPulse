@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { pool, withTransaction } = require('../db/pool');
+const { pool } = require('../db/pool');
 const { recordTransaction } = require('./ledgerService');
 const mpinService = require('./mpinService');
 const otpService = require('./otpService');
@@ -11,6 +11,7 @@ const { toCents, fromCents } = require('../utils/money');
 const { normalizeMobile, requireMobile } = require('../utils/mobile');
 const { maskAccount, shortName } = require('../utils/privacy');
 const { referenceFor } = require('./receiptService');
+const { lockWallet, checkOutgoing, withPaymentTransaction } = require('./walletLock');
 
 // Transfers ABOVE this amount (₱1,000.00) need a one-time code on top of the MPIN.
 const OTP_THRESHOLD_CENTS = 100_000;
@@ -25,9 +26,10 @@ const peso = (cents) => `₱${(cents / 100).toLocaleString('en-PH', { minimumFra
 /**
  * The sender's wallet with its balance COMPUTED from the ledger (view account_balances).
  *
- * NOTE (intentional QA bug, see QA_NOTES.md): this is a plain read with no lock. Two transfers
- * that run at the same moment both see the same balance, both pass the balance check, and both
- * post their ledger entries, so the wallet can be overdrawn below zero.
+ * Inside a transfer this runs after lockWallet() (runSecured), so the balance can't change before
+ * the ledger postings commit. (Before that lock, two simultaneous transfers both read the same
+ * balance and overdrew the wallet: QA_NOTES.md.) Without the lock it is only the OTP step's
+ * fail-fast preview.
  */
 async function findSenderAccount(db, userId) {
   const { rows } = await db.query(
@@ -88,9 +90,11 @@ async function loadSender(db, userId, totalCents, insufficientMessage) {
  *
  * Without an OTP yet (and above the threshold), `preflight` runs the usual checks and the call
  * returns { otpRequired: true, ... } instead of moving money. Otherwise `execute(client)` runs
- * inside one database transaction.
+ * inside one database transaction that first locks the sender's wallet row (SELECT ... FOR UPDATE)
+ * and re-runs the AML and limit checks under that lock: simultaneous transfers from one wallet run
+ * one after the other, and any failed check rolls everything back.
  */
-async function runSecured(userId, { destinationKey, amountCents, mpin, otpChallengeId, otp }, { preflight, execute }) {
+async function runSecured(userId, { destinationKey, amountCents, mpin, otpChallengeId, otp, endpoint }, { preflight, execute }) {
   await mpinService.verifyMpin(userId, mpin);
 
   // Above ₱1,000 always; for every amount when the user turned on "SMS 2FA on every transfer".
@@ -105,7 +109,9 @@ async function runSecured(userId, { destinationKey, amountCents, mpin, otpChalle
     await otpService.verify(userId, { challengeId: otpChallengeId, code: otp, toAccountNumber: destinationKey, amountCents });
   }
 
-  return withTransaction(async (client) => {
+  return withPaymentTransaction(async (client) => {
+    await lockWallet(client, userId);
+    await checkOutgoing(client, userId, amountCents, endpoint);
     if (needsOtp) await otpService.consume(client, otpChallengeId);
     return execute(client);
   });
@@ -146,7 +152,7 @@ async function transfer(userId, input) {
     return { sender, receiver };
   };
 
-  return runSecured(userId, { ...input, destinationKey: recipient.key, amountCents }, {
+  return runSecured(userId, { ...input, destinationKey: recipient.key, amountCents, endpoint: 'POST /api/transfers' }, {
     preflight: checkParties,
     execute: async (client) => {
       const { sender, receiver } = await checkParties(client);
@@ -237,7 +243,7 @@ async function bankTransfer(userId, input) {
     `(${peso(amountCents)} + ${peso(feeCents)} fee)`;
 
   const destinationKey = `BANK:${rail.code}:${bank.code}:${account}`;
-  return runSecured(userId, { ...input, destinationKey, amountCents }, {
+  return runSecured(userId, { ...input, destinationKey, amountCents, endpoint: 'POST /api/transfers/bank' }, {
     preflight: (db) => loadSender(db, userId, totalCents, insufficient),
     execute: async (client) => {
       const sender = await loadSender(client, userId, totalCents, insufficient);

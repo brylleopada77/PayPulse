@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
 
   # Load / concurrency tests. Not started by "docker compose up"; run on demand with:
-  #   docker compose run --rm k6                                         (race condition, the default)
+  #   docker compose run --rm k6                                         (concurrency / row lock, the default)
   #   docker compose run --rm k6 run /scripts/idempotent-transfer.js     (idempotency)
   # HTML + JSON reports are written to ./reports.
   k6:
@@ -51,7 +51,7 @@ services:
     volumes:
       - ./tests/load:/scripts:ro
       - ./reports:/reports
-    command: ["run", "/scripts/race-transfer.js"]
+    command: ["run", "/scripts/concurrency-test.js"]
     depends_on:
       app:
         condition: service_healthy

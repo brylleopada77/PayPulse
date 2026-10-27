@@ -6,8 +6,8 @@
  *
  * Exactly ONE transfer may happen. Every other answer must be a replay of the first one
  * (201 + "Idempotent-Replayed: true") or "409 IDEMPOTENCY_IN_PROGRESS" while it is still running.
- * Unlike race-transfer.js (which shows the intentional race bug: no key, separate requests), this
- * proves that clients which DO send an Idempotency-Key can never pay twice.
+ * concurrency-test.js covers separate requests WITHOUT a key (the wallet row lock lets only what
+ * the balance covers through); this proves that a client retrying WITH a key can never pay twice.
  *
  * Run with Docker:  docker compose run --rm k6 run /scripts/idempotent-transfer.js
  * Run locally:      k6 run -e BASE_URL=http://localhost:3000 tests/load/idempotent-transfer.js
