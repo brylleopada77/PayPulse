@@ -2,8 +2,12 @@
    Run "npm run theme:dark" after changing styles.css. */
 
 /* ===== Generated: light colours translated by role ===== */
-:root[data-theme="dark"] .bank-avatar img {
+:root[data-theme="dark"] .bank-avatar.has-logo {
   background: #1c1f22;
+}
+:root[data-theme="dark"] .limit-warning.show {
+  background: rgba(255, 159, 67, 0.16);
+  color: #ffc58f;
 }
 :root[data-theme="dark"] .auth {
   background: #1c1f22;

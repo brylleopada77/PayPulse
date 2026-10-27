@@ -14,7 +14,7 @@ async function openBankTransfer(page: Page) {
 }
 
 test.describe('Bank Transfer: bank picker', () => {
-  test('grouped list with badges and network tags; choosing a bank updates the trigger and the routes', async ({ page, request }) => {
+  test('grouped list with logos (badge where there is none) and network tags', async ({ page, request }) => {
     await login(page, await createFundedUser(request, 1000, 'Alice Tan'));
     await openBankTransfer(page);
 
@@ -27,31 +27,95 @@ test.describe('Bank Transfer: bank picker', () => {
     await expect(listbox.getByRole('group', { name: 'E-wallets & digital banks' }).getByRole('option')).toHaveCount(8);
     await expect(listbox.getByRole('group', { name: 'Universal & commercial banks' }).getByRole('option')).toHaveCount(11);
     const bdo = listbox.getByRole('option', { name: 'BDO InstaPay PESONet' });
-    await expect(bdo.locator('.bank-avatar')).toHaveText('BDO');
+    await expect(bdo.locator('.bank-avatar.has-logo img')).toHaveAttribute('src', '/img/banks/bdo.png');
     await expect(bdo.locator('.rail-tag')).toHaveText(['InstaPay', 'PESONet']);
     await expect(listbox.getByRole('option', { name: 'GCash InstaPay' })).toHaveAttribute('aria-selected', 'true');
 
-    // E-wallet selected: PESONet disabled, InstaPay forced
-    const rail = page.getByTestId('bank-rail');
-    await expect(rail.locator('option[value="PESONET"]')).toHaveJSProperty('disabled', true);
-    await expect(page.getByTestId('bank-rail-hint')).toHaveText('GCash receives InstaPay only');
+    // every logo is served and decodes (no broken images)
+    const broken = await listbox.locator('img').evaluateAll((imgs) =>
+      Promise.all(imgs.map((img) => (img as HTMLImageElement).decode().then(() => null, () => (img as HTMLImageElement).src))));
+    expect(broken.filter(Boolean)).toEqual([]);
+    // no logo for PNB: its initials badge
+    await expect(listbox.getByRole('option', { name: 'PNB InstaPay PESONet' }).locator('.bank-avatar')).toHaveText('PNB');
 
-    // Choose Landbank with the mouse: list closes, trigger shows its badge, name and both routes
+    // choosing closes the list; the trigger shows the logo and name (no channel tags: that is the channel picker)
     await listbox.getByRole('option', { name: 'Landbank InstaPay PESONet' }).click();
     await expect(listbox).toBeHidden();
     await expect(page.getByTestId('bank-trigger-name')).toHaveText('Landbank');
-    await expect(trigger.locator('.bank-avatar')).toHaveText('LB');
-    await expect(trigger.locator('.rail-tag')).toHaveText(['InstaPay', 'PESONet']);
+    await expect(trigger.locator('.bank-avatar img')).toHaveAttribute('src', '/img/banks/landbank.png');
+    await expect(trigger.locator('.rail-tag')).toHaveCount(0);
     await expect(page.getByTestId('bank-code')).toHaveValue('LANDBANK');
-    await expect(page.locator('#bank-account-label')).toHaveText('Landbank account number');
-    await expect(rail.locator('option[value="PESONET"]')).toHaveJSProperty('disabled', false);
-    await rail.selectOption('PESONET');
+  });
+
+  test('a logo that fails to load falls back to the initials badge', async ({ page, request }) => {
+    await page.route('**/img/banks/gcash.png', (route) => route.fulfill({ status: 404, body: '' }));
+    await login(page, await createFundedUser(request, 1000, 'Alice Tan'));
+    await openBankTransfer(page);
+    const avatar = page.getByTestId('bank-trigger').locator('.bank-avatar');
+    await expect(avatar).toHaveText('GC');
+    await expect(avatar).not.toHaveClass(/has-logo/);
+  });
+
+  test('transfer channel: e-wallets locked to InstaPay; banks pick InstaPay or PESONet; account placeholder per bank', async ({ page, request }) => {
+    await login(page, await createFundedUser(request, 1000, 'Alice Tan'));
+    await openBankTransfer(page);
+
+    const channel = page.getByRole('group', { name: /Transfer channel/ });
+    const instapay = channel.getByRole('radio', { name: /InstaPay/ });
+    const pesonet = channel.getByRole('radio', { name: /PESONet/ });
+
+    // GCash: InstaPay checked, PESONet disabled, an informative tag; mobile-number placeholder
+    await expect(instapay).toBeChecked();
+    await expect(pesonet).toBeDisabled();
+    await expect(page.getByTestId('bank-rail-hint')).toHaveText('GCash: InstaPay only');
+    await expect(page.getByTestId('bank-account')).toHaveAttribute('placeholder', '09XXXXXXXXX (registered with GCash)');
+
+    // AUB: both channels; PESONet can be picked; account-number placeholder names the bank
+    await page.getByTestId('bank-trigger').click();
+    await page.getByRole('option', { name: 'AUB InstaPay PESONet' }).click();
+    await expect(pesonet).toBeEnabled();
+    await expect(page.getByTestId('bank-rail-hint')).toBeHidden();
+    await expect(page.getByTestId('bank-account')).toHaveAttribute('placeholder', '10 to 16 digits for AUB');
+    await page.getByTestId('channel-pesonet').click();
+    await expect(pesonet).toBeChecked();
 
     // Back to a digital bank: the unsupported PESONet choice falls back to InstaPay
-    await trigger.click();
-    await listbox.getByRole('option', { name: 'Tonik InstaPay' }).click();
-    await expect(rail).toHaveValue('INSTAPAY');
-    await expect(page.locator('#bank-account-label')).toHaveText('Tonik account number');
+    await page.getByTestId('bank-trigger').click();
+    await page.getByRole('option', { name: 'Tonik InstaPay' }).click();
+    await expect(instapay).toBeChecked();
+    await expect(pesonet).toBeDisabled();
+    await expect(page.getByTestId('bank-account')).toHaveAttribute('placeholder', '10 to 16 digits for Tonik');
+  });
+
+  test('InstaPay above ₱50,000: inline warning, one-tap switch to PESONet, and Review is blocked until then', async ({ page, request }) => {
+    await login(page, await createFundedUser(request, 100_000, 'Alice Tan'));
+    await openBankTransfer(page);
+    const warning = page.locator('#bank-limit-text');
+
+    await page.getByTestId('bank-trigger').click();
+    await page.getByRole('option', { name: 'BDO InstaPay PESONet' }).click();
+    await page.getByTestId('bank-account').fill('001234567890');
+    await page.getByTestId('bank-account-name').fill('Ana Reyes');
+    await page.getByTestId('bank-amount').fill('50000');
+    await expect(warning).toHaveText(''); // exactly the cap is fine
+    await page.getByTestId('bank-amount').fill('60000');
+    await expect(warning).toContainText('InstaPay limit is ₱50,000. Switch to PESONet for higher amounts.');
+
+    await page.getByTestId('bank-submit').click();
+    await expect(page.locator('#bank-form .form-error')).toHaveText('InstaPay limit is ₱50,000. Switch to PESONet for higher amounts.');
+
+    await page.getByTestId('bank-use-pesonet').click();
+    await expect(page.getByRole('radio', { name: /PESONet/ })).toBeChecked();
+    await expect(warning).toHaveText('');
+    await page.getByTestId('bank-submit').click();
+    await expect(page.locator('#send-review')).toContainText('PESONet (batch)');
+
+    // an InstaPay-only e-wallet can't switch: the warning says to send it in parts
+    await page.locator('#review-back').click();
+    await page.getByTestId('bank-trigger').click();
+    await page.getByRole('option', { name: 'GCash InstaPay' }).click();
+    await expect(warning).toContainText('GCash receives InstaPay only. Send it in parts.');
+    await expect(page.getByTestId('bank-use-pesonet')).toBeHidden();
   });
 
   test('keyboard: arrows, type-ahead, Enter, and Escape closes only the list', async ({ page, request }) => {

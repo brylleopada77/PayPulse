@@ -199,13 +199,15 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .bank-chevron { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s ease; }
 .bank-picker.open .bank-chevron { transform: rotate(180deg); }
 .bank-name { flex: 1; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 24px round avatar: a logo image, or the bank's initials on its brand-tinted colour */
+/* 28px round avatar: the bank's logo on a white disc (visible in dark mode too), or its initials
+   on a brand-tinted colour when there is no logo / it fails to load */
 .bank-avatar {
-  width: 24px; height: 24px; flex: none; border-radius: 50%; display: grid; place-items: center; overflow: hidden;
-  color: #fff; font-size: 0.6rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1;
+  width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center; overflow: hidden;
+  color: #fff; font-size: 0.66rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1;
 }
-.bank-avatar.long { font-size: 0.5rem; }
-.bank-avatar img { width: 100%; height: 100%; object-fit: contain; background: #fff; padding: 2px; }
+.bank-avatar.long { font-size: 0.55rem; }
+.bank-avatar.has-logo { background: #fff; padding: 4px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18); }
+.bank-avatar img { width: 100%; height: 100%; object-fit: contain; }
 .bank-rails { display: flex; gap: 4px; flex: none; }
 .rail-tag {
   padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px;
@@ -227,6 +229,34 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .bank-option[aria-selected="true"] .bank-name { color: var(--accent-ink); }
 /* the highlighted row (keyboard or pointer): soft accent fill + accent outline */
 .bank-option.active { background: var(--accent-soft); outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---------- Transfer channel: InstaPay / PESONet radio cards ---------- */
+.channel-picker { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
+.channel-picker legend { padding: 0; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.channel-tag {
+  padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink);
+  font-size: 0.72rem; font-weight: 700;
+}
+.form .channel-option {
+  position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface); font-weight: 400;
+}
+.channel-option input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: inherit; }
+.channel-icon { font-size: 1.05rem; line-height: 1.3; }
+.channel-text { display: grid; gap: 2px; min-width: 0; }
+.channel-text small { color: var(--muted); font-size: 0.74rem; line-height: 1.3; }
+.channel-option:has(input:checked) { border-color: var(--accent); background: var(--accent-softer); box-shadow: inset 0 0 0 1px var(--accent); }
+.channel-option:has(input:checked) strong { color: var(--accent-ink); }
+.channel-option:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
+.channel-option.unavailable { cursor: not-allowed; opacity: 0.55; }
+
+/* InstaPay cap warning under the amount (role="status": always present, empty when fine) */
+.limit-warning { margin: 0; font-size: 0.85rem; }
+.limit-warning.show {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 12px; border-radius: 12px;
+  background: #fff4d6; color: #6b4600; border: 1px solid #f5d39b;
+}
+.link-btn { border: 0; padding: 0; background: none; color: var(--accent-ink); font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .form-error { color: var(--danger); font-size: 0.875rem; margin: 0; min-height: 1.2em; }
 
 /* ---------- Auth ---------- */

@@ -86,6 +86,15 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.getByTestId('bank-listbox')).toBeVisible();
       await page.keyboard.press('ArrowDown'); // a highlighted row too
       await expectNoViolations(page, testInfo, `${theme}-bank-picker-open`, '[data-testid="send-dialog"]');
+
+      // a bank with both channels, PESONet chosen, then the InstaPay cap warning
+      await page.getByRole('option', { name: 'AUB InstaPay PESONet' }).click();
+      await page.getByTestId('channel-pesonet').click();
+      await expectNoViolations(page, testInfo, `${theme}-bank-channel`, '[data-testid="send-dialog"]');
+      await page.getByTestId('channel-instapay').click();
+      await page.getByTestId('bank-amount').fill('60000');
+      await expect(page.getByTestId('bank-use-pesonet')).toBeVisible();
+      await expectNoViolations(page, testInfo, `${theme}-bank-limit-warning`, '[data-testid="send-dialog"]');
     });
 
     test('receipt and the ISO 20022 Message Inspector tab', async ({ page, request }, testInfo) => {
