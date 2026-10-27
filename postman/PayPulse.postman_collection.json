@@ -666,7 +666,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.environment.set('newMpin', String(Math.floor(Math.random() * 900000) + 100000).replace(/(\\d)\\1{2,}/g, '$1' + '7'));"
+                  "// a random 6-digit MPIN the server accepts: no repeated neighbours, not a straight run, not the current one",
+                  "let next;",
+                  "do {",
+                  "  next = '';",
+                  "  while (next.length < 6) {",
+                  "    const d = String(Math.floor(Math.random() * 10));",
+                  "    if (d !== next.slice(-1)) next += d;",
+                  "  }",
+                  "} while ([1, -1].some((s) => [...next].slice(1).every((d, i) => d - next[i] === s)) || next === pm.environment.get('mpin'));",
+                  "pm.environment.set('newMpin', next);"
                 ]
               }
             },
