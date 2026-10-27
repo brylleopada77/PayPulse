@@ -190,12 +190,16 @@ async function transfer(userId, input) {
 function parseBankDestination({ bankCode, accountNumber, accountName, rail = 'INSTAPAY' }) {
   const bank = findBank(typeof bankCode === 'string' ? bankCode.trim().toUpperCase() : bankCode);
   if (!bank) {
-    throw badRequest('INVALID_BANK', 'Choose one of: GCash, Maya, BDO, BPI, Metrobank');
+    throw badRequest('INVALID_BANK', 'Choose a bank or e-wallet from the list (GET /api/transfers/banks)');
   }
 
   const railInfo = RAILS[typeof rail === 'string' ? rail.trim().toUpperCase() : rail];
   if (!railInfo) {
     throw badRequest('INVALID_RAIL', 'rail must be "INSTAPAY" or "PESONET"');
+  }
+  if (!bank.rails.includes(railInfo.code)) {
+    throw badRequest('RAIL_NOT_SUPPORTED', `${bank.name} receives ${bank.rails.map((r) => RAILS[r].name).join(' or ')} transfers only`)
+      .withDetails({ bankCode: bank.code, rail: railInfo.code, supportedRails: bank.rails });
   }
 
   let account;

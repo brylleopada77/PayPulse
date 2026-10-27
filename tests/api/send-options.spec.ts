@@ -87,7 +87,53 @@ test.describe('Bank Transfer (₱15 fee)', () => {
     const body = await response.json();
 
     expect(body.feeCents).toBe(1500);
-    expect(body.banks.map((b: { name: string }) => b.name)).toEqual(['GCash', 'Maya', 'BDO', 'BPI', 'Metrobank']);
+    expect(body.categories).toEqual({ EWALLET: 'E-wallets & digital banks', BANK: 'Banks' });
+    const names = (category: string) =>
+      body.banks.filter((b: { category: string }) => b.category === category).map((b: { name: string }) => b.name);
+    expect(names('EWALLET')).toEqual(['GCash', 'Maya', 'GoTyme', 'SeaBank', 'CIMB', 'Tonik', 'UnionDigital', 'Komo']);
+    expect(names('BANK')).toEqual([
+      'BDO', 'BPI', 'Metrobank', 'UnionBank', 'Security Bank', 'RCBC', 'China Bank', 'PNB', 'EastWest', 'AUB', 'Landbank',
+    ]);
+    for (const b of body.banks) {
+      // route tags: every destination is on InstaPay; PESONet only for the banks
+      expect(b.rails, b.code).toEqual(b.category === 'BANK' ? ['INSTAPAY', 'PESONET'] : ['INSTAPAY']);
+      expect(b.code, b.name).toMatch(/^[A-Z]+$/);
+      expect(b.bic, b.name).toMatch(/^[A-Z0-9]{8}([A-Z0-9]{3})?$/);
+    }
+    expect(new Set(body.banks.map((b: { code: string }) => b.code)).size, 'unique codes').toBe(body.banks.length);
+  });
+
+  test('PESONet goes to banks only: an e-wallet or digital bank answers 400 RAIL_NOT_SUPPORTED', async ({ request }) => {
+    const alice = await createFundedUser(request, 1000);
+
+    const refused = await bankTransfer(request, alice, {
+      bankCode: 'GCASH', accountNumber: '09171234567', accountName: 'Ana Reyes', amount: 100, rail: 'PESONET',
+    });
+    expect(refused.status()).toBe(400);
+    expect(await refused.json()).toMatchObject({
+      error: { code: 'RAIL_NOT_SUPPORTED', details: { bankCode: 'GCASH', rail: 'PESONET', supportedRails: ['INSTAPAY'] } },
+    });
+
+    const pesonet = await bankTransfer(request, alice, {
+      bankCode: 'UNIONBANK', accountNumber: '109876543210', accountName: 'Ana Reyes', amount: 100, rail: 'PESONET',
+    });
+    expect(pesonet.status(), await pesonet.text()).toBe(201);
+    expect(await pesonet.json()).toMatchObject({ bank: { code: 'UNIONBANK', name: 'UnionBank' }, rail: 'PESONET', status: 'QUEUED' });
+    expect(await getBalanceCents(request, alice)).toBe(100_000 - 11_500);
+  });
+
+  test('a digital bank (GoTyme) takes an account number over InstaPay, with its BIC in the pacs.008', async ({ request }) => {
+    const alice = await createFundedUser(request, 1000);
+
+    const sent = await bankTransfer(request, alice, {
+      bankCode: 'GOTYME', accountNumber: '012345678901', accountName: 'Ana Reyes', amount: 200,
+    });
+    expect(sent.status(), await sent.text()).toBe(201);
+    const { transactionId, rail } = await sent.json();
+    expect(rail).toBe('INSTAPAY');
+
+    const iso = await request.get(`/api/transfers/bank/${transactionId}/iso20022?format=xml`, { headers: authHeader(alice.token) });
+    expect(await iso.text()).toContain('<BICFI>GOTYPHM2XXX</BICFI>');
   });
 
   test('deducts amount + ₱15 fee and records "Bank Transfer to BDO"', async ({ request }) => {

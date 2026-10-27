@@ -1144,7 +1144,7 @@
 
   // ----- Bank list + fee (from GET /api/transfers/banks) -----
 
-  let bankInfo = null; // { feeCents, banks: [{ code, name, accountType }] }
+  let bankInfo = null; // { feeCents, categories, banks: [{ code, name, category, accountType, rails }] }
 
   const CUTOFF_TIME = new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
 
@@ -1157,9 +1157,23 @@
       bankInfo ??= { feeCents: 1500, banks: [], pesonetNextCutoffAt: null };
     }
     if (firstLoad) {
+      // One <optgroup> per category (E-wallets & digital banks, Banks); each option shows its routes.
+      const categories = bankInfo.categories ?? {};
       bankForm.elements.bankCode.replaceChildren(
-        ...bankInfo.banks.map((b) => Object.assign(document.createElement('option'), { value: b.code, textContent: b.name })),
+        ...Object.entries(categories).map(([category, label]) => {
+          const group = Object.assign(document.createElement('optgroup'), { label });
+          group.append(
+            ...bankInfo.banks
+              .filter((b) => b.category === category)
+              .map((b) => Object.assign(document.createElement('option'), {
+                value: b.code,
+                textContent: `${b.name} · ${b.rails.map((r) => RAIL_SHORT[r]).join(' / ')}`,
+              })),
+          );
+          return group;
+        }),
       );
+      updateBankForm();
     }
     if (bankInfo.pesonetNextCutoffAt) {
       bankForm.elements.rail.querySelector('option[value="PESONET"]').textContent =
@@ -1168,6 +1182,7 @@
   }
 
   const RAIL_NAMES = { INSTAPAY: 'InstaPay (instant)', PESONET: 'PESONet (batch)' };
+  const RAIL_SHORT = { INSTAPAY: 'InstaPay', PESONET: 'PESONet' };
 
   const selectedBank = () => bankInfo?.banks.find((b) => b.code === bankForm.elements.bankCode.value);
 
@@ -1183,6 +1198,13 @@
       input.placeholder = '10 to 16 digits';
       input.inputMode = 'numeric';
     }
+    // Route tags: PESONet only where the destination accepts it (e-wallets / digital banks: InstaPay).
+    const rails = bank?.rails ?? ['INSTAPAY', 'PESONET'];
+    const railSelect = bankForm.elements.rail;
+    for (const option of railSelect.options) option.disabled = !rails.includes(option.value);
+    if (!rails.includes(railSelect.value)) railSelect.value = rails[0];
+    $('#bank-rail-hint').textContent = rails.length === 1 && bank ? `${bank.name} receives ${RAIL_SHORT[rails[0]]} only` : '';
+
     const fee = (bankInfo?.feeCents ?? 1500) / 100;
     const amount = bankForm.elements.amount.value.trim();
     $('#bank-fee').textContent = money(fee);

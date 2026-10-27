@@ -1018,7 +1018,7 @@
           }
         },
         {
-          "name": "Banks / e-wallets, rails and the bank transfer fee",
+          "name": "Banks and e-wallets by category, with their routes (InstaPay / PESONet), and the fee",
           "event": [
             {
               "listen": "test",
@@ -1096,7 +1096,7 @@
                 "bank"
               ]
             },
-            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+            "description": "Destinations and their routes come from GET /api/transfers/banks: every bank and e-wallet is on InstaPay; PESONet goes to the banks only (otherwise 400 RAIL_NOT_SUPPORTED).\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
           }
         },
         {
@@ -1145,7 +1145,7 @@
                 "bank"
               ]
             },
-            "description": "**Moves money.** Sent with a fresh `Idempotency-Key`."
+            "description": "Destinations and their routes come from GET /api/transfers/banks: every bank and e-wallet is on InstaPay; PESONet goes to the banks only (otherwise 400 RAIL_NOT_SUPPORTED).\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
           }
         },
         {
