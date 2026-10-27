@@ -669,9 +669,22 @@
         <h2>Bank Transfer</h2>
         <button type="button" class="close" data-close aria-label="Close">×</button>
       </header>
-      <label>Bank or e-wallet
-        <select name="bankCode" required data-testid="bank-select"></select>
-      </label>
+      <!-- Bank picker: a select-only combobox (WAI-ARIA APG) so each row can show the bank's badge,
+           name and network tags. Focus stays on the combobox; aria-activedescendant moves. -->
+      <div class="bank-picker" id="bank-picker" data-testid="bank-picker">
+        <span class="picker-label" id="bank-picker-label">Bank or e-wallet</span>
+        <div class="bank-trigger" id="bank-trigger" role="combobox" tabindex="0" aria-haspopup="listbox"
+             aria-expanded="false" aria-controls="bank-listbox" aria-labelledby="bank-picker-label bank-trigger-name"
+             data-testid="bank-trigger">
+          <span class="bank-avatar" id="bank-trigger-avatar" aria-hidden="true"></span>
+          <span class="bank-name" id="bank-trigger-name" data-testid="bank-trigger-name">Choose a bank</span>
+          <span class="bank-rails" id="bank-trigger-rails" aria-hidden="true"></span>
+          <svg class="bank-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <ul class="bank-listbox" id="bank-listbox" role="listbox" aria-labelledby="bank-picker-label" tabindex="-1"
+            data-testid="bank-listbox" hidden></ul>
+        <input type="hidden" name="bankCode" data-testid="bank-code">
+      </div>
       <label><span id="bank-account-label">Account number</span>
         <input name="accountNumber" autocomplete="off" required data-testid="bank-account">
       </label>

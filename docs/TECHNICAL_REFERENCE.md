@@ -192,7 +192,7 @@ the change get `401` with "Your password was changed. Please log in again."
 
 | | Express Send | Bank Transfer |
 |---|---|---|
-| To | Another PayPulse wallet, by account number (`PP…`) or mobile number (`09…`) | 19 destinations (`GET /api/transfers/banks`, grouped): **e-wallets & digital banks** GCash, Maya (recipient's mobile number), GoTyme, MariBank (formerly SeaBank), CIMB, Tonik, UnionDigital, Komo; **banks** BDO, BPI, Metrobank, UnionBank, Security Bank, RCBC, China Bank, PNB, EastWest, AUB, Landbank (10 to 16 digit account number) |
+| To | Another PayPulse wallet, by account number (`PP…`) or mobile number (`09…`) | 19 destinations (`GET /api/transfers/banks`, grouped): **e-wallets & digital banks** GCash, Maya (recipient's mobile number), GoTyme, MariBank (formerly SeaBank), CIMB, Tonik, UnionDigital, Komo; **universal & commercial banks** BDO, BPI, Metrobank, UnionBank, Security Bank, RCBC, China Bank, PNB, EastWest, AUB, Landbank (10 to 16 digit account number). Picked in an accessible custom select (WAI-ARIA select-only combobox) that shows each one's badge (initials on a brand-tinted colour; a `logo` image if the catalog has one, falling back to the badge) and its network tags |
 | Routes | InstaPay only | InstaPay to all; **PESONet to the banks only** (`rails` per destination; PESONet to an e-wallet / digital bank → `400 RAIL_NOT_SUPPORTED`) |
 | Fee | ₱0 | **₱15** per transfer |
 | Deducted | amount | **amount + ₱15** |

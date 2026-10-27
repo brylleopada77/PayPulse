@@ -185,6 +185,48 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
 .hint { color: var(--muted); font-weight: 400; font-size: 0.8rem; }
+
+/* ---------- Bank picker (select-only combobox: badge, name, network tags) ---------- */
+.bank-picker { display: grid; gap: 6px; }
+.picker-label { font-size: 0.9rem; font-weight: 600; }
+.bank-trigger, .bank-option { display: flex; align-items: center; gap: 10px; }
+.bank-trigger {
+  padding: 10px 12px; min-height: 48px; cursor: pointer; user-select: none;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
+}
+.bank-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; border-color: transparent; }
+.bank-picker.open .bank-trigger { border-color: var(--accent); }
+.bank-chevron { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s ease; }
+.bank-picker.open .bank-chevron { transform: rotate(180deg); }
+.bank-name { flex: 1; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 24px round avatar: a logo image, or the bank's initials on its brand-tinted colour */
+.bank-avatar {
+  width: 24px; height: 24px; flex: none; border-radius: 50%; display: grid; place-items: center; overflow: hidden;
+  color: #fff; font-size: 0.6rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1;
+}
+.bank-avatar.long { font-size: 0.5rem; }
+.bank-avatar img { width: 100%; height: 100%; object-fit: contain; background: #fff; padding: 2px; }
+.bank-rails { display: flex; gap: 4px; flex: none; }
+.rail-tag {
+  padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--muted); font-size: 0.7rem; font-weight: 600; white-space: nowrap;
+}
+.bank-listbox {
+  margin: 0; padding: 6px; list-style: none; max-height: 300px; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+}
+.bank-listbox[hidden] { display: none; }
+.bank-listbox ul { margin: 0; padding: 0; list-style: none; }
+.bank-group-label {
+  display: block; padding: 10px 10px 4px; color: var(--muted);
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.bank-option { padding: 8px 10px; border-radius: 10px; cursor: pointer; font-weight: 400; }
+.bank-option[aria-selected="true"] { background: var(--accent-softer); }
+.bank-option[aria-selected="true"] .bank-name { color: var(--accent-ink); }
+/* the highlighted row (keyboard or pointer): soft accent fill + accent outline */
+.bank-option.active { background: var(--accent-soft); outline: 2px solid var(--accent); outline-offset: -2px; }
 .form-error { color: var(--danger); font-size: 0.875rem; margin: 0; min-height: 1.2em; }
 
 /* ---------- Auth ---------- */
