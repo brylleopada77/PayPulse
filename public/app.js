@@ -3648,9 +3648,10 @@
 
   /**
    * Draw the logo mark (symbol #pp-mark in index.html, viewBox 48x48) at x, y in a size x size box.
-   * The shapes are read from the symbol, so the PNG receipt always matches the on-screen logo.
+   * The shapes are read from the symbol, so the PNG receipt always matches the on-screen logo;
+   * colours come from the theme tokens through color(name, fallback).
    */
-  function drawLogoMark(ctx, x, y, size) {
+  function drawLogoMark(ctx, x, y, size, color = cssToken) {
     const symbol = document.getElementById('pp-mark');
     ctx.save();
     ctx.translate(x, y);
@@ -3660,14 +3661,14 @@
       ctx.globalAlpha *= Number(el.getAttribute('opacity') || 1);
       if (part === 'card') {
         const fill = ctx.createLinearGradient(2, 8, 46, 40);
-        fill.addColorStop(0, '#FF6B00');
-        fill.addColorStop(1, '#FF3D00');
+        fill.addColorStop(0, color('--accent', '#0052ff'));
+        fill.addColorStop(1, color('--accent-strong', '#0036b3'));
         ctx.fillStyle = fill;
         ctx.beginPath();
         ctx.roundRect(+el.getAttribute('x'), +el.getAttribute('y'), +el.getAttribute('width'), +el.getAttribute('height'), +el.getAttribute('rx'));
         ctx.fill();
       } else if (el.tagName === 'circle') {
-        ctx.fillStyle = el.getAttribute('fill');
+        ctx.fillStyle = color('--accent-secondary', el.getAttribute('fill'));
         ctx.beginPath();
         ctx.arc(+el.getAttribute('cx'), +el.getAttribute('cy'), +el.getAttribute('r'), 0, Math.PI * 2);
         ctx.fill();
@@ -3725,12 +3726,12 @@
     ctx.globalAlpha = 0.08;
     ctx.translate(W - 74, 50);
     ctx.rotate((-12 * Math.PI) / 180);
-    drawLogoMark(ctx, -85, -85, 170);
+    drawLogoMark(ctx, -85, -85, 170, light);
     ctx.restore();
     const mark = 20;
     ctx.font = font(14, 800);
     const brandW = mark + 6 + ctx.measureText('PayPulse').width;
-    drawLogoMark(ctx, (W - brandW) / 2, 8, mark);
+    drawLogoMark(ctx, (W - brandW) / 2, 8, mark, light);
     ctx.fillStyle = ink;
     ctx.textAlign = 'left';
     ctx.fillText('PayPulse', (W - brandW) / 2 + mark + 6, 23);
