@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- PayPulse "Pulse Card" mark: same geometry as #pp-mark in index.html -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF6B00"/>
+      <stop offset="1" stop-color="#FF3D00"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="8" width="44" height="32" rx="8" fill="url(#g)"/>
+  <path d="M2 16a8 8 0 0 1 8-8h28a8 8 0 0 1 8 8v1H2z" fill="#fff" opacity="0.14"/>
+  <path d="M8 25h7l3.2-7 5 14 3.6-9.5 2.4 2.5H34" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="38.5" cy="25" r="3.4" fill="#FFB300"/>
+</svg>

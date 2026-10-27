@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PayPulse Wallet</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230052ff'/><path d='M6 17h5l3-7 4 13 3-6h5' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f4f7ff">
   <!-- Theme before first paint (no flash): saved choice, or the system's light/dark setting -->
@@ -21,12 +21,46 @@
   <link rel="stylesheet" href="theme-dark.css">
 </head>
 <body>
+  <!-- PayPulse logo, "Pulse Card": a payment card with a glowing heartbeat line and an amber dot.
+       One <symbol>, used everywhere as <svg class="pp-mark"><use href="#pp-mark"/></svg> inside
+       .pp-logo.sm / .md / .lg (the receipt PNG reads the same paths: app.js drawLogoMark). -->
+  <svg class="svg-sprite" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="pp-card-fill" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#FF6B00"/>
+        <stop offset="1" stop-color="#FF3D00"/>
+      </linearGradient>
+      <filter id="pp-glow" x="-20%" y="-40%" width="140%" height="180%">
+        <feGaussianBlur stdDeviation="1.6"/>
+      </filter>
+    </defs>
+    <symbol id="pp-mark" viewBox="0 0 48 48">
+      <rect data-part="card" x="2" y="8" width="44" height="32" rx="8" fill="url(#pp-card-fill)"/>
+      <path data-part="sheen" d="M2 16a8 8 0 0 1 8-8h28a8 8 0 0 1 8 8v1H2z" fill="#fff" opacity="0.14"/>
+      <path data-part="pulse" d="M8 25h7l3.2-7 5 14 3.6-9.5 2.4 2.5H34" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.55" filter="url(#pp-glow)"/>
+      <path data-part="pulse" d="M8 25h7l3.2-7 5 14 3.6-9.5 2.4 2.5H34" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle data-part="dot-halo" cx="38.5" cy="25" r="5.2" fill="#FFB300" opacity="0.35"/>
+      <circle data-part="dot" cx="38.5" cy="25" r="3.2" fill="#FFB300"/>
+    </symbol>
+  </svg>
+
+  <!-- App loading screen: the pulse mark beats until the first screen is ready (app.js hides it) -->
+  <div class="boot-loader" id="boot-loader" role="status" data-testid="boot-loader">
+    <svg class="boot-mark" viewBox="0 0 48 48" aria-hidden="true">
+      <rect x="2" y="8" width="44" height="32" rx="8" fill="url(#pp-card-fill)"/>
+      <path d="M2 16a8 8 0 0 1 8-8h28a8 8 0 0 1 8 8v1H2z" fill="#fff" opacity="0.14"/>
+      <path class="boot-pulse" d="M8 25h7l3.2-7 5 14 3.6-9.5 2.4 2.5H34" pathLength="100" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle class="boot-dot" cx="38.5" cy="25" r="3.2" fill="#FFB300"/>
+    </svg>
+    <span class="boot-text">Loading PayPulse…</span>
+  </div>
+
   <!-- ============ Sign in / Sign up ============ -->
   <main id="auth-view" class="auth" hidden>
     <section class="auth-card">
-      <div class="brand">
-        <span class="logo" aria-hidden="true"></span>
-        <span class="brand-name">PayPulse</span>
+      <div class="pp-logo lg" data-testid="brand-logo">
+        <svg class="pp-mark" aria-hidden="true"><use href="#pp-mark"/></svg>
+        <span class="pp-wordmark">PayPulse</span>
       </div>
       <p class="tagline">Send and receive money in seconds.</p>
       <p class="demo-note">Demo app for QA practice: balances are play money. Don't reuse a real password.</p>
@@ -116,12 +150,15 @@
           <span class="role-chip" id="role-chip" data-testid="role-chip" hidden>Admin</span>
         </p>
         <p class="who-account">
-          Account No: <code id="account-number" data-testid="account-number">—</code>
+          <span class="acct-label">Account No:</span><span class="acct-label short">Acct No:</span> <code id="account-number" data-testid="account-number">—</code>
           <button type="button" id="copy-btn" class="icon-btn tiny" data-testid="copy-account" aria-label="Copy account number" title="Copy account number">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
           </button>
         </p>
       </div>
+      <span class="pp-logo sm topbar-logo" role="img" aria-label="PayPulse" title="PayPulse" data-testid="topbar-logo">
+        <svg class="pp-mark" aria-hidden="true"><use href="#pp-mark"/></svg>
+      </span>
       <button type="button" id="bell-btn" class="icon-btn round glass-btn" data-testid="notifications" aria-label="Notifications" title="Notifications">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span class="bell-dot" id="bell-dot" data-testid="bell-dot" hidden></span>
@@ -978,6 +1015,11 @@
   <!-- ============ Transaction receipt ============ -->
   <dialog id="receipt-dialog" class="sheet receipt-sheet" aria-labelledby="receipt-title" data-testid="receipt-dialog">
     <div class="receipt-head">
+      <svg class="receipt-watermark" aria-hidden="true"><use href="#pp-mark"/></svg>
+      <span class="pp-logo sm receipt-logo" data-testid="receipt-logo">
+        <svg class="pp-mark" aria-hidden="true"><use href="#pp-mark"/></svg>
+        <span class="pp-wordmark">PayPulse</span>
+      </span>
       <span class="receipt-check" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
       </span>

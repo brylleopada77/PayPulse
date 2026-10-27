@@ -3646,13 +3646,55 @@
     }
   });
 
+  /**
+   * Draw the logo mark (symbol #pp-mark in index.html, viewBox 48x48) at x, y in a size x size box.
+   * The shapes are read from the symbol, so the PNG receipt always matches the on-screen logo.
+   */
+  function drawLogoMark(ctx, x, y, size) {
+    const symbol = document.getElementById('pp-mark');
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(size / 48, size / 48);
+    for (const el of symbol.querySelectorAll('[data-part]')) {
+      const part = el.dataset.part;
+      ctx.globalAlpha *= Number(el.getAttribute('opacity') || 1);
+      if (part === 'card') {
+        const fill = ctx.createLinearGradient(2, 8, 46, 40);
+        fill.addColorStop(0, '#FF6B00');
+        fill.addColorStop(1, '#FF3D00');
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        ctx.roundRect(+el.getAttribute('x'), +el.getAttribute('y'), +el.getAttribute('width'), +el.getAttribute('height'), +el.getAttribute('rx'));
+        ctx.fill();
+      } else if (el.tagName === 'circle') {
+        ctx.fillStyle = el.getAttribute('fill');
+        ctx.beginPath();
+        ctx.arc(+el.getAttribute('cx'), +el.getAttribute('cy'), +el.getAttribute('r'), 0, Math.PI * 2);
+        ctx.fill();
+      } else if (el.getAttribute('stroke')) {
+        ctx.strokeStyle = el.getAttribute('stroke');
+        ctx.lineWidth = +el.getAttribute('stroke-width');
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (el.getAttribute('filter')) ctx.filter = 'blur(1.6px)';
+        ctx.stroke(new Path2D(el.getAttribute('d')));
+        ctx.filter = 'none';
+      } else {
+        ctx.fillStyle = el.getAttribute('fill');
+        ctx.fill(new Path2D(el.getAttribute('d')));
+      }
+      ctx.globalAlpha /= Number(el.getAttribute('opacity') || 1);
+    }
+    ctx.restore();
+  }
+
   /** Draw the receipt on a canvas (2x for sharp text) and return it as a PNG blob. */
   function drawReceiptImage(r) {
     const W = 380;
     const PAD = 24;
     const ROW = 30;
     const rows = [['Reference No.', r.reference], ...receiptRows(r)];
-    const headH = 190;
+    const headH = 206;
     const H = headH + 20 + rows.length * ROW + 70;
     const scale = 2;
 
@@ -3678,29 +3720,44 @@
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, W, headH);
 
+    // Logo watermark behind the header, then the logo on top (as in the modal)
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.translate(W - 74, 50);
+    ctx.rotate((-12 * Math.PI) / 180);
+    drawLogoMark(ctx, -85, -85, 170);
+    ctx.restore();
+    const mark = 20;
+    ctx.font = font(14, 800);
+    const brandW = mark + 6 + ctx.measureText('PayPulse').width;
+    drawLogoMark(ctx, (W - brandW) / 2, 8, mark);
+    ctx.fillStyle = ink;
+    ctx.textAlign = 'left';
+    ctx.fillText('PayPulse', (W - brandW) / 2 + mark + 6, 23);
+
     // Check icon
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(W / 2, 46, 24, 0, Math.PI * 2);
+    ctx.arc(W / 2, 62, 24, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#0e9f6e';
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(W / 2 - 10, 47);
-    ctx.lineTo(W / 2 - 3, 54);
-    ctx.lineTo(W / 2 + 11, 39);
+    ctx.moveTo(W / 2 - 10, 63);
+    ctx.lineTo(W / 2 - 3, 70);
+    ctx.lineTo(W / 2 + 11, 55);
     ctx.stroke();
 
     ctx.fillStyle = ink;
     ctx.textAlign = 'center';
     ctx.font = font(18, 700);
-    ctx.fillText(r.title, W / 2, 98);
+    ctx.fillText(r.title, W / 2, 114);
     ctx.font = font(30, 700);
-    ctx.fillText(receiptHeadline(r), W / 2, 138);
+    ctx.fillText(receiptHeadline(r), W / 2, 154);
     ctx.font = font(13);
-    ctx.fillText(RECEIPT_TIME.format(new Date(r.createdAt)), W / 2, 164);
+    ctx.fillText(RECEIPT_TIME.format(new Date(r.createdAt)), W / 2, 180);
 
     // Rows: label left, value right (shortened with … if too long)
     const fit = (text, maxWidth) => {
@@ -3746,9 +3803,18 @@
 
   // ---------- Start ----------
 
+  // The loading screen (pulse mark) stays until the first screen is ready.
+  const hideBootLoader = () => {
+    const loader = $('#boot-loader');
+    loader.classList.add('done');
+    loader.setAttribute('aria-hidden', 'true');
+    setTimeout(() => loader.remove(), 400);
+  };
+
   if (getToken()) {
-    showWallet().catch(() => logout());
+    showWallet().catch(() => logout()).finally(hideBootLoader);
   } else {
     showAuth();
+    hideBootLoader();
   }
 })();
