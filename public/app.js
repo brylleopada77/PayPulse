@@ -1151,7 +1151,7 @@
       }
       showSendStep(btn.dataset.method);
       const step = `[data-step="${btn.dataset.method}"]`;
-      sendDialog.querySelector(`${step} [role="combobox"], ${step} input:not([type="hidden"]), ${step} select`)?.focus();
+      sendDialog.querySelector(`${step} .bank-trigger, ${step} input:not([type="hidden"]), ${step} select`)?.focus();
     });
   });
   sendDialog.querySelectorAll('[data-back]').forEach((btn) => btn.addEventListener('click', () => showSendStep('choose')));
@@ -1172,6 +1172,7 @@
       bankInfo ??= { feeCents: 1500, banks: [], pesonetNextCutoffAt: null };
     }
     if (firstLoad) bankPicker.render(bankInfo);
+    bankPicker.close(); // start on the form, with the grid folded away
     // The form was reset when the dialog opened: start on the first destination again.
     if (!selectedBank() && bankInfo.banks[0]) bankPicker.choose(bankInfo.banks[0].code);
     if (bankInfo.pesonetNextCutoffAt) {
@@ -1183,7 +1184,7 @@
   const RAIL_SHORT = { INSTAPAY: 'InstaPay', PESONET: 'PESONet' };
   const INSTAPAY_MAX = 50_000; // pesos per transfer (the server answers 400 INSTAPAY_LIMIT_EXCEEDED above it)
 
-  const selectedBank = () => bankInfo?.banks.find((b) => b.code === bankForm.elements.bankCode.value);
+  const selectedBank = () => bankInfo?.banks.find((b) => b.code === bankForm.elements.bankCode?.value);
 
   /** The InstaPay cap message for the current choice, or '' when the amount is fine. */
   function instapayLimitMessage() {
@@ -1239,22 +1240,16 @@
     bankForm.querySelector('input[name="rail"][value="PESONET"]').focus();
   });
 
-  // ----- Bank picker: select-only combobox (WAI-ARIA APG) with a badge, name and network tags -----
+  // ----- Bank picker: a summary button that opens a grid of bank cards (no dropdown, no inner scroll) -----
   //
-  // The combobox keeps focus; aria-activedescendant points at the highlighted option. Keys: Up / Down,
-  // Home / End, PageUp / PageDown move; Enter / Space / Tab choose; Escape closes the list (not the
-  // dialog); typing jumps to the first name starting with the typed letters. The value lives in the
-  // hidden input "bankCode", so the form reads it like any other field.
+  // The button (aria-expanded / aria-controls) shows the chosen bank. Opening it swaps steps 2 to 5 for
+  // the grid: two fieldsets (one per category) of native radio cards named "bankCode", so the form reads
+  // the value like any other field and arrow keys move between banks. A click, Enter or Space on a card
+  // chooses it, closes the grid and moves focus to the account number; Escape closes the grid only.
 
   const bankPicker = (() => {
-    const picker = $('#bank-picker');
     const trigger = $('#bank-trigger');
-    const listbox = $('#bank-listbox');
-    const hidden = bankForm.elements.bankCode;
-    let options = []; // the option <li>s, in order
-    let active = -1;
-    let typed = '';
-    let typedAt = 0;
+    const grid = $('#bank-grid');
 
     /** The bank's avatar: its logo when the catalog has one (the badge if it fails to load), else the badge. */
     function avatar(bank, el = document.createElement('span')) {
@@ -1287,163 +1282,80 @@
     }
 
     function render(info) {
-      options = [];
-      listbox.replaceChildren(
+      grid.replaceChildren(
         ...Object.entries(info.categories ?? {}).map(([category, label]) => {
-          const group = document.createElement('li');
-          group.setAttribute('role', 'group');
-          const heading = Object.assign(document.createElement('span'), { className: 'bank-group-label', id: `bank-group-${category}`, textContent: label });
-          heading.setAttribute('role', 'presentation');
-          group.setAttribute('aria-labelledby', heading.id);
-          const list = document.createElement('ul');
-          list.setAttribute('role', 'none');
+          const group = Object.assign(document.createElement('fieldset'), { className: 'bank-group' });
+          group.append(Object.assign(document.createElement('legend'), { className: 'bank-group-label', textContent: label }));
+          const cards = Object.assign(document.createElement('div'), { className: 'bank-cards' });
           for (const bank of info.banks.filter((b) => b.category === category)) {
-            const li = document.createElement('li');
-            li.id = `bank-option-${bank.code}`;
-            li.className = 'bank-option';
-            li.dataset.code = bank.code;
-            li.dataset.testid = 'bank-option';
-            li.setAttribute('role', 'option');
-            li.setAttribute('aria-selected', 'false');
-            // accessible name = the visible text: "BDO InstaPay PESONet" (the badge is decorative)
-            li.append(
+            const card = Object.assign(document.createElement('label'), { className: 'bank-card' });
+            card.dataset.testid = 'bank-card';
+            const radio = Object.assign(document.createElement('input'), { type: 'radio', name: 'bankCode', value: bank.code });
+            // accessible name = the visible text: "BDO InstaPay PESONet" (the logo is decorative)
+            card.append(
+              radio,
               avatar(bank),
               Object.assign(document.createElement('span'), { className: 'bank-name', textContent: bank.name }),
               railTags(bank),
             );
-            li.addEventListener('click', () => {
-              choose(bank.code);
-              close();
-            });
-            li.addEventListener('pointermove', () => highlight(options.indexOf(li), false));
-            options.push(li);
-            list.append(li);
+            cards.append(card);
           }
-          group.append(heading, list);
+          group.append(cards);
           return group;
         }),
       );
     }
 
-    /** Make `code` the value: the trigger shows its badge, name and routes; the form updates. */
+    /** Make `code` the value: the summary shows its logo and name; the form updates. */
     function choose(code) {
       const bank = bankInfo?.banks.find((b) => b.code === code);
       if (!bank) return;
-      hidden.value = code;
-      for (const li of options) li.setAttribute('aria-selected', String(li.dataset.code === code));
+      bankForm.elements.bankCode.value = code;
       avatar(bank, $('#bank-trigger-avatar'));
       $('#bank-trigger-name').textContent = bank.name;
       updateBankForm();
     }
 
-    function highlight(index, scroll = true) {
-      if (!options.length) return;
-      active = Math.max(0, Math.min(options.length - 1, index));
-      options.forEach((li, i) => li.classList.toggle('active', i === active));
-      trigger.setAttribute('aria-activedescendant', options[active].id);
-      if (scroll) options[active].scrollIntoView({ block: 'nearest' });
-    }
+    const isOpen = () => !grid.hidden;
 
-    /**
-     * The list is a popover (top layer), so it floats over the form and never adds a scrollbar to the
-     * dialog. It sits under the trigger at the trigger's width, or above it when there is more room.
-     */
-    const LIST_MAX_HEIGHT = 208;
-    function place() {
-      const rect = trigger.getBoundingClientRect();
-      const below = window.innerHeight - rect.bottom - 12;
-      const above = rect.top - 12;
-      const up = below < Math.min(LIST_MAX_HEIGHT, 160) && above > below;
-      const maxHeight = Math.min(LIST_MAX_HEIGHT, up ? above : below) - 6;
-      Object.assign(listbox.style, {
-        left: `${rect.left}px`,
-        width: `${rect.width}px`,
-        maxHeight: `${Math.max(maxHeight, 120)}px`,
-        top: up ? 'auto' : `${rect.bottom + 6}px`,
-        bottom: up ? `${window.innerHeight - rect.top + 6}px` : 'auto',
-      });
-    }
-
-    function open(index) {
-      if (!options.length) return;
-      typed = '';
-      listbox.showPopover();
-      place();
-      picker.classList.add('open');
+    function open() {
+      grid.hidden = false;
+      bankForm.classList.add('picking');
       trigger.setAttribute('aria-expanded', 'true');
-      const selected = options.findIndex((li) => li.dataset.code === hidden.value);
-      highlight(index ?? (selected >= 0 ? selected : 0));
+      (grid.querySelector('input:checked') ?? grid.querySelector('input'))?.focus();
     }
 
-    function close() {
-      typed = '';
-      if (isOpen()) listbox.hidePopover();
-      picker.classList.remove('open');
+    function close({ focus } = {}) {
+      grid.hidden = true;
+      bankForm.classList.remove('picking');
       trigger.setAttribute('aria-expanded', 'false');
-      trigger.removeAttribute('aria-activedescendant');
-      options.forEach((li) => li.classList.remove('active'));
+      focus?.focus();
     }
 
-    const isOpen = () => listbox.matches(':popover-open');
-    // Follow the trigger when the dialog scrolls or the window resizes (scrolling the list itself doesn't move it)
-    const follow = (event) => { if (isOpen() && event.target !== listbox) place(); };
-    $('#send-dialog').addEventListener('scroll', follow, true);
-    $('#send-dialog').addEventListener('close', () => close()); // a top-layer list would outlive the dialog
-    window.addEventListener('resize', follow);
-    const isPrintable = (event) => event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey;
-
-    /** Type-ahead: the next name starting with the typed letters (a pause starts a new search). */
-    function typeAhead(char) {
-      const now = Date.now();
-      typed = now - typedAt > 700 ? char : typed + char;
-      typedAt = now;
-      const current = isOpen() ? active : options.findIndex((li) => li.dataset.code === hidden.value);
-      const from = current + (typed.length === 1 ? 1 : 0); // a new letter moves on; more letters refine
-      const ordered = [...options.slice(from), ...options.slice(0, from)];
-      const match = ordered.find((li) => li.querySelector('.bank-name').textContent.toLowerCase().startsWith(typed));
-      if (!match) return;
-      if (isOpen()) highlight(options.indexOf(match));
-      else choose(match.dataset.code);
-    }
-
-    const chooseActive = () => {
-      choose(options[active].dataset.code);
-      close();
+    /** A card was picked: choose it, fold the grid away, and go on to the account number. */
+    const pick = (radio) => {
+      choose(radio.value);
+      close({ focus: bankForm.elements.accountNumber });
     };
 
     trigger.addEventListener('click', () => (isOpen() ? close() : open()));
-    trigger.addEventListener('keydown', (event) => {
-      const { key, altKey } = event;
-      if (!isOpen()) {
-        if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(key)) open();
-        else if (key === 'Home') open(0);
-        else if (key === 'End') open(options.length - 1);
-        else if (isPrintable(event)) typeAhead(key.toLowerCase());
-        else return;
-        event.preventDefault();
-        return;
-      }
-      if (key === 'Tab') return chooseActive(); // choose, and let focus move on
-      if (key === 'ArrowDown') highlight(active + 1);
-      else if (key === 'ArrowUp' && altKey) chooseActive();
-      else if (key === 'ArrowUp') highlight(active - 1);
-      else if (key === 'Home') highlight(0);
-      else if (key === 'End') highlight(options.length - 1);
-      else if (key === 'PageDown') highlight(active + 10);
-      else if (key === 'PageUp') highlight(active - 10);
-      else if (key === 'Enter' || key === ' ') chooseActive();
-      else if (key === 'Escape') {
-        event.stopPropagation();
-        close(); // the list, not the dialog
-      } else if (isPrintable(event)) typeAhead(key.toLowerCase());
-      else return;
-      event.preventDefault();
+    // arrow keys move the checked radio (and fire a keyboard click, detail 0): that only selects
+    grid.addEventListener('change', (event) => choose(event.target.value));
+    grid.addEventListener('click', (event) => {
+      if (event.target.name === 'bankCode' && event.detail > 0) pick(event.target);
     });
-    // Clicking a row must not take focus from the combobox; leaving the picker closes the list.
-    listbox.addEventListener('mousedown', (event) => event.preventDefault());
-    trigger.addEventListener('blur', () => setTimeout(() => {
-      if (!picker.contains(document.activeElement)) close();
-    }));
+    grid.addEventListener('keydown', (event) => {
+      if (event.target.name !== 'bankCode') return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault(); // Enter would submit the form
+        event.target.checked = true;
+        pick(event.target);
+      } else if (event.key === 'Escape') {
+        event.stopPropagation(); // the grid, not the dialog
+        event.preventDefault();
+        close({ focus: trigger });
+      }
+    });
 
     return { render, choose, close };
   })();

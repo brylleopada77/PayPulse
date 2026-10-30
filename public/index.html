@@ -671,21 +671,19 @@
       </header>
       <!-- Five numbered steps, top to bottom: bank, channel, account number, account name, amount
            (the numbers are CSS counters, hidden from screen readers). -->
-      <!-- Step 1. Bank picker: a select-only combobox (WAI-ARIA APG) so each row can show the bank's
-           logo, name and network tags. Focus stays on the combobox; aria-activedescendant moves. The
-           list is a popover in the top layer: it floats over the form instead of pushing it down. -->
+      <!-- Step 1. Bank picker: a summary button showing the chosen bank. It opens a grid of bank cards
+           (2 columns, grouped by category) in place of steps 2 to 5: no dropdown, no inner scrollbar.
+           The cards are native radios named "bankCode", rendered by app.js. -->
       <div class="bank-picker" id="bank-picker" data-testid="bank-picker">
         <span class="picker-label step-label" id="bank-picker-label">Bank or e-wallet</span>
-        <div class="bank-trigger" id="bank-trigger" role="combobox" tabindex="0" aria-haspopup="listbox"
-             aria-expanded="false" aria-controls="bank-listbox" aria-labelledby="bank-picker-label bank-trigger-name"
-             data-testid="bank-trigger">
+        <button type="button" class="bank-trigger" id="bank-trigger" aria-expanded="false" aria-controls="bank-grid"
+                aria-labelledby="bank-picker-label bank-trigger-name bank-trigger-action" data-testid="bank-trigger">
           <span class="bank-avatar" id="bank-trigger-avatar" aria-hidden="true"></span>
           <span class="bank-name" id="bank-trigger-name" data-testid="bank-trigger-name">Choose a bank</span>
+          <span class="bank-change" id="bank-trigger-action">Change</span>
           <svg class="bank-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-        </div>
-        <ul class="bank-listbox" id="bank-listbox" role="listbox" aria-labelledby="bank-picker-label" tabindex="-1"
-            data-testid="bank-listbox" popover="manual"></ul>
-        <input type="hidden" name="bankCode" data-testid="bank-code">
+        </button>
+        <div class="bank-grid" id="bank-grid" data-testid="bank-grid" hidden></div>
       </div>
       <!-- Step 2. Transfer channel: chosen separately from the bank. E-wallets / digital banks are
            InstaPay only: PESONet is disabled and marked "Not supported". -->
