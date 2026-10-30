@@ -1576,10 +1576,17 @@ h1, h2, h3, .who-name, .product-title, .tx-title { color: var(--text); }
 .brand-chip input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.25); }
 .brand-chip input:focus-visible + span { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 /* every network we sell load for, before a number is typed */
-.telco-strip { list-style: none; margin: -4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.telco-strip { list-style: none; margin: -4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .telco-strip[hidden] { display: none; }
-.telco-strip li { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
-.telco-strip .bank-avatar { width: 24px; height: 24px; }
+.telco-pick {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px 4px 4px; cursor: pointer;
+  border: 1.5px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text);
+  font: inherit; font-size: 0.82rem; font-weight: 700;
+}
+.telco-pick:hover { border-color: var(--accent); }
+.telco-pick[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+.telco-pick:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+
 .telco-override summary { cursor: pointer; font-size: 0.84rem; color: var(--muted); }
 .telco-override .brand-chips { margin-top: 8px; }
 .amount-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -1672,3 +1679,7 @@ h1, h2, h3, .who-name, .product-title, .tx-title { color: var(--text); }
   font-size: 0.82rem; white-space: normal; line-height: 1.2;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+/* telco logos are wide wordmarks (SMART, tm): a pill instead of the round avatar so they stay legible */
+.telco-pick .bank-avatar, .brand-chip .bank-avatar, .promo-item .bank-avatar { width: 46px; height: 26px; border-radius: 13px; }
+.telco-pick .bank-avatar.has-logo, .brand-chip .bank-avatar.has-logo, .promo-item .bank-avatar.has-logo { padding: 3px 6px; }
+.telco-pick .bank-avatar img, .brand-chip .bank-avatar img, .promo-item .bank-avatar img { width: 34px; height: 20px; } /* the pill's content box */

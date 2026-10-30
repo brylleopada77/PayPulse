@@ -492,8 +492,9 @@
         <input name="mobileNumber" type="tel" inputmode="numeric" autocomplete="tel" placeholder="09171234567" maxlength="13" required data-testid="load-mobile">
       </label>
       <p class="telco-detect" id="load-detect" aria-live="polite" data-testid="load-detect"></p>
-      <!-- Every network we sell load for (logos); replaced by the brand choice once a number is detected -->
-      <ul class="telco-strip" id="load-networks" aria-label="Networks you can load" data-testid="load-networks"></ul>
+      <!-- Every network we sell load for (logos): tap one to see its promos straight away. Replaced by
+           the brand choice once a number is detected. -->
+      <ul class="telco-strip" id="load-networks" aria-label="Choose a network" data-testid="load-networks"></ul>
       <div class="brand-chips" id="load-brands" role="radiogroup" aria-label="Network brand" data-testid="load-brands" hidden></div>
       <details class="telco-override" id="load-override" hidden>
         <summary>Ported number? Choose the network</summary>

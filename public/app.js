@@ -2573,12 +2573,24 @@
     $('#load-brands').hidden = !network;
     $('#load-networks').hidden = Boolean(network);
     if (!$('#load-networks').children.length) {
+      // Tap a network to go straight to its promos (the number can come after)
       $('#load-networks').replaceChildren(...loadCatalog.brands.map((b) => {
         const li = document.createElement('li');
-        li.dataset.testid = 'load-network-' + b.code;
-        li.append(logoAvatar(b), b.name);
+        const button = Object.assign(document.createElement('button'), { type: 'button', className: 'telco-pick' });
+        button.dataset.testid = 'load-network-' + b.code;
+        button.dataset.code = b.code;
+        button.append(logoAvatar(b), b.name);
+        button.addEventListener('click', () => {
+          loadForm.elements.productType.value = 'PROMO';
+          selectBrand(b.code);
+          $('#load-promos').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+        li.append(button);
         return li;
       }));
+    }
+    for (const button of $('#load-networks').querySelectorAll('button')) {
+      button.setAttribute('aria-pressed', String(button.dataset.code === loadBrand));
     }
     $('#load-brands').replaceChildren(...(network ? network.brands.map((b) => brandChip(b, 'load-brand')) : []));
     $('#load-override').hidden = !normalizeLoadMobile(loadForm.elements.mobileNumber.value);
@@ -2652,7 +2664,7 @@
               return b;
             })
           : [Object.assign(document.createElement('p'), { className: 'empty', textContent: 'No promos for ' + brandName(loadBrand) + ' yet. Use Regular Load.' })]
-        : [Object.assign(document.createElement('p'), { className: 'empty', textContent: 'Enter the mobile number first to see its promos.' })]),
+        : [Object.assign(document.createElement('p'), { className: 'empty', textContent: 'Choose a network above, or enter the mobile number, to see its promos.' })]),
     );
   }
 
