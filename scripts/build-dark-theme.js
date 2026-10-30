@@ -45,7 +45,7 @@ const LINE = {
 const ALWAYS_DARK = /\.(qa-(fab|panel|head|badge|note|primary|select|more|status|actions)|chaos-)/;
 // White in both themes: the cash-in ticket, so its barcode always scans (dark bars on white), and
 // the white disc behind bank / partner logos (most logos are dark ink and vanish on dark glass)
-const ALWAYS_LIGHT = /\.(otc-(ticket|status|ref|expiry|barcode)|bank-avatar)/;
+const ALWAYS_LIGHT = /\.(otc-(ticket|status|ref|expiry|barcode)|bank-avatar|biller-badge\.has-logo)/;
 const HEX = /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|\bwhite\b/g;
 const RGBA = /rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\s*\)/g;
 const round = (n) => Math.round(n * 100) / 100;

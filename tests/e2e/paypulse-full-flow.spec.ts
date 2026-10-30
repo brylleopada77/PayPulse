@@ -17,7 +17,9 @@ test.describe('PayPulse full flow', () => {
 
     await page.getByTestId('open-bills').click();
     await page.getByTestId('bills-category-UTILITIES').click();
+    await expect(page.getByTestId('biller-MERALCO').locator('.biller-badge img')).toHaveAttribute('src', '/img/billers/meralco.png');
     await page.getByTestId('biller-MERALCO').click();
+    await expect(page.locator('#bills-chosen img')).toHaveAttribute('src', '/img/billers/meralco.png');
     await page.getByTestId('bills-account').fill('1234567890');
     await page.getByTestId('bills-account-name').fill('Alice Reyes');
     await page.getByTestId('bills-amount').fill('1000');

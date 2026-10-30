@@ -27,16 +27,16 @@ const CATEGORIES = {
 const INSTAPAY_ONLY = ['INSTAPAY'];
 const BOTH_RAILS = ['INSTAPAY', 'PESONET'];
 
-// Avatars in the Bank Transfer picker: `logo`, the institution's icon (self-hosted in
-// public/img/banks/, taken from its website favicon; trademarks of their owners, shown only to
-// identify the destination), and `badge`, the fallback when there is no logo or it fails to load
+// Avatars in the Bank Transfer picker: `logo`, the institution's current logo (self-hosted in
+// public/img/banks/: from its Wikipedia infobox, cut down to the symbol for wide lockups; GoTyme,
+// MariBank, CIMB, Tonik, UnionDigital and Komo have none there, so their website icon; trademarks of
+// their owners, shown only to identify the destination), and `badge`, the fallback when there is no logo or it fails to load
 // (initials on a brand-tinted colour, at least 4.5:1 against the white initials).
 const LOGO_FILES = {
   GCASH: 'gcash.png', MAYA: 'maya.png', GOTYME: 'gotyme.png', MARIBANK: 'maribank.png', CIMB: 'cimb.png',
   TONIK: 'tonik.png', UNIONDIGITAL: 'uniondigital.png', KOMO: 'komo.jpg', BDO: 'bdo.png', BPI: 'bpi.png',
   METROBANK: 'metrobank.png', UNIONBANK: 'unionbank.png', SECURITYBANK: 'securitybank.png', RCBC: 'rcbc.png',
-  CHINABANK: 'chinabank.ico', EASTWEST: 'eastwest.png', AUB: 'aub.png', LANDBANK: 'landbank.png',
-  // PNB: no icon available (its site blocks downloads), so it shows the badge
+  CHINABANK: 'chinabank.png', EASTWEST: 'eastwest.png', AUB: 'aub.png', LANDBANK: 'landbank.png', PNB: 'pnb.png',
 };
 const logo = (code) => (LOGO_FILES[code] ? { logo: `/img/banks/${LOGO_FILES[code]}` } : {});
 
