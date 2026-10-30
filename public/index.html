@@ -669,10 +669,13 @@
         <h2>Bank Transfer</h2>
         <button type="button" class="close" data-close aria-label="Close">×</button>
       </header>
-      <!-- Bank picker: a select-only combobox (WAI-ARIA APG) so each row can show the bank's badge,
-           name and network tags. Focus stays on the combobox; aria-activedescendant moves. -->
+      <!-- Five numbered steps, top to bottom: bank, channel, account number, account name, amount
+           (the numbers are CSS counters, hidden from screen readers). -->
+      <!-- Step 1. Bank picker: a select-only combobox (WAI-ARIA APG) so each row can show the bank's
+           logo, name and network tags. Focus stays on the combobox; aria-activedescendant moves. The
+           list is a popover in the top layer: it floats over the form instead of pushing it down. -->
       <div class="bank-picker" id="bank-picker" data-testid="bank-picker">
-        <span class="picker-label" id="bank-picker-label">Bank or e-wallet</span>
+        <span class="picker-label step-label" id="bank-picker-label">Bank or e-wallet</span>
         <div class="bank-trigger" id="bank-trigger" role="combobox" tabindex="0" aria-haspopup="listbox"
              aria-expanded="false" aria-controls="bank-listbox" aria-labelledby="bank-picker-label bank-trigger-name"
              data-testid="bank-trigger">
@@ -681,45 +684,46 @@
           <svg class="bank-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
         </div>
         <ul class="bank-listbox" id="bank-listbox" role="listbox" aria-labelledby="bank-picker-label" tabindex="-1"
-            data-testid="bank-listbox" hidden></ul>
+            data-testid="bank-listbox" popover="manual"></ul>
         <input type="hidden" name="bankCode" data-testid="bank-code">
       </div>
-      <!-- Transfer channel: chosen separately from the bank. E-wallets / digital banks are InstaPay
-           only (PESONet disabled, with the tag below). -->
+      <!-- Step 2. Transfer channel: chosen separately from the bank. E-wallets / digital banks are
+           InstaPay only: PESONet is disabled and marked "Not supported". -->
       <fieldset class="channel-picker" data-testid="bank-channel">
-        <legend class="picker-label">Transfer channel
+        <legend class="picker-label step-label">Transfer channel
           <span class="channel-tag" id="bank-rail-hint" data-testid="bank-rail-hint" hidden></span>
         </legend>
         <label class="channel-option" data-testid="channel-instapay">
           <input type="radio" name="rail" value="INSTAPAY" checked>
           <span class="channel-icon" aria-hidden="true">⚡</span>
-          <span class="channel-text"><strong>InstaPay</strong><small>Real-time credit · up to ₱50,000</small></span>
+          <span class="channel-text"><strong>InstaPay</strong><small>Real-time · Up to ₱50k</small></span>
         </label>
         <label class="channel-option" data-testid="channel-pesonet">
           <input type="radio" name="rail" value="PESONET">
           <span class="channel-icon" aria-hidden="true">🏦</span>
-          <span class="channel-text"><strong>PESONet</strong><small id="pesonet-detail">Same-day batch · for amounts above ₱50,000</small></span>
+          <span class="channel-text"><strong>PESONet</strong><small>Same-day · High value</small><small class="channel-cutoff" id="pesonet-detail"></small></span>
+          <span class="channel-badge" data-testid="pesonet-not-supported" hidden>Not supported</span>
         </label>
       </fieldset>
-      <label><span id="bank-account-label">Account number</span>
+      <label><span class="step-label" id="bank-account-label">Account number</span>
         <input name="accountNumber" autocomplete="off" required data-testid="bank-account">
       </label>
-      <label>Account name <span class="hint">as registered with the bank</span>
+      <label><span><span class="step-label">Account name</span> <span class="hint">as registered with the bank</span></span>
         <input name="accountName" autocomplete="off" maxlength="100" required data-testid="bank-account-name">
       </label>
-      <label>Amount (₱)
-        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="bank-amount" aria-describedby="bank-limit-warning">
+      <label><span class="step-label">Amount (₱)</span>
+        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="bank-amount" aria-describedby="bank-limit-warning bank-fee-preview">
       </label>
       <p class="limit-warning" id="bank-limit-warning" role="status" data-testid="bank-limit-warning">
         <span id="bank-limit-text"></span>
         <button type="button" class="link-btn" id="bank-use-pesonet" data-testid="bank-use-pesonet" hidden>Switch to PESONet</button>
       </p>
-      <p class="fee-preview" data-testid="bank-fee-preview">
-        <span>Transfer fee <strong id="bank-fee">₱15.00</strong></span>
+      <p class="fee-preview" id="bank-fee-preview" data-testid="bank-fee-preview">
+        <span>Transaction fee <strong id="bank-fee">₱15.00</strong></span>
         <span>Total deducted <strong id="bank-total">₱0.00</strong></span>
       </p>
       <p class="form-error" role="alert"></p>
-      <button type="submit" class="btn primary" data-testid="bank-submit">Review</button>
+      <button type="submit" class="btn primary" data-testid="bank-submit">Continue to Transfer</button>
     </form>
 
     <!-- Step 3: Review -->

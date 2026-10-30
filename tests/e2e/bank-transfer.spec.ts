@@ -47,6 +47,55 @@ test.describe('Bank Transfer: bank picker', () => {
     await expect(page.getByTestId('bank-code')).toHaveValue('LANDBANK');
   });
 
+  test('the list floats over the form: no extra scrollbar, nothing pushed down, closes on pick and with the dialog', async ({ page, request }) => {
+    await page.setViewportSize({ width: 390, height: 700 });
+    await login(page, await createFundedUser(request, 1000, 'Alice Tan'));
+    await openBankTransfer(page);
+
+    const dialog = page.getByTestId('send-dialog');
+    const scrollHeight = () => dialog.evaluate((d) => d.scrollHeight);
+    const channelTop = async () => (await page.getByTestId('bank-channel').boundingBox())!.y;
+    const [heightBefore, channelBefore] = [await scrollHeight(), await channelTop()];
+
+    await page.getByTestId('bank-trigger').click();
+    const listbox = page.getByTestId('bank-listbox');
+    await expect(listbox).toBeVisible();
+    expect(await scrollHeight()).toBe(heightBefore); // the dialog does not grow a scrollbar
+    expect(await channelTop()).toBe(channelBefore); // the channel cards stay where they were
+    // directly under the trigger, as wide as it, at most 208px tall (it scrolls inside)
+    const trigger = (await page.getByTestId('bank-trigger').boundingBox())!;
+    const list = (await listbox.boundingBox())!;
+    expect(Math.round(list.x)).toBe(Math.round(trigger.x));
+    expect(Math.round(list.width)).toBe(Math.round(trigger.width));
+    expect(list.y).toBeGreaterThan(trigger.y + trigger.height);
+    expect(list.height).toBeLessThanOrEqual(208);
+    expect(await listbox.evaluate((l) => l.scrollHeight > l.clientHeight)).toBe(true);
+
+    await page.getByRole('option', { name: 'BPI InstaPay PESONet' }).click();
+    await expect(listbox).toBeHidden();
+    await expect(page.getByTestId('bank-trigger-name')).toHaveText('BPI');
+
+    // the list must not outlive the dialog (it lives in the top layer)
+    await page.getByTestId('bank-trigger').click();
+    await expect(listbox).toBeVisible();
+    await page.getByTestId('bank-trigger').press('Escape'); // closes the list only
+    await page.keyboard.press('Escape'); // then the dialog
+    await expect(dialog).toBeHidden();
+    await expect(listbox).toBeHidden();
+  });
+
+  test('the five steps are numbered in order and the button reads "Continue to Transfer"', async ({ page, request }) => {
+    await login(page, await createFundedUser(request, 1000, 'Alice Tan'));
+    await openBankTransfer(page);
+    // top to bottom: bank, channel, account number, account name, amount
+    const steps = page.locator('#bank-form .step-label');
+    await expect(steps).toHaveText(['Bank or e-wallet', /^Transfer channel/, 'GCash mobile number', 'Account name', 'Amount (₱)']);
+    const tops = await steps.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+    await expect(page.getByTestId('bank-submit')).toHaveText('Continue to Transfer');
+    await expect(page.getByTestId('bank-fee-preview')).toContainText('Transaction fee ₱15.00');
+  });
+
   test('a logo that fails to load falls back to the initials badge', async ({ page, request }) => {
     await page.route('**/img/banks/gcash.png', (route) => route.fulfill({ status: 404, body: '' }));
     await login(page, await createFundedUser(request, 1000, 'Alice Tan'));
@@ -68,6 +117,7 @@ test.describe('Bank Transfer: bank picker', () => {
     await expect(instapay).toBeChecked();
     await expect(pesonet).toBeDisabled();
     await expect(page.getByTestId('bank-rail-hint')).toHaveText('GCash: InstaPay only');
+    await expect(page.getByTestId('pesonet-not-supported')).toHaveText('Not supported');
     await expect(page.getByTestId('bank-account')).toHaveAttribute('placeholder', '09XXXXXXXXX (registered with GCash)');
 
     // AUB: both channels; PESONet can be picked; account-number placeholder names the bank
@@ -75,6 +125,7 @@ test.describe('Bank Transfer: bank picker', () => {
     await page.getByRole('option', { name: 'AUB InstaPay PESONet' }).click();
     await expect(pesonet).toBeEnabled();
     await expect(page.getByTestId('bank-rail-hint')).toBeHidden();
+    await expect(page.getByTestId('pesonet-not-supported')).toBeHidden();
     await expect(page.getByTestId('bank-account')).toHaveAttribute('placeholder', '10 to 16 digits for AUB');
     await page.getByTestId('channel-pesonet').click();
     await expect(pesonet).toBeChecked();
