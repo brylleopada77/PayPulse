@@ -1570,11 +1570,16 @@ h1, h2, h3, .who-name, .product-title, .tx-title { color: var(--text); }
 .brand-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .brand-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .brand-chip span {
-  display: inline-block; padding: 8px 16px; border-radius: 999px; cursor: pointer; font-weight: 700; font-size: 0.88rem;
+  display: inline-flex; align-items: center; gap: 8px; padding: 5px 16px 5px 5px; border-radius: 999px; cursor: pointer; font-weight: 700; font-size: 0.88rem;
   border: 1.5px solid var(--border); background: var(--surface); color: var(--text);
 }
 .brand-chip input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.25); }
 .brand-chip input:focus-visible + span { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+/* every network we sell load for, before a number is typed */
+.telco-strip { list-style: none; margin: -4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.telco-strip[hidden] { display: none; }
+.telco-strip li { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+.telco-strip .bank-avatar { width: 24px; height: 24px; }
 .telco-override summary { cursor: pointer; font-size: 0.84rem; color: var(--muted); }
 .telco-override .brand-chips { margin-top: 8px; }
 .amount-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -1588,11 +1593,11 @@ h1, h2, h3, .who-name, .product-title, .tx-title { color: var(--text); }
 .amount-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.3); }
 .promo-list { display: grid; gap: 8px; }
 .promo-item {
-  display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; width: 100%; padding: 12px 14px; text-align: left;
+  display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; width: 100%; padding: 12px 14px; text-align: left;
   border: 1.5px solid var(--border); border-radius: 14px; background: var(--glass-bg, var(--surface)); color: var(--text); font: inherit; cursor: pointer;
   -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
-.promo-item span:first-child { display: grid; gap: 2px; }
+.promo-item .promo-copy { display: grid; gap: 2px; }
 .promo-item small { color: var(--muted); font-size: 0.8rem; }
 .promo-item:hover { border-color: var(--accent); }
 .promo-item[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.3); }

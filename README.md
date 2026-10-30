@@ -1,7 +1,7 @@
 # PayPulse: a QA automation showcase built around a realistic e-wallet
 
 [![PayPulse QA Pipeline](https://github.com/brylleopada77/PayPulse/actions/workflows/qa-pipeline.yml/badge.svg)](https://github.com/brylleopada77/PayPulse/actions/workflows/qa-pipeline.yml)
-![Playwright](https://img.shields.io/badge/Playwright-415_tests-2EAD33?logo=playwright&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-417_tests-2EAD33?logo=playwright&logoColor=white)
 ![k6](https://img.shields.io/badge/k6-load_%26_concurrency-7D64FF?logo=k6&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
@@ -23,7 +23,7 @@ across five layers**, a **concurrency bug the automation found, proved and now g
 **CI pipeline** that runs everything on every push. (All money is play money; banks, billers and the
 card network are mocks.)
 
-> **415 Playwright tests · 2 k6 scenarios · 3 ledger/reconciliation gates · all green in CI**
+> **417 Playwright tests · 2 k6 scenarios · 3 ledger/reconciliation gates · all green in CI**
 > (the race condition the tests caught is fixed and now a hard gate: see [the race condition](#the-bug-the-tests-were-built-to-catch)).
 
 | | | | |
@@ -41,7 +41,7 @@ card network are mocks.)
 | **Finding and fixing a real bug** | Concurrency tests and k6 reproduced an overdraft race (wallet driven to **-₱200**); row-level locking fixed it and the same tests now gate every build | [QA_NOTES.md](QA_NOTES.md) |
 | **Proving a fix pattern** | k6 shows `Idempotency-Key` makes 30 duplicate sends move money **exactly once** | `tests/load/idempotent-transfer.js` |
 | **Financial correctness** | Every test can assert the ledger: debits = credits, wallets = GL 2010, end-of-day reconciliation with 20 control checks | `tests/helpers/db.ts`, `scripts/reconcile-eod.js` |
-| **Test design** | Every test creates its own users, so 415 tests run **fully in parallel** without shared state or ordering | `tests/helpers/api.ts` |
+| **Test design** | Every test creates its own users, so 417 tests run **fully in parallel** without shared state or ordering | `tests/helpers/api.ts` |
 | **Tuning, not just writing tests** | Visual regression first missed a 28px→8px dock change; I tightened the threshold and proved it now fails on the regression and stays stable over repeated runs | `playwright.config.ts` |
 | **CI/CD** | GitHub Actions: PostgreSQL service container, migrations, Playwright, k6, ledger gates, HTML report + videos as artifacts | [CI pipeline](#ci-pipeline) |
 
@@ -51,12 +51,12 @@ card network are mocks.)
 
 ```mermaid
 flowchart TB
-  subgraph L1["API: 346 tests (25 suites)"]
+  subgraph L1["API: 347 tests (25 suites)"]
     a1[auth, MPIN, OTP, lockouts] --- a2[transfers, limits, AML]
     a2 --- a3[bills, loans, cards, savings]
     a3 --- a4[receipts, notifications, realtime] --- a5[ISO 20022 pacs.008] --- a6[OpenAPI contract]
   end
-  subgraph L2["Browser E2E + chaos: 27 tests"]
+  subgraph L2["Browser E2E + chaos: 28 tests"]
     b1[Pay Bills ₱995 net] --- b2[Loan drawdown] --- b3[Locked card 403] --- b4[503 drops, DB locks, retries] --- b5[Chaos Engine 500s, ISO inspector]
   end
   subgraph L3["Visual regression: 19 snapshots"]
@@ -76,8 +76,8 @@ flowchart TB
 
 | Layer | Tool | Count | Risk it covers |
 |-------|------|------:|----------------|
-| API | Playwright `request` | 346 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, other users' data), money math in centavos |
-| Browser E2E | Playwright + Chrome | 26 | Real customer journeys: Cash In over the counter (19 partners, category pills, the 12-digit code with its ITF barcode and 24-hour countdown, paid by the partner webhook), Refresh shows the pulsing PayPulse logo, then the new balance, the Bank Transfer form (5 numbered steps; a 2-column grid of the 19 banks / e-wallets by category, no dropdown, no inner scrollbar; logos, badge fallback, mouse + keyboard), the InstaPay / PESONet channel picker and the ₱50,000 InstaPay cap warning, Pay Bills (net **₱995.00** after ₱5 cashback), ₱10,000 loan drawdown, locked virtual card → **403 CARD_FROZEN**, live toast on incoming money, Buy Load, the Chaos Engine fault toast and recovery, the ISO 20022 Message Inspector (XML + Copy Payload) |
+| API | Playwright `request` | 347 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, other users' data), money math in centavos |
+| Browser E2E | Playwright + Chrome | 27 | Real customer journeys: Cash In over the counter (19 partners, category pills, the 12-digit code with its ITF barcode and 24-hour countdown, paid by the partner webhook), Refresh shows the pulsing PayPulse logo, then the new balance, the Bank Transfer form (5 numbered steps; a 2-column grid of the 19 banks / e-wallets by category, no dropdown, no inner scrollbar; logos, badge fallback, mouse + keyboard), the InstaPay / PESONet channel picker and the ₱50,000 InstaPay cap warning, Pay Bills (net **₱995.00** after ₱5 cashback), ₱10,000 loan drawdown, locked virtual card → **403 CARD_FROZEN**, live toast on incoming money, Buy Load (telco logos on the network list, brand chips and every promo card), the Chaos Engine fault toast and recovery, the ISO 20022 Message Inspector (XML + Copy Payload) |
 | Chaos / resilience | Playwright + `x-chaos-*` headers | 5 | 503 drops before/after the server acts, exhausted retries, 2-second DB locks: the UI retries safely and **no money is duplicated or lost** |
 | Visual regression | `toHaveScreenshot` | 19 | The glassmorphic iOS dock and Home layout on iPhone SE, iPhone 15, Pixel 7, iPad mini and desktop, plus the dark glass theme |
 | Accessibility | `@axe-core/playwright` | 19 | WCAG 2.0 / 2.1 / 2.2 A + AA on login, Home, Send, the Bank Transfer picker (closed and open), Cash In (partners, amount, payment code), Pay Bills, Buy Load, receipt + ISO inspector, notifications, profile, logout and the QA panel, in **light and dark**; keyboard-only login, dialog focus trap / focus return, ARIA tabs |
@@ -296,7 +296,7 @@ or Instant Loan. To use Add money and the QA Sandbox, make your account an admin
 ```bash
 npm ci
 npx playwright install ffmpeg            # for test videos (tests use your installed Chrome)
-npx playwright test                       # all 415: projects api, ui, visual, a11y (+ ledger check at the end)
+npx playwright test                       # all 417: projects api, ui, visual, a11y (+ ledger check at the end)
 npx playwright test --project=ui          # E2E + chaos in a real browser
 npx playwright test --project=a11y        # axe-core WCAG 2.2 AA scans + keyboard checks
 npx playwright show-report                # open the HTML report (each axe scan is attached as JSON)
@@ -317,7 +317,7 @@ Visual baselines are per OS; after an intended UI change run `npx playwright tes
 src/            Express API: routes, services (ledger, transfers, bills, loans, cards, KYC…), realtime.js
 public/         web wallet (vanilla JS, iOS glass design)
 db/schema.sql   schema, chart of accounts, immutability + notify triggers (re-runnable migration)
-tests/api/      346 API tests (25 suites)            tests/e2e/      customer journeys in Chrome
+tests/api/      347 API tests (25 suites)            tests/e2e/      customer journeys in Chrome
 tests/visual/   visual regression + baselines         tests/load/     k6: concurrency + idempotency (+ HTML reports)
 tests/a11y/     axe-core accessibility + keyboard     src/docs/       OpenAPI 3 document (served at /api-docs)
 tests/resilience.spec.ts  chaos tests                 scripts/        ledger assertion, EOD reconciliation, workers

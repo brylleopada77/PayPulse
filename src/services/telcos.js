@@ -25,13 +25,16 @@ const NETWORKS = {
   GOMO: { code: 'GOMO', name: 'GOMO', brands: ['GOMO'], prefixes: ['0976', '0977'] },
 };
 
+// `logo` is self-hosted under public/img/telcos (null: the initials badge, white text at 4.5:1 or better)
+const brand = (code, name, network, logo, initials, color) =>
+  ({ code, name, network, logo: logo && `/img/telcos/${logo}`, badge: { initials, color } });
 const BRANDS = {
-  GLOBE: { code: 'GLOBE', name: 'Globe', network: 'GLOBE' },
-  TM: { code: 'TM', name: 'TM', network: 'GLOBE' },
-  SMART: { code: 'SMART', name: 'Smart', network: 'SMART' },
-  TNT: { code: 'TNT', name: 'TNT', network: 'SMART' },
-  DITO: { code: 'DITO', name: 'DITO', network: 'DITO' },
-  GOMO: { code: 'GOMO', name: 'GOMO', network: 'GOMO' },
+  GLOBE: brand('GLOBE', 'Globe', 'GLOBE', 'globe.png', 'G', '#0033a0'),
+  TM: brand('TM', 'TM', 'GLOBE', null, 'TM', '#1d4ed8'),
+  SMART: brand('SMART', 'Smart', 'SMART', null, 'S', '#00703c'),
+  TNT: brand('TNT', 'TNT', 'SMART', 'tnt.ico', 'TNT', '#b45309'),
+  DITO: brand('DITO', 'DITO', 'DITO', 'dito.png', 'D', '#c8102e'),
+  GOMO: brand('GOMO', 'GOMO', 'GOMO', 'gomo.png', 'GO', '#be185d'),
 };
 
 const REGULAR_AMOUNTS = [20, 50, 100, 200, 500, 1000];
@@ -43,11 +46,23 @@ const PROMOS = [
   promo('GOPLUS99', 'GLOBE', 'Go+99', 99, '8GB All Access data + 8GB for apps', '7 days'),
   promo('GOEXTRA99', 'GLOBE', 'GoEXTRA99', 99, '8GB data + unli calls and texts to all networks', '7 days'),
   promo('GOPLUS149', 'GLOBE', 'Go+149', 149, '12GB All Access data + 12GB for apps', '7 days'),
+  promo('GOUNLI180', 'GLOBE', 'GoUNLI180', 180, 'Unli calls and texts to all networks + 2GB data', '7 days'),
+  promo('GOPLUS349', 'GLOBE', 'Go+349', 349, '24GB All Access data + 24GB for apps', '30 days'),
   promo('EASYSURF50', 'TM', 'EasySURF 50', 50, '3GB data + unli texts to all networks', '3 days'),
+  promo('EASYSURF99', 'TM', 'EasySURF 99', 99, '8GB data + unli texts to all networks', '7 days'),
+  promo('TMALLNET30', 'TM', 'AllNet 30', 30, 'Unli texts to all networks + 30 mins all-net calls', '3 days'),
   promo('POWERALL99', 'SMART', 'Power All 99', 99, '8GB data + unli TikTok', '7 days'),
   promo('GIGAVIDEO99', 'SMART', 'GIGA VIDEO 99', 99, '2GB data + 1GB/day for video apps', '7 days'),
+  promo('MAGICDATA99', 'SMART', 'Magic Data 99', 99, '6GB data that never expires', 'No expiry'),
+  promo('POWERALL149', 'SMART', 'Power All 149', 149, '12GB data + unli calls and texts to all networks', '7 days'),
   promo('TNTGIGA50', 'TNT', 'GIGA Surf 50', 50, '3GB data + 1GB/day for video apps', '3 days'),
+  promo('TNTGIGA99', 'TNT', 'GIGA Surf 99', 99, '8GB data + 1GB/day for video apps', '7 days'),
+  promo('TNTALLNET30', 'TNT', 'TNT AllNet 30', 30, 'Unli texts to all networks + 30 mins all-net calls', '3 days'),
   promo('DITO99', 'DITO', 'DITO 99', 99, '7GB data with no expiry + unli all-net calls and texts', '30 days for calls/texts'),
+  promo('DITO149', 'DITO', 'DITO Level-Up 149', 149, '25GB data + unli all-net calls and texts', '30 days'),
+  promo('DITO199', 'DITO', 'DITO 199', 199, '35GB data + unli all-net calls and texts', '30 days'),
+  promo('GOMO99', 'GOMO', '8GB No Expiry', 99, '8GB data that never expires', 'No expiry'),
+  promo('GOMO199', 'GOMO', '15GB No Expiry', 199, '15GB data that never expires', 'No expiry'),
   promo('GOMO30GB', 'GOMO', '30GB No Expiry', 399, '30GB data that never expires', 'No expiry'),
 ];
 
