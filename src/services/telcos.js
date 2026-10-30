@@ -30,9 +30,9 @@ const brand = (code, name, network, logo, initials, color) =>
   ({ code, name, network, logo: logo && `/img/telcos/${logo}`, badge: { initials, color } });
 const BRANDS = {
   GLOBE: brand('GLOBE', 'Globe', 'GLOBE', 'globe.png', 'G', '#0033a0'),
-  TM: brand('TM', 'TM', 'GLOBE', null, 'TM', '#1d4ed8'),
-  SMART: brand('SMART', 'Smart', 'SMART', null, 'S', '#00703c'),
-  TNT: brand('TNT', 'TNT', 'SMART', 'tnt.ico', 'TNT', '#b45309'),
+  TM: brand('TM', 'TM', 'GLOBE', 'tm.png', 'TM', '#1d4ed8'),
+  SMART: brand('SMART', 'Smart', 'SMART', 'smart.png', 'S', '#00703c'),
+  TNT: brand('TNT', 'TNT', 'SMART', 'tnt.png', 'TNT', '#b45309'),
   DITO: brand('DITO', 'DITO', 'DITO', 'dito.png', 'D', '#c8102e'),
   GOMO: brand('GOMO', 'GOMO', 'GOMO', 'gomo.png', 'GO', '#be185d'),
 };

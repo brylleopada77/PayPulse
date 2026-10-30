@@ -9,6 +9,36 @@ import { expireMpin } from '../helpers/db';
 import { login, peso, typeCode } from '../helpers/ui';
 
 test.describe('Buy Load', () => {
+  test('tap a telco first: its promos open straight away, then the number keeps that brand', async ({ page, request }) => {
+    await login(page, await createFundedUser(request, 500, 'Alice Reyes'));
+    await page.getByTestId('open-load').click();
+
+    const tm = page.getByTestId('load-network-TM');
+    await expect(tm).toHaveAttribute('aria-pressed', 'false');
+    await tm.click();
+    await expect(tm).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('load-tab-promo')).toBeChecked();
+    const promos = page.locator('#load-promos .promo-item');
+    await expect(promos).toHaveCount(3);
+    await expect(page.getByTestId('load-promo-EASYSURF50')).toBeVisible();
+    for (const promo of await promos.all()) await expect(promo.locator('.bank-avatar img')).toHaveAttribute('src', '/img/telcos/tm.png');
+
+    // another telco: its own promos
+    await page.getByTestId('load-network-SMART').click();
+    await expect(tm).toHaveAttribute('aria-pressed', 'false');
+    await expect(promos).toHaveCount(4);
+    await expect(page.getByTestId('load-promo-MAGICDATA99')).toBeVisible();
+
+    // back to TM, pick a promo, then a Globe-network number: TM (a Globe brand) stays chosen
+    await tm.click();
+    await page.getByTestId('load-promo-EASYSURF50').click();
+    await page.getByTestId('load-mobile').fill('09171234567');
+    await expect(page.getByTestId('load-brand-TM')).toBeChecked();
+    await expect(page.getByTestId('load-promo-EASYSURF50')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('load-continue').click();
+    await expect(page.getByTestId('load-summary')).toContainText('EasySURF 50');
+  });
+
   test('telco logos: every network before a number is typed, then the brand chips and each promo card', async ({ page, request }) => {
     await login(page, await createFundedUser(request, 500, 'Alice Reyes'));
     await page.getByTestId('open-load').click();
@@ -16,7 +46,8 @@ test.describe('Buy Load', () => {
     const networks = page.getByTestId('load-networks');
     await expect(networks.getByRole('listitem')).toHaveText([/Globe$/, /TM$/, /Smart$/, /TNT$/, /DITO$/, /GOMO$/]); // logo (or badge) + name
     await expect(page.getByTestId('load-network-GLOBE').locator('img')).toHaveAttribute('src', '/img/telcos/globe.png');
-    await expect(page.getByTestId('load-network-SMART').locator('.bank-avatar')).toHaveText('S'); // no logo: its badge
+    await expect(page.getByTestId('load-network-SMART').locator('img')).toHaveAttribute('src', '/img/telcos/smart.png');
+    await expect(page.getByTestId('load-network-TM').locator('img')).toHaveAttribute('src', '/img/telcos/tm.png');
     const broken = await networks.locator('img').evaluateAll((imgs) =>
       Promise.all(imgs.map((img) => (img as HTMLImageElement).decode().then(() => null, () => (img as HTMLImageElement).src))));
     expect(broken.filter(Boolean)).toEqual([]);

@@ -36,7 +36,8 @@ test.describe('Buy Load: catalog and network detection', () => {
       }
       expect(catalog.promos.filter((p: { brand: string }) => p.brand === brand.code).length, brand.code).toBeGreaterThanOrEqual(3);
     }
-    expect(catalog.brands.filter((b: { logo: string | null }) => b.logo).map((b: { code: string }) => b.code)).toEqual(['GLOBE', 'TNT', 'DITO', 'GOMO']);
+    expect(catalog.brands.map((b: { logo: string | null }) => b.logo)).toEqual(
+      ['globe.png', 'tm.png', 'smart.png', 'tnt.png', 'dito.png', 'gomo.png'].map((f) => `/img/telcos/${f}`));
     expect(catalog.promos).toHaveLength(21);
     expect(new Set(catalog.promos.map((p: { code: string }) => p.code)).size).toBe(21); // codes are unique
   });
