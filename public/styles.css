@@ -1695,3 +1695,13 @@ h1, h2, h3, .who-name, .product-title, .tx-title { color: var(--text); }
 #bank-grid .bank-avatar { width: 38px; height: 26px; }
 #bank-grid .bank-avatar.has-logo { padding: 3px 4px; }
 #bank-grid .bank-avatar img { width: 30px; height: 20px; }
+/* Cash In partner cards: the logo on a white strip across the top (most partner logos are wide
+   wordmarks: Uncle John's, M Lhuillier, Mercury Drug), then the name and the fee tag */
+.form .otc-card { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 5px; }
+.otc-card .bank-avatar { grid-row: auto; justify-self: stretch; width: auto; height: 34px; border-radius: 8px; }
+.otc-card .bank-avatar.has-logo { padding: 4px 8px; }
+.otc-card .bank-avatar img { width: 100%; height: 26px; }
+.otc-card .bank-avatar:not(.has-logo) { justify-self: start; width: 34px; border-radius: 50%; }
+/* the chosen partner at the top of the amount and code steps */
+.otc-partner .bank-avatar.has-logo { width: 76px; height: 34px; border-radius: 8px; padding: 4px 6px; }
+.otc-partner .bank-avatar img { width: 64px; height: 26px; }
