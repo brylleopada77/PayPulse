@@ -260,6 +260,10 @@
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/><path d="m12.5 6-2 4h3l-2 4"/></svg></span>
           Buy Load
         </button>
+        <button type="button" class="quick glass-card glass-press" id="otc-btn" data-testid="open-otc">
+          <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 9 5 4h14l2 5"/><path d="M4 9v11h16V9"/><path d="M3 9h18"/><path d="M10 20v-5h4v5"/></svg></span>
+          Cash In
+        </button>
         <!-- Admins only, and only when the server has the mock payment provider on (MOCK_PAYMENTS=true). -->
         <button type="button" class="quick glass-card glass-press" id="topup-btn" data-open="topup-dialog" data-testid="open-topup" hidden>
           <span class="quick-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg></span>
@@ -528,6 +532,81 @@
       <p class="form-error" role="alert"></p>
       <button type="submit" class="btn primary" data-testid="load-pay">Buy Load</button>
     </form>
+  </dialog>
+  <!-- ============ Cash In over the counter: partner -> amount -> payment code ============ -->
+  <dialog id="otc-dialog" class="sheet otc-sheet" aria-labelledby="otc-title" data-testid="otc-dialog">
+    <!-- Step 1: where will you pay? Category pills filter a 2-column grid (no inner scrollbar) -->
+    <form id="otc-pick" class="form" data-view="pick" novalidate>
+      <header class="sheet-head">
+        <h2 id="otc-title">Cash In</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <p class="otc-intro">Pay in cash at a partner near you. Your wallet is credited as soon as the cashier confirms.</p>
+      <div class="otc-pending" id="otc-pending" data-testid="otc-pending" hidden>
+        <span class="otc-pending-label">Unpaid codes</span>
+        <div class="otc-pending-list" id="otc-pending-list"></div>
+      </div>
+      <fieldset class="otc-tabs" data-testid="otc-tabs">
+        <legend class="visually-hidden">Partner type</legend>
+        <label><input type="radio" name="otcCategory" value="ALL" checked><span>All</span></label>
+        <label><input type="radio" name="otcCategory" value="PAWNSHOP"><span>Pawnshops</span></label>
+        <label><input type="radio" name="otcCategory" value="STORE"><span>Stores</span></label>
+        <label><input type="radio" name="otcCategory" value="MALL"><span>Malls</span></label>
+        <label><input type="radio" name="otcCategory" value="PHARMACY"><span>Pharmacies</span></label>
+      </fieldset>
+      <fieldset class="otc-grid">
+        <legend class="visually-hidden">Where will you pay?</legend>
+        <div class="bank-cards" id="otc-partners" data-testid="otc-partners"></div>
+      </fieldset>
+    </form>
+
+    <!-- Step 2: how much? -->
+    <form id="otc-form" class="form" data-view="amount" novalidate hidden>
+      <header class="sheet-head">
+        <button type="button" class="back" id="otc-back" aria-label="Back to partners">‹</button>
+        <h2>Cash In</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <div class="otc-partner" id="otc-partner" data-testid="otc-partner"></div>
+      <label>Amount (₱) <span class="hint">₱100 to ₱50,000</span>
+        <input name="amount" inputmode="decimal" placeholder="0.00" required data-testid="otc-amount" aria-describedby="otc-summary">
+      </label>
+      <div class="quick-amounts" id="otc-chips">
+        <button type="button" class="chip" data-otc-amount="500">₱500</button>
+        <button type="button" class="chip" data-otc-amount="1000">₱1,000</button>
+        <button type="button" class="chip" data-otc-amount="2000">₱2,000</button>
+        <button type="button" class="chip" data-otc-amount="5000">₱5,000</button>
+      </div>
+      <dl class="otc-summary" id="otc-summary" data-testid="otc-summary">
+        <div><dt>Counter fee</dt><dd id="otc-fee">₱0.00</dd></div>
+        <div><dt>Pay at the counter</dt><dd id="otc-total">₱0.00</dd></div>
+        <div><dt>Added to your wallet</dt><dd id="otc-credit">₱0.00</dd></div>
+      </dl>
+      <p class="form-error" role="alert"></p>
+      <button type="submit" class="btn primary" data-testid="otc-generate">Generate Payment Code</button>
+    </form>
+
+    <!-- Step 3: the code to show at the counter -->
+    <div id="otc-result" class="form" data-view="code" hidden>
+      <header class="sheet-head">
+        <h2>Pay at the counter</h2>
+        <button type="button" class="close" data-close aria-label="Close">×</button>
+      </header>
+      <div class="otc-partner" id="otc-result-partner"></div>
+      <div class="otc-ticket" data-testid="otc-ticket">
+        <svg class="otc-barcode" id="otc-barcode" role="img" aria-label="Barcode of the payment code" data-testid="otc-barcode"></svg>
+        <p class="otc-ref-label">Payment reference</p>
+        <p class="otc-ref"><strong id="otc-ref" data-testid="otc-ref"></strong>
+          <button type="button" class="link-btn" id="otc-copy" data-testid="otc-copy">Copy</button></p>
+        <p class="otc-pay">Pay exactly <strong id="otc-pay" data-testid="otc-pay"></strong></p>
+        <p class="otc-status" id="otc-status" role="status" data-testid="otc-status"></p>
+        <p class="otc-expiry" data-testid="otc-expiry">Valid for 24 hours · <span id="otc-countdown" role="timer" aria-live="off"></span></p>
+      </div>
+      <p class="otc-howto" id="otc-howto" data-testid="otc-howto"></p>
+      <!-- QA sandbox, admins only: stands in for the cashier -->
+      <button type="button" class="btn secondary" id="otc-simulate" data-testid="otc-simulate" hidden>Simulate counter payment (QA)</button>
+      <button type="button" class="btn primary" data-close data-testid="otc-done">Done</button>
+    </div>
   </dialog>
 
   <!-- ============ Pay Bills ============ -->

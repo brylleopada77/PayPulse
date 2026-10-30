@@ -97,6 +97,19 @@ for (const theme of ['light', 'dark'] as const) {
       await expectNoViolations(page, testInfo, `${theme}-bank-limit-warning`, '[data-testid="send-dialog"]');
     });
 
+    test('Cash In over the counter: partners, amount and the payment code', async ({ page, request }, testInfo) => {
+      await login(page, await userWithHistory(request));
+      await page.getByTestId('open-otc').click();
+      await expect(page.getByTestId('otc-partners')).toBeVisible();
+      await expectNoViolations(page, testInfo, `${theme}-otc-partners`, '[data-testid="otc-dialog"]');
+      await page.getByTestId('otc-partners').getByRole('radio', { name: /7-Eleven/ }).click();
+      await page.getByTestId('otc-amount').fill('500');
+      await expectNoViolations(page, testInfo, `${theme}-otc-amount`, '[data-testid="otc-dialog"]');
+      await page.getByTestId('otc-generate').click();
+      await expect(page.getByTestId('otc-ref')).toHaveText(/^\d{4} \d{4} \d{4}$/);
+      await expectNoViolations(page, testInfo, `${theme}-otc-code`, '[data-testid="otc-dialog"]');
+    });
+
     test('receipt and the ISO 20022 Message Inspector tab', async ({ page, request }, testInfo) => {
       await login(page, await userWithHistory(request));
       await page.getByTestId('tx-item').first().click();

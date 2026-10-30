@@ -8,6 +8,7 @@ const pesonetService = require('../services/pesonetService');
 const complianceService = require('../services/complianceService');
 const savingsService = require('../services/savingsService');
 const interestService = require('../services/interestService');
+const otcCashInService = require('../services/otcCashInService');
 const { pool } = require('../db/pool');
 
 const router = express.Router();
@@ -34,6 +35,15 @@ router.post('/reset', async (req, res) => {
 router.post('/pesonet/run-cutoff', async (req, res) => {
   const batch = await pesonetService.runCutoff({ cutoffAt: new Date(), userId: req.user.id });
   res.json({ batch });
+});
+
+// POST /api/qa/otc/:reference/pay -> act as the counter: pay MY cash-in code in full (amount + fee)
+router.post('/otc/:reference/pay', async (req, res) => {
+  const code = await otcCashInService.getCode(req.user.id, req.params.reference);
+  res.json(await otcCashInService.confirmPayment(
+    { reference: code.reference, amountPaid: code.totalToPay, partnerTxnId: 'qa-counter' },
+    { userId: req.user.id },
+  ));
 });
 
 // POST /api/qa/compliance/clear -> act as the compliance officer: close MY alerts, release the hold

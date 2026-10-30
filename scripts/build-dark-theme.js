@@ -43,6 +43,9 @@ const LINE = {
 };
 
 const ALWAYS_DARK = /\.(qa-(fab|panel|head|badge|note|primary|select|more|status|actions)|chaos-)/;
+// White in both themes: the cash-in ticket, so its barcode always scans (dark bars on white), and
+// the white disc behind bank / partner logos (most logos are dark ink and vanish on dark glass)
+const ALWAYS_LIGHT = /\.(otc-(ticket|status|ref|expiry|barcode)|bank-avatar)/;
 const HEX = /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|\bwhite\b/g;
 const RGBA = /rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\s*\)/g;
 const round = (n) => Math.round(n * 100) / 100;
@@ -132,7 +135,7 @@ function emit(nodes, indent = '') {
     }
     // The QA Sandbox panel and the Chaos Engine are dark by design in both themes: leave them alone
     // (translating them turned the panel's dark ink into light ink on its amber buttons).
-    if (ALWAYS_DARK.test(n.selector)) continue;
+    if (ALWAYS_DARK.test(n.selector) || ALWAYS_LIGHT.test(n.selector)) continue;
     const changed = declarations(n.body)
       .filter(([prop, value]) => !prop.startsWith('--') && !value.includes('url('))
       .map(([prop, value]) => [prop, translate(prop, value)])

@@ -2632,7 +2632,241 @@
       ]
     },
     {
-      "name": "13. Top-ups (ADMIN)",
+      "name": "13. Cash-in (over the counter)",
+      "description": "A 12-digit code to pay in cash at a partner (7-Eleven, Cebuana, SM, Mercury Drug...). With webhookSecret set, the partner webhook pays it and the wallet is credited.",
+      "item": [
+        {
+          "name": "Over-the-counter partners by category, with their counter fees",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('19 partners', () => pm.expect(pm.response.json().partners).to.have.lengthOf(19));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cash-in/otc/partners",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cash-in",
+                "otc",
+                "partners"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate a code: Cebuana Lhuillier ₱1,000 (1% fee: pay ₱1,010)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset('otcPaid');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code < 300) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.reference !== undefined) pm.environment.set('otcReference', String(body.reference));",
+                  "  if (body.totalToPay !== undefined) pm.environment.set('otcTotal', String(body.totalToPay));",
+                  "}",
+                  "if (pm.response.code === 201) pm.test('12-digit code, ₱1,010 to pay', () => { pm.expect(pm.response.json().reference).to.match(/^\\d{12}$/); pm.expect(pm.response.json().totalToPay).to.eql('1010.00'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "A retry with the same key replays the first answer"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partnerCode\": \"CEBUANA\",\n  \"amount\": 1000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cash-in/otc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cash-in",
+                "otc"
+              ]
+            },
+            "description": "Cash in ₱100 to ₱50,000 per code, at most 5 unpaid codes at a time (409 TOO_MANY_PENDING_CODES). The customer pays amount + the counter fee of the partner (FREE, FLAT ₱15 or 1%) in cash; the wallet is credited the amount when the partner confirms. The code is 11 random digits + a Luhn check digit.\n\n**Moves money.** Sent with a fresh `Idempotency-Key`."
+          }
+        },
+        {
+          "name": "My latest 20 cash-in codes (PENDING, PAID or EXPIRED)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cash-in/otc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cash-in",
+                "otc"
+              ]
+            }
+          }
+        },
+        {
+          "name": "One of my cash-in codes (spaces and dashes in the reference are ignored)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('otcReference'))) { console.log('Skipped: no cash-in code yet'); pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cash-in/otc/{{otcReference}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cash-in",
+                "otc",
+                "{{otcReference}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "The counter pays it: signed partner webhook (needs webhookSecret)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('webhookSecret') && pm.environment.get('otcReference'))) { console.log('Skipped: no webhookSecret (or no code) in the environment'); pm.execution.skipRequest(); }",
+                  "const body = JSON.stringify({ reference: pm.environment.get('otcReference'), amountPaid: pm.environment.get('otcTotal'), partnerTxnId: 'postman-' + Date.now() });",
+                  "pm.request.body.raw = body;",
+                  "pm.request.headers.upsert({ key: 'X-PayPulse-Signature', value: require('crypto-js').HmacSHA256(body, pm.environment.get('webhookSecret')).toString() });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('Paid', () => pm.expect(pm.response.json().status).to.eql('PAID'));",
+                  "pm.environment.set('otcPaid', 'true');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"set by the pre-request script\": true }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/webhooks/otc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "otc"
+              ]
+            },
+            "description": "`amountPaid` must equal amount + counter fee (409 AMOUNT_MISMATCH). An expired code answers 410 CODE_EXPIRED; a paid code answers again with `duplicate: true` and no second credit."
+          }
+        }
+      ]
+    },
+    {
+      "name": "14. Top-ups (ADMIN)",
       "description": "Adding money is admin-only: a customer account gets 403.",
       "item": [
         {
@@ -2668,7 +2902,7 @@
       ]
     },
     {
-      "name": "14. QA Sandbox (ADMIN)",
+      "name": "15. QA Sandbox (ADMIN)",
       "description": "QA_SANDBOX servers only; admin-only (a customer gets 403). \"Reset\" is last: it sets your wallet to ₱100,000 and hides your history.",
       "item": [
         {
@@ -2774,6 +3008,48 @@
                 "qa",
                 "pesonet",
                 "run-cutoff"
+              ]
+            },
+            "description": "Available only when the server runs with `QA_SANDBOX=true`; ADMIN accounts only. Affects the caller's own account."
+          }
+        },
+        {
+          "name": "Act as the counter: pay my cash-in code",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('otcReference') && !pm.environment.get('otcPaid'))) { console.log('Skipped: no unpaid cash-in code (folder 13)'); pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const isAdmin = pm.environment.get('role') === 'ADMIN';",
+                  "pm.test(isAdmin ? 'Status 200 (admin)' : 'Status 403 (admin only)', () => pm.expect(pm.response.code).to.eql(isAdmin ? 200 : 403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/qa/otc/{{otcReference}}/pay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "qa",
+                "otc",
+                "{{otcReference}}",
+                "pay"
               ]
             },
             "description": "Available only when the server runs with `QA_SANDBOX=true`; ADMIN accounts only. Affects the caller's own account."
@@ -2900,7 +3176,7 @@
       ]
     },
     {
-      "name": "15. Negative cases",
+      "name": "16. Negative cases",
       "description": "Requests that must be refused. Nothing is moved.",
       "item": [
         {
@@ -3172,7 +3448,7 @@
       ]
     },
     {
-      "name": "16. Auth (password reset)",
+      "name": "17. Auth (password reset)",
       "description": "Run last: sets the same password again, so the environment keeps working.",
       "item": [
         {

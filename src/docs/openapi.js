@@ -79,6 +79,7 @@ module.exports = {
     { name: 'Transactions', description: 'ISO 20022 Message Inspector' },
     { name: 'Profile', description: 'KYC, linked accounts, security preferences, support' },
     { name: 'Notifications', description: 'Notification center' },
+    { name: 'Cash-in', description: 'Over-the-counter cash-in: a 12-digit payment code paid in cash at a partner (pawnshop, store, mall, pharmacy)' },
     { name: 'Top-ups', description: 'Add money (mock card checkout, admins) and the provider webhook' },
     { name: 'QA Sandbox', description: QA_ONLY },
   ],
@@ -442,6 +443,35 @@ module.exports = {
       }),
     },
 
+    // ----- Cash-in (over the counter) -----
+    '/api/v1/cash-in/otc/partners': {
+      get: op('Cash-in', 'Over-the-counter partners by category, with their counter fees', { responses: { 200: ok('{ categories, partners, minAmount, maxAmount, validHours }') } }),
+    },
+    '/api/v1/cash-in/otc': {
+      post: op('Cash-in', 'Generate a 12-digit payment code (valid 24 hours)', {
+        money: true,
+        description: 'Cash in ₱100 to ₱50,000 per code, at most 5 unpaid codes at a time (409 TOO_MANY_PENDING_CODES). The customer pays amount + the counter fee of the partner (FREE, FLAT ₱15 or 1%) in cash; the wallet is credited the amount when the partner confirms. The code is 11 random digits + a Luhn check digit.',
+        requestBody: body({ partnerCode: str('Partner code, e.g. 7ELEVEN or CEBUANA'), amount: AMOUNT }, ['partnerCode', 'amount'], { partnerCode: 'CEBUANA', amount: '1000.00' }),
+        responses: { 201: ok('{ reference, displayReference, partner, amount, fee, totalToPay, status, expiresAt }'), 409: err('Conflict') },
+      }),
+      get: op('Cash-in', 'My latest 20 cash-in codes (PENDING, PAID or EXPIRED)', { responses: { 200: ok('{ codes }') } }),
+    },
+    '/api/v1/cash-in/otc/{reference}': {
+      get: op('Cash-in', 'One of my cash-in codes (spaces and dashes in the reference are ignored)', {
+        params: [pathParam('reference', '12-digit code', { type: 'string', example: '882930194410' })],
+        responses: { 200: ok('Code'), 404: err('NotFound') },
+      }),
+    },
+    '/api/webhooks/otc': {
+      post: op('Cash-in', 'Partner callback: the code was paid at the counter (HMAC-signed; credits once)', {
+        auth: false,
+        params: [{ name: 'X-PayPulse-Signature', in: 'header', required: true, description: 'hex HMAC-SHA256 of the raw body with WEBHOOK_SECRET', schema: { type: 'string' } }],
+        description: '`amountPaid` must equal amount + counter fee (409 AMOUNT_MISMATCH). An expired code answers 410 CODE_EXPIRED; a paid code answers again with `duplicate: true` and no second credit.',
+        requestBody: body({ reference: str('The 12-digit code'), amountPaid: AMOUNT, partnerTxnId: str('Transaction id at the partner') }, ['reference', 'amountPaid'], { reference: '882930194410', amountPaid: '1010.00' }),
+        responses: { 200: ok('{ received: true, status, credited, duplicate, ... }'), 401: err('Unauthorized'), 404: err('NotFound'), 409: err('Conflict'), 410: err('Gone') },
+      }),
+    },
+
     // ----- Top-ups -----
     '/api/payments/mock-checkout': {
       post: op('Top-ups', 'Add money with a mock card checkout (ADMIN, MOCK_PAYMENTS=true)', {
@@ -482,6 +512,13 @@ module.exports = {
     },
     '/api/qa/pesonet/run-cutoff': {
       post: op('QA Sandbox', 'Settle my queued PESONet transfers now', { description: QA_ONLY, responses: { 200: ok('Batch') } }),
+    },
+    '/api/qa/otc/{reference}/pay': {
+      post: op('QA Sandbox', 'Act as the counter: pay my cash-in code in full', {
+        description: QA_ONLY,
+        params: [pathParam('reference', '12-digit code')],
+        responses: { 200: ok('Paid'), 404: err('NotFound'), 410: err('Gone') },
+      }),
     },
     '/api/qa/compliance/clear': {
       post: op('QA Sandbox', 'Act as the compliance officer: close my alerts, release the hold', { description: QA_ONLY, responses: { 200: ok('Cleared') } }),
@@ -579,6 +616,7 @@ module.exports = {
       NotFound: { description: 'Not found (or not yours)', content: json(ref('Error')) },
       Conflict: { description: 'Already exists / conflicting state', content: json(ref('Error')) },
       Unprocessable: { description: 'Not applicable to this resource', content: json(ref('Error')) },
+      Gone: { description: 'No longer valid (e.g. an expired cash-in code)', content: json(ref('Error')) },
       Locked: { description: 'Account frozen or locked', content: json(ref('Error')) },
       TooManyRequests: { description: 'Daily limit or anti-spam window reached', content: json(ref('Error')) },
     },

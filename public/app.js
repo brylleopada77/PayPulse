@@ -180,8 +180,11 @@
     return Math.max(0, Math.ceil((mpinDeadline - Date.now()) / 1000));
   }
 
+  /** An over-the-counter cash-in (a DEPOSIT described "Cash in at <partner> (<code>)"). */
+  const isOtcCashIn = (tx) => tx.type === 'DEPOSIT' && /^Cash in at /.test(tx.description || '');
+
   function describe(tx) {
-    if (tx.type === 'DEPOSIT') return { title: 'Added money', icon: '+' };
+    if (tx.type === 'DEPOSIT') return { title: isOtcCashIn(tx) ? 'Cash in' : 'Added money', icon: '+' };
     if (tx.type === 'BANK_TRANSFER') return { title: tx.description, icon: '🏦' };
     if (tx.type === 'LOAN_DISBURSEMENT') return { title: 'Loan Disbursement', icon: '💰' };
     if (tx.type === 'BILL_PAYMENT') return { title: tx.description, icon: '🧾' };
@@ -498,7 +501,7 @@
     const pending = bt?.status === 'QUEUED' ? ' · PESONet: pending cut-off' : '';
     // Top-ups carry a long payment id in their description: the receipt shows it, the list doesn't.
     const note =
-      tx.type === 'DEPOSIT' ? 'Card top-up'
+      tx.type === 'DEPOSIT' ? (isOtcCashIn(tx) ? tx.description : 'Card top-up')
         : tx.type === 'INTEREST' ? (tx.description || '').replace('Savings interest for', 'For') + ' · added to PayPulse Save'
           : tx.description;
     meta.textContent = bt
@@ -1247,33 +1250,35 @@
   // the value like any other field and arrow keys move between banks. A click, Enter or Space on a card
   // chooses it, closes the grid and moves focus to the account number; Escape closes the grid only.
 
+  /** A bank's or partner's avatar: its logo when the catalog has one (the badge if it fails to load), else the badge. */
+  function logoAvatar(bank, el = document.createElement('span')) {
+    el.className = 'bank-avatar';
+    el.setAttribute('aria-hidden', 'true');
+    const badge = () => {
+      const initials = bank.badge?.initials ?? bank.name.slice(0, 2).toUpperCase();
+      el.replaceChildren(initials);
+      el.style.background = bank.badge?.color ?? 'var(--accent)';
+      el.classList.remove('has-logo');
+      el.classList.toggle('long', initials.length > 2);
+    };
+    if (bank.logo) {
+      const img = Object.assign(document.createElement('img'), { src: bank.logo, alt: '', loading: 'lazy' });
+      img.addEventListener('error', badge, { once: true });
+      el.style.background = '';
+      el.classList.remove('long');
+      el.classList.add('has-logo');
+      el.replaceChildren(img);
+    } else {
+      badge();
+    }
+    return el;
+  }
+
   const bankPicker = (() => {
     const trigger = $('#bank-trigger');
     const grid = $('#bank-grid');
 
-    /** The bank's avatar: its logo when the catalog has one (the badge if it fails to load), else the badge. */
-    function avatar(bank, el = document.createElement('span')) {
-      el.className = 'bank-avatar';
-      el.setAttribute('aria-hidden', 'true');
-      const badge = () => {
-        const initials = bank.badge?.initials ?? bank.name.slice(0, 2).toUpperCase();
-        el.replaceChildren(initials);
-        el.style.background = bank.badge?.color ?? 'var(--accent)';
-        el.classList.remove('has-logo');
-        el.classList.toggle('long', initials.length > 2);
-      };
-      if (bank.logo) {
-        const img = Object.assign(document.createElement('img'), { src: bank.logo, alt: '', loading: 'lazy' });
-        img.addEventListener('error', badge, { once: true });
-        el.style.background = '';
-        el.classList.remove('long');
-        el.classList.add('has-logo');
-        el.replaceChildren(img);
-      } else {
-        badge();
-      }
-      return el;
-    }
+    const avatar = logoAvatar;
 
     function railTags(bank, el = document.createElement('span')) {
       el.className = 'bank-rails';
@@ -3654,6 +3659,17 @@
         ...(r.cashback ? [['Cashback Earned', money(r.cashback)]] : []),
       ];
     }
+    if (r.type === 'DEPOSIT' && r.otc) {
+      return [
+        ['Amount', money(r.amount)],
+        ['Counter fee', `${money(r.otc.counterFee)} (paid at the counter)`],
+        ['Paid at', r.sender.name],
+        ['Payment reference', r.sender.account],
+        ['Recipient Name', r.recipient.name],
+        ['Recipient Account', r.recipient.account],
+        ['Bank Name', r.bankName],
+      ];
+    }
     if (r.type === 'DEPOSIT') {
       return [
         ['Amount', money(r.amount)],
@@ -3976,6 +3992,280 @@
   // ---------- Start ----------
 
   // The loading screen (pulse mark) stays until the first screen is ready.
+  // ----- Cash In over the counter: partner -> amount -> 12-digit payment code -----
+  //
+  // The code is shown as text and as an Interleaved 2 of 5 barcode (the numeric symbology payment
+  // counters scan). While the code view is open the app polls it every 5 s and shows "Paid" (and
+  // the new balance) as soon as the partner confirms.
+
+  const otcDialog = $('#otc-dialog');
+  const otcPick = $('#otc-pick');
+  const otcForm = $('#otc-form');
+  const otcResult = $('#otc-result');
+  const OTC_POLL_MS = 5_000;
+  let otcCatalog = null; // GET /api/v1/cash-in/otc/partners
+  let otcPartner = null;
+  let otcCode = null; // the code on screen
+  let otcTimers = [];
+
+  const otcPartnerByCode = (code) => otcCatalog?.partners.find((p) => p.code === code);
+
+  function otcFeeCents(partner, amountCents) {
+    if (partner.fee.type === 'FLAT') return partner.fee.cents;
+    if (partner.fee.type === 'PERCENT') return Math.round((amountCents * partner.fee.bps) / 10_000);
+    return 0;
+  }
+
+  function otcFeeTag(partner) {
+    return Object.assign(document.createElement('span'), {
+      className: `otc-fee-tag ${partner.fee.type === 'FREE' ? 'free' : 'paid'}`,
+      textContent: partner.feeLabel,
+    });
+  }
+
+  /** The grid: one radio card per partner (logo, name, fee tag), filtered by the category pills. */
+  function renderOtcPartners() {
+    $('#otc-partners').replaceChildren(...otcCatalog.partners.map((partner) => {
+      const card = Object.assign(document.createElement('label'), { className: 'bank-card otc-card' });
+      card.dataset.category = partner.category;
+      card.dataset.testid = 'otc-card';
+      const radio = Object.assign(document.createElement('input'), { type: 'radio', name: 'partnerCode', value: partner.code });
+      card.append(
+        radio,
+        logoAvatar(partner),
+        Object.assign(document.createElement('span'), { className: 'bank-name', textContent: partner.name }),
+        otcFeeTag(partner),
+      );
+      return card;
+    }));
+  }
+
+  function filterOtcPartners() {
+    const category = otcPick.elements.otcCategory.value;
+    for (const card of $('#otc-partners').children) card.hidden = category !== 'ALL' && card.dataset.category !== category;
+  }
+
+  /** Logo + name + fee tag at the top of steps 2 and 3. */
+  function otcPartnerHeader(el, partner) {
+    const name = Object.assign(document.createElement('strong'), { className: 'bank-name', textContent: partner.name });
+    el.replaceChildren(logoAvatar(partner), name, otcFeeTag(partner));
+  }
+
+  function showOtcView(view) {
+    otcPick.hidden = view !== 'pick';
+    otcForm.hidden = view !== 'amount';
+    otcResult.hidden = view !== 'code';
+    if (view !== 'code') stopOtcTimers();
+  }
+
+  function stopOtcTimers() {
+    otcTimers.forEach(clearInterval);
+    otcTimers = [];
+  }
+
+  /** Up to 3 unpaid codes above the grid, so a closed code is never lost. */
+  async function renderOtcPending() {
+    const box = $('#otc-pending');
+    try {
+      const { codes } = await api('/api/v1/cash-in/otc');
+      const pending = codes.filter((c) => c.status === 'PENDING').slice(0, 3);
+      $('#otc-pending-list').replaceChildren(...pending.map((code) => {
+        const chip = Object.assign(document.createElement('button'), {
+          type: 'button',
+          className: 'chip',
+          textContent: `${code.partner.name} · ${money(code.totalToPay)}`,
+        });
+        chip.dataset.testid = 'otc-pending-code';
+        chip.addEventListener('click', () => showOtcCode(code));
+        return chip;
+      }));
+      box.hidden = pending.length === 0;
+    } catch {
+      box.hidden = true;
+    }
+  }
+
+  async function openOtc() {
+    try {
+      otcCatalog ??= await api('/api/v1/cash-in/otc/partners');
+    } catch (err) {
+      return toast(err.message, 'error');
+    }
+    if (!$('#otc-partners').children.length) renderOtcPartners();
+    otcPick.reset();
+    filterOtcPartners();
+    $('#otc-pending').hidden = true;
+    showOtcView('pick');
+    otcDialog.showModal();
+    renderOtcPending();
+    otcPick.querySelector('input[name="otcCategory"]:checked').focus();
+  }
+
+  function chooseOtcPartner(code) {
+    otcPartner = otcPartnerByCode(code);
+    otcForm.reset();
+    setFormError(otcForm);
+    otcPartnerHeader($('#otc-partner'), otcPartner);
+    updateOtcSummary();
+    showOtcView('amount');
+    otcForm.elements.amount.focus();
+  }
+
+  function updateOtcSummary() {
+    const value = otcForm.elements.amount.value.trim();
+    const amountCents = validAmount(value) ? Math.round(Number(value) * 100) : 0;
+    const feeCents = otcFeeCents(otcPartner, amountCents);
+    $('#otc-fee').textContent = otcPartner.fee.type === 'FREE' ? 'Free'
+      : !amountCents && otcPartner.fee.type === 'PERCENT' ? otcPartner.feeLabel.replace(' fee', ' of the amount')
+        : money(feeCents / 100);
+    $('#otc-total').textContent = money(amountCents ? (amountCents + feeCents) / 100 : 0);
+    $('#otc-credit').textContent = money(amountCents / 100);
+  }
+
+  // ITF (Interleaved 2 of 5): each digit is 5 elements, 2 of them wide; a pair of digits interleaves
+  // the first digit's bars with the second digit's spaces. 12 digits = 6 pairs.
+  const ITF = ['NNWWN', 'WNNNW', 'NWNNW', 'WWNNN', 'NNWNW', 'WNWNN', 'NWWNN', 'NNNWW', 'WNNWN', 'NWNWN'];
+  function renderBarcode(svg, digits) {
+    const [NARROW, WIDE, QUIET] = [2, 5, 20];
+    const widths = [NARROW, NARROW, NARROW, NARROW]; // start: bar space bar space
+    for (let i = 0; i < digits.length; i += 2) {
+      const [bars, spaces] = [ITF[digits[i]], ITF[digits[i + 1]]];
+      for (let k = 0; k < 5; k += 1) widths.push(bars[k] === 'W' ? WIDE : NARROW, spaces[k] === 'W' ? WIDE : NARROW);
+    }
+    widths.push(WIDE, NARROW, NARROW); // stop: bar space bar
+    let x = QUIET;
+    const rects = [];
+    widths.forEach((w, i) => {
+      if (i % 2 === 0) rects.push(`<rect x="${x}" y="0" width="${w}" height="60"/>`);
+      x += w;
+    });
+    svg.setAttribute('viewBox', `0 0 ${x + QUIET} 60`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.innerHTML = rects.join('');
+  }
+
+  function otcCountdown() {
+    const left = new Date(otcCode.expiresAt).getTime() - Date.now();
+    if (left <= 0) {
+      $('#otc-countdown').textContent = 'Expired';
+      if (otcCode.status === 'PENDING') setOtcStatus({ ...otcCode, status: 'EXPIRED' });
+      return;
+    }
+    const s = Math.floor(left / 1000);
+    const pad = (n) => String(n).padStart(2, '0');
+    $('#otc-countdown').textContent = `Expires in ${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+  }
+
+  function setOtcStatus(code) {
+    const previous = otcCode?.status;
+    otcCode = code;
+    const el = $('#otc-status');
+    el.className = `otc-status ${code.status.toLowerCase()}`;
+    el.textContent = {
+      PENDING: 'Waiting for payment',
+      PAID: `Paid · ${money(code.amount)} added to your wallet`,
+      EXPIRED: 'Expired: generate a new code',
+    }[code.status];
+    $('#otc-simulate').disabled = code.status !== 'PENDING';
+    if (code.status !== 'PENDING') {
+      stopOtcTimers();
+      $('#otc-countdown').textContent = code.status === 'PAID' ? 'Paid' : 'Expired';
+    }
+    if (code.status === 'PAID' && previous === 'PENDING') loadWallet().catch(() => {});
+  }
+
+  async function pollOtc() {
+    try {
+      setOtcStatus(await api(`/api/v1/cash-in/otc/${otcCode.reference}`));
+    } catch {
+      // keep the code on screen; the next poll tries again
+    }
+  }
+
+  async function showOtcCode(code) {
+    const partner = otcPartnerByCode(code.partner.code) ?? code.partner;
+    otcPartnerHeader($('#otc-result-partner'), partner);
+    renderBarcode($('#otc-barcode'), code.reference);
+    $('#otc-ref').textContent = code.displayReference;
+    $('#otc-pay').textContent = money(code.totalToPay);
+    $('#otc-howto').textContent =
+      `Present this reference code or barcode to the cashier at any ${partner.name} branch and pay the exact amount.`;
+    showOtcView('code');
+    otcCode = null;
+    setOtcStatus(code);
+    if (code.status === 'PENDING') {
+      otcCountdown();
+      otcTimers.push(setInterval(otcCountdown, 1000), setInterval(pollOtc, OTC_POLL_MS));
+    }
+    $('#otc-copy').focus();
+    try {
+      const { features } = await api('/api/config');
+      $('#otc-simulate').hidden = !(features.qaSandbox && lastAccount?.role === 'ADMIN');
+    } catch {
+      $('#otc-simulate').hidden = true;
+    }
+  }
+
+  $('#otc-btn').addEventListener('click', openOtc);
+  otcDialog.addEventListener('close', stopOtcTimers);
+  otcPick.addEventListener('change', (event) => {
+    if (event.target.name === 'otcCategory') filterOtcPartners();
+  });
+  // A click, Enter or Space on a partner card goes on to the amount; arrow keys only move between
+  // cards (they fire a keyboard click with detail 0).
+  $('#otc-partners').addEventListener('click', (event) => {
+    if (event.target.name === 'partnerCode' && event.detail > 0) chooseOtcPartner(event.target.value);
+  });
+  $('#otc-partners').addEventListener('keydown', (event) => {
+    if (event.target.name !== 'partnerCode' || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    event.target.checked = true;
+    chooseOtcPartner(event.target.value);
+  });
+  $('#otc-back').addEventListener('click', () => {
+    showOtcView('pick');
+    otcPick.querySelector(`input[name="partnerCode"][value="${otcPartner.code}"]`)?.focus();
+  });
+  otcForm.elements.amount.addEventListener('input', updateOtcSummary);
+  otcForm.querySelectorAll('[data-otc-amount]').forEach((chip) => chip.addEventListener('click', () => {
+    otcForm.elements.amount.value = chip.dataset.otcAmount;
+    updateOtcSummary();
+  }));
+
+  otcForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const amount = otcForm.elements.amount.value.trim();
+    if (!validAmount(amount)) return setFormError(otcForm, 'Enter an amount, e.g. 500 or 1000.50');
+    if (Number(amount) < Number(otcCatalog.minAmount) || Number(amount) > Number(otcCatalog.maxAmount)) {
+      return setFormError(otcForm, 'Cash in from ₱100 to ₱50,000 per code');
+    }
+    setFormError(otcForm);
+    const submit = otcForm.querySelector('[type="submit"]');
+    submit.disabled = true;
+    try {
+      showOtcCode(await api('/api/v1/cash-in/otc', {
+        method: 'POST',
+        idempotencyKey: newIdempotencyKey(),
+        body: { partnerCode: otcPartner.code, amount },
+      }));
+    } catch (err) {
+      setFormError(otcForm, err.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  $('#otc-copy').addEventListener('click', async () => {
+    if (await copyText(otcCode.reference)) toast('Payment reference copied');
+  });
+  $('#otc-simulate').addEventListener('click', async () => {
+    try {
+      setOtcStatus(await api(`/api/qa/otc/${otcCode.reference}/pay`, { method: 'POST' }));
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
   const hideBootLoader = () => {
     const loader = $('#boot-loader');
     loader.classList.add('done');
