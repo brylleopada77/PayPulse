@@ -1012,7 +1012,7 @@ button.tx:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px;
 .list-title { margin: 0; color: var(--muted); font-size: 0.82rem; font-weight: 600; }
 .biller-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .biller-row {
-  display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; width: 100%;
+  display: grid; grid-template-columns: 48px 1fr auto; gap: 12px; align-items: center; width: 100%;
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
   color: var(--text); font: inherit; text-align: left; cursor: pointer;
 }
@@ -1683,3 +1683,15 @@ h1, h2, h3, .who-name, .product-title, .tx-title { color: var(--text); }
 .telco-pick .bank-avatar, .brand-chip .bank-avatar, .promo-item .bank-avatar { width: 46px; height: 26px; border-radius: 13px; }
 .telco-pick .bank-avatar.has-logo, .brand-chip .bank-avatar.has-logo, .promo-item .bank-avatar.has-logo { padding: 3px 6px; }
 .telco-pick .bank-avatar img, .brand-chip .bank-avatar img, .promo-item .bank-avatar img { width: 34px; height: 20px; } /* the pill's content box */
+
+/* Biller logos: a white tile (white in both themes, see ALWAYS_LIGHT), sized for wide wordmarks */
+.biller-badge.has-logo { width: 48px; height: 36px; border-radius: 10px; padding: 4px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18); }
+.biller-badge.has-logo img { width: 40px; height: 28px; object-fit: contain; }
+/* Bank Transfer: logos in a rounded tile rather than a circle, so wordmarks (BDO, BPI, Maya) stay legible */
+#bank-grid .bank-avatar, #bank-trigger .bank-avatar { width: 44px; height: 28px; border-radius: 8px; }
+#bank-grid .bank-avatar.has-logo, #bank-trigger .bank-avatar.has-logo { padding: 3px 5px; }
+#bank-grid .bank-avatar img, #bank-trigger .bank-avatar img { width: 34px; height: 22px; }
+/* the 2-column grid has less room than the trigger: a slightly smaller tile keeps names and networks whole */
+#bank-grid .bank-avatar { width: 38px; height: 26px; }
+#bank-grid .bank-avatar.has-logo { padding: 3px 4px; }
+#bank-grid .bank-avatar img { width: 30px; height: 20px; }

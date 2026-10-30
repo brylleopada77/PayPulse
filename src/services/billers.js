@@ -45,6 +45,20 @@ const BILLERS = [
   biller('CABLELINK', 'Cablelink', 'CABLE', 'Account Number'),
 ];
 
+// Current logos (self-hosted under public/img: from each organisation's Wikipedia infobox, cut down to
+// the symbol for wide lockups; trademarks of their owners, shown only to identify the biller). Card
+// and credit billers reuse their bank's logo.
+const LOGOS = {
+  MERALCO: 'billers/meralco.png', MANILA_WATER: 'billers/manilawater.png', MAYNILAD: 'billers/maynilad.png',
+  VECO: 'billers/veco.png', DAVAO_LIGHT: 'billers/davaolight.png', PLDT: 'billers/pldt.png',
+  GLOBE_POSTPAID: 'billers/globe.png', SMART_POSTPAID: 'billers/smart.png', CONVERGE: 'billers/converge.png',
+  DITO: 'billers/dito.png', NBI: 'billers/nbi.png', SSS: 'billers/sss.png', PAGIBIG: 'billers/pagibig.png',
+  LTO: 'billers/lto.png', BIR: 'billers/bir.png', HOME_CREDIT: 'billers/homecredit.png', MAYA_CREDIT: 'banks/maya.png',
+  BDO_CC: 'banks/bdo.png', BPI_CC: 'banks/bpi.png', UNIONBANK_CC: 'banks/unionbank.png', CIGNAL: 'billers/cignal.png',
+  SKY_CABLE: 'billers/skycable.png', CABLELINK: 'billers/cablelink.png',
+};
+const logoOf = (code) => (LOGOS[code] ? `/img/${LOGOS[code]}` : null);
+
 function findBiller(code) {
   return BILLERS.find((b) => b.code === code) || null;
 }
@@ -56,6 +70,7 @@ function catalog() {
     billers: BILLERS.map(({ code, name, category, accountLabel, hint, sensitive }) => ({
       code,
       name,
+      logo: logoOf(code),
       category,
       accountLabel,
       accountHint: hint,

@@ -2873,11 +2873,7 @@
         button.type = 'button';
         button.className = 'biller-row';
         button.dataset.testid = `biller-${b.code}`;
-        const badge = Object.assign(document.createElement('span'), {
-          className: `biller-badge cat-${b.category.toLowerCase()}`,
-          textContent: initialsOf(b.name),
-        });
-        badge.setAttribute('aria-hidden', 'true');
+        const badge = billerAvatar(b);
         const text = document.createElement('span');
         text.className = 'biller-text';
         text.append(
@@ -2894,15 +2890,31 @@
     );
   }
 
+  /** The biller's logo on a white tile, or its initials on the category tint (also if the logo fails). */
+  function billerAvatar(b) {
+    const el = document.createElement('span');
+    el.setAttribute('aria-hidden', 'true');
+    const initials = () => {
+      el.className = `biller-badge cat-${b.category.toLowerCase()}`;
+      el.replaceChildren(initialsOf(b.name));
+    };
+    if (b.logo) {
+      el.className = 'biller-badge has-logo';
+      const img = Object.assign(document.createElement('img'), { src: b.logo, alt: '', loading: 'lazy' });
+      img.addEventListener('error', initials, { once: true });
+      el.append(img);
+    } else {
+      initials();
+    }
+    return el;
+  }
+
   function chooseBiller(b) {
     billsBiller = b;
     billsForm.reset();
     setFormError(billsForm);
     $('#bills-chosen').replaceChildren(
-      Object.assign(document.createElement('span'), {
-        className: `biller-badge cat-${b.category.toLowerCase()}`,
-        textContent: initialsOf(b.name),
-      }),
+      billerAvatar(b),
       Object.assign(document.createElement('strong'), { textContent: b.name }),
     );
     $('#bills-account-label').textContent = b.accountLabel;

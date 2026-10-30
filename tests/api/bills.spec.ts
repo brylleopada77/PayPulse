@@ -42,11 +42,20 @@ test.describe('Pay Bills: catalog', () => {
     expect(catalog.billers.find((b: { code: string }) => b.code === 'MERALCO')).toEqual({
       code: 'MERALCO',
       name: 'Meralco',
+      logo: '/img/billers/meralco.png',
       category: 'UTILITIES',
       accountLabel: 'Customer Account Number (CAN)',
       accountHint: '10-digit CAN on your bill',
       sensitive: false,
     });
+    // every biller has its current logo, served as an image (card / credit billers reuse their bank's)
+    for (const b of catalog.billers) {
+      expect(b.logo, b.code).toMatch(/^\/img\/(billers|banks)\/[a-z]+\.png$/);
+      const img = await request.get(b.logo);
+      expect(img.status(), b.logo).toBe(200);
+      expect(img.headers()['content-type'], b.logo).toBe('image/png');
+    }
+    expect(catalog.billers.find((b: { code: string }) => b.code === 'BDO_CC').logo).toBe('/img/banks/bdo.png');
     expect(catalog).toMatchObject({
       convenienceFee: '0.00',
       cashback: { amount: '5.00', minBill: '100.00', dailyMax: 3, usedToday: 0, remainingToday: 3 },

@@ -22,7 +22,7 @@ async function pickBank(page: Page, name: string) {
 }
 
 test.describe('Bank Transfer: bank picker', () => {
-  test('2-column grid by category with logos (badge where there is none) and network tags', async ({ page, request }) => {
+  test('2-column grid by category with logos and network tags', async ({ page, request }) => {
     await login(page, await createFundedUser(request, 1000, 'Alice Tan'));
     await openBankTransfer(page);
 
@@ -51,8 +51,9 @@ test.describe('Bank Transfer: bank picker', () => {
     const broken = await grid.locator('img').evaluateAll((imgs) =>
       Promise.all(imgs.map((img) => (img as HTMLImageElement).decode().then(() => null, () => (img as HTMLImageElement).src))));
     expect(broken.filter(Boolean)).toEqual([]);
-    // no logo for PNB: its initials badge
-    await expect(grid.getByTestId('bank-card').filter({ hasText: 'PNB' }).locator('.bank-avatar')).toHaveText('PNB');
+    // PNB now has its logo too (from Wikipedia); China Bank's is a PNG, no longer the site's .ico
+    await expect(grid.getByTestId('bank-card').filter({ hasText: 'PNB' }).locator('.bank-avatar img')).toHaveAttribute('src', '/img/banks/pnb.png');
+    await expect(grid.getByTestId('bank-card').filter({ hasText: 'China Bank' }).locator('.bank-avatar img')).toHaveAttribute('src', '/img/banks/chinabank.png');
 
     // choosing closes the grid; the summary shows the logo and name (no channel tags: that is the channel picker)
     await grid.getByRole('radio', { name: 'Landbank InstaPay PESONet' }).click();
