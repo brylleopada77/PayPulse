@@ -1175,8 +1175,7 @@
     // The form was reset when the dialog opened: start on the first destination again.
     if (!selectedBank() && bankInfo.banks[0]) bankPicker.choose(bankInfo.banks[0].code);
     if (bankInfo.pesonetNextCutoffAt) {
-      $('#pesonet-detail').textContent =
-        `Same-day batch (cut-off ${CUTOFF_TIME.format(new Date(bankInfo.pesonetNextCutoffAt))}) · above ₱50,000`;
+      $('#pesonet-detail').textContent = `Cut-off ${CUTOFF_TIME.format(new Date(bankInfo.pesonetNextCutoffAt))}`;
     }
   }
 
@@ -1215,6 +1214,7 @@
       radio.disabled = !rails.includes(radio.value);
       radio.closest('.channel-option').classList.toggle('unavailable', radio.disabled);
     }
+    $('[data-testid="pesonet-not-supported"]').hidden = rails.includes('PESONET');
     if (!rails.includes(bankForm.elements.rail.value)) bankForm.elements.rail.value = rails[0];
     const tag = $('#bank-rail-hint');
     tag.textContent = rails.length === 1 && bank ? `${bank.name}: ${RAIL_SHORT[rails[0]]} only` : '';
@@ -1344,10 +1344,31 @@
       if (scroll) options[active].scrollIntoView({ block: 'nearest' });
     }
 
+    /**
+     * The list is a popover (top layer), so it floats over the form and never adds a scrollbar to the
+     * dialog. It sits under the trigger at the trigger's width, or above it when there is more room.
+     */
+    const LIST_MAX_HEIGHT = 208;
+    function place() {
+      const rect = trigger.getBoundingClientRect();
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      const up = below < Math.min(LIST_MAX_HEIGHT, 160) && above > below;
+      const maxHeight = Math.min(LIST_MAX_HEIGHT, up ? above : below) - 6;
+      Object.assign(listbox.style, {
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+        maxHeight: `${Math.max(maxHeight, 120)}px`,
+        top: up ? 'auto' : `${rect.bottom + 6}px`,
+        bottom: up ? `${window.innerHeight - rect.top + 6}px` : 'auto',
+      });
+    }
+
     function open(index) {
       if (!options.length) return;
       typed = '';
-      listbox.hidden = false;
+      listbox.showPopover();
+      place();
       picker.classList.add('open');
       trigger.setAttribute('aria-expanded', 'true');
       const selected = options.findIndex((li) => li.dataset.code === hidden.value);
@@ -1356,14 +1377,19 @@
 
     function close() {
       typed = '';
-      listbox.hidden = true;
+      if (isOpen()) listbox.hidePopover();
       picker.classList.remove('open');
       trigger.setAttribute('aria-expanded', 'false');
       trigger.removeAttribute('aria-activedescendant');
       options.forEach((li) => li.classList.remove('active'));
     }
 
-    const isOpen = () => !listbox.hidden;
+    const isOpen = () => listbox.matches(':popover-open');
+    // Follow the trigger when the dialog scrolls or the window resizes (scrolling the list itself doesn't move it)
+    const follow = (event) => { if (isOpen() && event.target !== listbox) place(); };
+    $('#send-dialog').addEventListener('scroll', follow, true);
+    $('#send-dialog').addEventListener('close', () => close()); // a top-layer list would outlive the dialog
+    window.addEventListener('resize', follow);
     const isPrintable = (event) => event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey;
 
     /** Type-ahead: the next name starting with the typed letters (a pause starts a new search). */

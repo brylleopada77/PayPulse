@@ -213,12 +213,14 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
   padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px;
   color: var(--muted); font-size: 0.7rem; font-weight: 600; white-space: nowrap;
 }
+/* A popover in the top layer, placed under the trigger by app.js (left / top / width / max-height):
+   it floats over the form, so opening it never pushes the fields down or scrolls the dialog */
 .bank-listbox {
-  margin: 0; padding: 6px; list-style: none; max-height: 300px; overflow-y: auto; overscroll-behavior: contain;
+  position: fixed; inset: auto; margin: 0; padding: 6px; list-style: none; max-height: 208px;
+  overflow-y: auto; overscroll-behavior: contain; color: var(--text);
   border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.22);
 }
-.bank-listbox[hidden] { display: none; }
 .bank-listbox ul { margin: 0; padding: 0; list-style: none; }
 .bank-group-label {
   display: block; padding: 10px 10px 4px; color: var(--muted);
@@ -248,7 +250,24 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .channel-option:has(input:checked) { border-color: var(--accent); background: var(--accent-softer); box-shadow: inset 0 0 0 1px var(--accent); }
 .channel-option:has(input:checked) strong { color: var(--accent-ink); }
 .channel-option:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
-.channel-option.unavailable { cursor: not-allowed; opacity: 0.55; }
+.channel-option.unavailable { cursor: not-allowed; }
+.channel-option.unavailable > :not(.channel-badge) { opacity: 0.4; }
+.channel-cutoff:empty { display: none; }
+.channel-badge {
+  position: absolute; top: -9px; right: 8px; padding: 1px 8px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+  font-size: 0.68rem; font-weight: 700; white-space: nowrap;
+}
+
+/* Bank Transfer: numbered steps 1 to 5 (the number is decorative: alt text "" keeps it out of the label) */
+#bank-form { counter-reset: bank-step; }
+#bank-form .step-label { counter-increment: bank-step; }
+#bank-form .step-label::before {
+  content: counter(bank-step) / "";
+  display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 8px; vertical-align: 1px;
+  border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: 0.72rem; font-weight: 800;
+}
+#bank-form legend.step-label::before { margin-right: 0; } /* the legend is a flex row: its gap spaces the number */
 
 /* InstaPay cap warning under the amount (role="status": always present, empty when fine) */
 .limit-warning { margin: 0; font-size: 0.85rem; }
