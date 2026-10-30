@@ -23,6 +23,24 @@ test.describe('Buy Load: catalog and network detection', () => {
     expect(catalog.cashback).toMatchObject({ amount: '5.00', minAmount: '50.00', dailyMax: 3, remainingToday: 3 });
   });
 
+  test('every brand has a logo (served) or an initials badge, and at least 3 promos', async ({ request }) => {
+    const alice = await createUser(request);
+    const catalog = await (await request.get('/api/v1/load', { headers: authHeader(alice.token) })).json();
+    for (const brand of catalog.brands) {
+      expect(brand.badge.initials, brand.code).toBeTruthy();
+      expect(brand.badge.color, brand.code).toMatch(/^#[0-9a-f]{6}$/);
+      if (brand.logo) {
+        const img = await request.get(brand.logo);
+        expect(img.status(), brand.logo).toBe(200);
+        expect(img.headers()['content-type'], brand.logo).toMatch(/^image\//);
+      }
+      expect(catalog.promos.filter((p: { brand: string }) => p.brand === brand.code).length, brand.code).toBeGreaterThanOrEqual(3);
+    }
+    expect(catalog.brands.filter((b: { logo: string | null }) => b.logo).map((b: { code: string }) => b.code)).toEqual(['GLOBE', 'TNT', 'DITO', 'GOMO']);
+    expect(catalog.promos).toHaveLength(21);
+    expect(new Set(catalog.promos.map((p: { code: string }) => p.code)).size).toBe(21); // codes are unique
+  });
+
   for (const [mobile, network] of [
     ['09171234567', 'GLOBE'], ['0927 123 4567', 'GLOBE'], ['+639561234567', 'GLOBE'],
     ['09181234567', 'SMART'], ['09201234567', 'SMART'], ['09991234567', 'SMART'],

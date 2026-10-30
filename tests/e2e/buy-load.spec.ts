@@ -9,6 +9,29 @@ import { expireMpin } from '../helpers/db';
 import { login, peso, typeCode } from '../helpers/ui';
 
 test.describe('Buy Load', () => {
+  test('telco logos: every network before a number is typed, then the brand chips and each promo card', async ({ page, request }) => {
+    await login(page, await createFundedUser(request, 500, 'Alice Reyes'));
+    await page.getByTestId('open-load').click();
+
+    const networks = page.getByTestId('load-networks');
+    await expect(networks.getByRole('listitem')).toHaveText([/Globe$/, /TM$/, /Smart$/, /TNT$/, /DITO$/, /GOMO$/]); // logo (or badge) + name
+    await expect(page.getByTestId('load-network-GLOBE').locator('img')).toHaveAttribute('src', '/img/telcos/globe.png');
+    await expect(page.getByTestId('load-network-SMART').locator('.bank-avatar')).toHaveText('S'); // no logo: its badge
+    const broken = await networks.locator('img').evaluateAll((imgs) =>
+      Promise.all(imgs.map((img) => (img as HTMLImageElement).decode().then(() => null, () => (img as HTMLImageElement).src))));
+    expect(broken.filter(Boolean)).toEqual([]);
+
+    await page.getByTestId('load-mobile').fill('09761234567'); // GOMO
+    await expect(networks).toBeHidden();
+    await expect(page.getByTestId('load-brands').locator('label', { hasText: 'GOMO' }).locator('img')).toHaveAttribute('src', '/img/telcos/gomo.png');
+    await page.getByTestId('load-tab-promo').check({ force: true });
+    const promos = page.locator('#load-promos .promo-item');
+    await expect(promos).toHaveCount(3);
+    for (const promo of await promos.all()) await expect(promo.locator('.bank-avatar img')).toHaveAttribute('src', '/img/telcos/gomo.png');
+    await expect(page.getByTestId('load-promo-GOMO199')).toContainText('15GB No Expiry');
+    await expect(page.getByTestId('load-promo-GOMO199')).toContainText('₱199');
+  });
+
   test('Globe Go+99 promo with MPIN -> receipt, and the net deduction is exactly ₱94.00', async ({ page, request }) => {
     const alice = await createFundedUser(request, 1000, 'Alice Reyes');
     await login(page, alice);

@@ -2554,7 +2554,10 @@
     const input = Object.assign(document.createElement('input'), { type: 'radio', name: group, value: code, checked: code === loadBrand });
     input.dataset.testid = (group === 'load-brand' ? 'load-brand-' : 'load-brand-any-') + code;
     input.addEventListener('change', () => selectBrand(code));
-    label.append(input, Object.assign(document.createElement('span'), { textContent: brandName(code) }));
+    const chip = document.createElement('span');
+    const brand = loadCatalog.brands.find((b) => b.code === code);
+    chip.append(...(brand ? [logoAvatar(brand)] : []), brandName(code));
+    label.append(input, chip);
     return label;
   }
 
@@ -2568,6 +2571,15 @@
   function renderLoadBrands() {
     const network = loadCatalog.networks.find((n) => n.code === loadDetected);
     $('#load-brands').hidden = !network;
+    $('#load-networks').hidden = Boolean(network);
+    if (!$('#load-networks').children.length) {
+      $('#load-networks').replaceChildren(...loadCatalog.brands.map((b) => {
+        const li = document.createElement('li');
+        li.dataset.testid = 'load-network-' + b.code;
+        li.append(logoAvatar(b), b.name);
+        return li;
+      }));
+    }
     $('#load-brands').replaceChildren(...(network ? network.brands.map((b) => brandChip(b, 'load-brand')) : []));
     $('#load-override').hidden = !normalizeLoadMobile(loadForm.elements.mobileNumber.value);
     $('#load-all-brands').replaceChildren(...loadCatalog.brands.map((b) => brandChip(b.code, 'load-brand-any')));
@@ -2626,12 +2638,13 @@
               const b = Object.assign(document.createElement('button'), { type: 'button', className: 'promo-item' });
               b.dataset.testid = 'load-promo-' + p.code;
               b.setAttribute('aria-pressed', String(loadPromo === p.code));
-              const text = document.createElement('span');
+              const text = Object.assign(document.createElement('span'), { className: 'promo-copy' });
               text.append(
                 Object.assign(document.createElement('strong'), { textContent: p.name }),
                 Object.assign(document.createElement('small'), { textContent: p.description + ' · ' + p.validity }),
               );
-              b.append(text, Object.assign(document.createElement('span'), { className: 'promo-price', textContent: money(p.price).replace('.00', '') }));
+              const brand = loadCatalog.brands.find((x) => x.code === p.brand);
+              b.append(...(brand ? [logoAvatar(brand)] : []), text, Object.assign(document.createElement('span'), { className: 'promo-price', textContent: money(p.price).replace('.00', '') }));
               b.addEventListener('click', () => {
                 loadPromo = p.code;
                 renderLoadProducts();
