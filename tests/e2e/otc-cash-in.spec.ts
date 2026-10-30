@@ -103,6 +103,8 @@ test.describe('Cash In over the counter', () => {
     await page.locator('#otc-chips').getByText('₱1,000').click();
     await expect(page.getByTestId('otc-summary')).toContainText('Pay at the counter₱1,010.00'); // 1%
     await page.getByTestId('otc-generate').click();
+    // wait for the code to render before reading it (reading right after the click races the request)
+    await expect(page.getByTestId('otc-ref')).toHaveText(/^\d{4} \d{4} \d{4}$/);
     const ref = await page.getByTestId('otc-ref').textContent();
     await page.getByTestId('otc-done').click();
 
