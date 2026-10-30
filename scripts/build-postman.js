@@ -472,14 +472,54 @@ const item = [
     }),
   ]),
 
-  folder('13. Top-ups (ADMIN)', 'Adding money is admin-only: a customer account gets 403.', [
+  folder('13. Cash-in (over the counter)', 'A 12-digit code to pay in cash at a partner (7-Eleven, Cebuana, SM, Mercury Drug...). With webhookSecret set, the partner webhook pays it and the wallet is credited.', [
+    req('GET /api/v1/cash-in/otc/partners', {
+      status: [200],
+      extra: ["pm.test('19 partners', () => pm.expect(pm.response.json().partners).to.have.lengthOf(19));"],
+    }),
+    req('POST /api/v1/cash-in/otc', {
+      name: 'Generate a code: Cebuana Lhuillier ₱1,000 (1% fee: pay ₱1,010)',
+      pre: ["pm.environment.unset('otcPaid');"],
+      body: { partnerCode: 'CEBUANA', amount: 1000 },
+      status: [201, 409],
+      save: { otcReference: 'reference', otcTotal: 'totalToPay' },
+      extra: ["if (pm.response.code === 201) pm.test('12-digit code, ₱1,010 to pay', () => { pm.expect(pm.response.json().reference).to.match(/^\\d{12}$/); pm.expect(pm.response.json().totalToPay).to.eql('1010.00'); });"],
+    }),
+    req('GET /api/v1/cash-in/otc', { status: [200] }),
+    req('GET /api/v1/cash-in/otc/{reference}', {
+      url: '/api/v1/cash-in/otc/{{otcReference}}',
+      pre: skipUnless("pm.environment.get('otcReference')", 'no cash-in code yet'),
+      status: [200],
+    }),
+    req('POST /api/webhooks/otc', {
+      name: 'The counter pays it: signed partner webhook (needs webhookSecret)',
+      noAuth: true,
+      pre: [
+        ...skipUnless("pm.environment.get('webhookSecret') && pm.environment.get('otcReference')", 'no webhookSecret (or no code) in the environment'),
+        "const body = JSON.stringify({ reference: pm.environment.get('otcReference'), amountPaid: pm.environment.get('otcTotal'), partnerTxnId: 'postman-' + Date.now() });",
+        'pm.request.body.raw = body;',
+        "pm.request.headers.upsert({ key: 'X-PayPulse-Signature', value: require('crypto-js').HmacSHA256(body, pm.environment.get('webhookSecret')).toString() });",
+      ],
+      body: '{ "set by the pre-request script": true }',
+      status: [200],
+      extra: ["pm.test('Paid', () => pm.expect(pm.response.json().status).to.eql('PAID'));", "pm.environment.set('otcPaid', 'true');"],
+    }),
+  ]),
+
+  folder('14. Top-ups (ADMIN)', 'Adding money is admin-only: a customer account gets 403.', [
     req('GET /api/payments/limits', { status: { admin: 200 } }),
   ]),
 
-  folder('14. QA Sandbox (ADMIN)', 'QA_SANDBOX servers only; admin-only (a customer gets 403). "Reset" is last: it sets your wallet to ₱100,000 and hides your history.', [
+  folder('15. QA Sandbox (ADMIN)', 'QA_SANDBOX servers only; admin-only (a customer gets 403). "Reset" is last: it sets your wallet to ₱100,000 and hides your history.', [
     req('GET /api/qa/state', { status: { admin: 200 } }),
     req('PUT /api/qa/settings', { name: 'Turn every QA switch off', body: { slowNetwork: false, failNextTransaction: false, frozen: false }, status: { admin: 200 } }),
     req('POST /api/qa/pesonet/run-cutoff', { status: { admin: 200 } }),
+    req('POST /api/qa/otc/{reference}/pay', {
+      name: 'Act as the counter: pay my cash-in code',
+      url: '/api/qa/otc/{{otcReference}}/pay',
+      pre: skipUnless("pm.environment.get('otcReference') && !pm.environment.get('otcPaid')", 'no unpaid cash-in code (folder 13)'),
+      status: { admin: 200 },
+    }),
     req('POST /api/qa/compliance/clear', { status: { admin: 200 } }),
     req('POST /api/qa/savings/accrue', { body: { days: 1 }, status: { admin: 200 } }),
     req('POST /api/qa/reset', {
@@ -489,7 +529,7 @@ const item = [
     }),
   ]),
 
-  folder('15. Negative cases', 'Requests that must be refused. Nothing is moved.', [
+  folder('16. Negative cases', 'Requests that must be refused. Nothing is moved.', [
     req('GET /api/accounts/me', {
       name: 'No token: 401',
       noAuth: true,
@@ -520,7 +560,7 @@ const item = [
     req('GET /api/v1/transactions/{id}/iso20022', { name: 'ISO 20022 of a transaction that is not mine: 404', url: '/api/v1/transactions/999999999/iso20022', status: [404] }),
   ]),
 
-  folder('16. Auth (password reset)', 'Run last: sets the same password again, so the environment keeps working.', [
+  folder('17. Auth (password reset)', 'Run last: sets the same password again, so the environment keeps working.', [
     req('POST /api/auth/password/forgot', {
       body: { email: '{{email}}' },
       status: [200],

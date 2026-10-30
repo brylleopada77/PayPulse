@@ -121,9 +121,12 @@ async function reconcile(client, businessDate) {
       SELECT le.transaction_id FROM ledger_entries le JOIN transactions t ON t.id = le.transaction_id
       WHERE t.created_at <= $1 GROUP BY le.transaction_id
       HAVING SUM(CASE WHEN le.direction = 'DEBIT' THEN le.amount_cents ELSE -le.amount_cents END) <> 0) x`);
+  // Cash in: card top-ups (payments) + over-the-counter cash-in codes paid at a partner
   const topUps = await one(`
-    SELECT COALESCE(SUM(p.amount_cents), 0) AS v FROM payments p JOIN transactions t ON t.id = p.transaction_id
-    WHERE p.status = 'SUCCESS' AND t.created_at <= $1`);
+    SELECT COALESCE((SELECT SUM(p.amount_cents) FROM payments p JOIN transactions t ON t.id = p.transaction_id
+                     WHERE p.status = 'SUCCESS' AND t.created_at <= $1), 0)
+         + COALESCE((SELECT SUM(c.amount_cents) FROM otc_cash_in_codes c JOIN transactions t ON t.id = c.transaction_id
+                     WHERE c.status = 'PAID' AND t.created_at <= $1), 0) AS v`);
   const settledOutbound = await one(`
     SELECT COALESCE(SUM(amount_cents), 0) AS v FROM bank_transfers
     WHERE status = 'SETTLED' AND COALESCE(settled_at, created_at) <= $1`);
@@ -176,7 +179,7 @@ async function reconcile(client, businessDate) {
     check('LIAB-1', 'Customer liability: GL 2010 = sum of customer wallets', walletSubledger, gl['2010'].balance),
     check('LIAB-2', 'Customer wallets not mapped to GL 2010', 0, unmappedWallets, { money: false }),
     check('EQ-1', 'Accounting equation: Assets = Liabilities + Equity + Revenue', liabilitiesEquityRevenue, assets),
-    check('CASH-1', 'Cash received: GL 1010 debits = successful top-ups', topUps, gl['1010'].debits),
+    check('CASH-1', 'Cash received: GL 1010 debits = successful top-ups + paid OTC cash-ins', topUps, gl['1010'].debits),
     check('OUT-1', 'Outbound settled: GL 1020 = settled bank transfers', settledOutbound, -gl['1020'].balance),
     check('PSN-1', 'PESONet clearing: GL 2020 = transfers queued at cut-off', queuedPesonet, gl['2020'].balance),
     check('FEE-1', 'Fee revenue: GL 4010 = bank transfer fees', bankFees, gl['4010'].balance),

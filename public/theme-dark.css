@@ -2,9 +2,6 @@
    Run "npm run theme:dark" after changing styles.css. */
 
 /* ===== Generated: light colours translated by role ===== */
-:root[data-theme="dark"] .bank-avatar.has-logo {
-  background: #1c1f22;
-}
 :root[data-theme="dark"] .limit-warning.show {
   background: rgba(255, 159, 67, 0.16);
   color: #ffc58f;
@@ -349,6 +346,14 @@
 }
 :root[data-theme="dark"] .telco-detect.warn {
   color: #ffb36b;
+}
+:root[data-theme="dark"] .otc-fee-tag.free {
+  background: rgba(18, 184, 134, 0.16);
+  color: #6fe0b4;
+}
+:root[data-theme="dark"] .otc-fee-tag.paid {
+  background: rgba(255, 159, 67, 0.16);
+  color: #ffc58f;
 }
 
 /* ===== Designed: deep-navy dark glass with the brand accent. Brand colours are theme tokens (top of styles.css), never literals here. ===== */

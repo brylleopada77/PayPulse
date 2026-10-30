@@ -544,6 +544,24 @@ curl -X POST localhost:3000/api/webhooks/payments \
 - `SUCCESS` credits the wallet; `PENDING` and `FAILED` do not.
 - The same `paymentId` is only ever credited once, even if the callback is retried.
 
+### Cash In over the counter (`/api/v1/cash-in/otc`)
+
+The customer pays cash at a partner with a 12-digit payment code; the partner confirms and the
+wallet is credited.
+
+| Step | Call | Rules |
+|------|------|-------|
+| Partners | `GET /api/v1/cash-in/otc/partners` | 19 partners in 4 categories (pawnshops & remittance, convenience stores & kiosks, malls & supermarkets, pharmacies). Counter fee per partner: **Free** (Bayad Center, Robinsons), **₱15** flat or **1%** of the amount |
+| Generate | `POST /api/v1/cash-in/otc` `{ partnerCode, amount }` | ₱100 to ₱50,000 per code; at most **5 unpaid codes** (409 `TOO_MANY_PENDING_CODES`, held under a per-user advisory lock). The code is 11 random digits + a **Luhn** check digit, valid **24 hours**. Answer: `reference`, `displayReference` (`8829 3019 4410`), `fee`, `totalToPay`, `expiresAt` |
+| Pay at the counter | `POST /api/webhooks/otc` `{ reference, amountPaid, partnerTxnId? }` | Signed like the payment webhook. `amountPaid` must equal amount + fee (409 `AMOUNT_MISMATCH`); expired 410 `CODE_EXPIRED`; a paid code answers `duplicate: true` with no second credit (row lock `FOR UPDATE`) |
+| Check | `GET /api/v1/cash-in/otc`, `GET /api/v1/cash-in/otc/:reference` | `PENDING`, `PAID` or `EXPIRED` (a pending code past `expiresAt` reads as expired). The web app polls the open code every 5 s |
+| QA | `POST /api/qa/otc/:reference/pay` | QA sandbox, admins: pays the caller's own code as the counter would |
+
+Ledger: a `DEPOSIT` of the **amount** (DEBIT `SYS-EXTERNAL-FUNDING` GL 1010, CREDIT the wallet).
+The counter fee is paid to the partner on top and never enters PayPulse's ledger. End-of-day
+reconciliation `CASH-1` counts paid codes with the card top-ups. The web app shows the code as text
+and as an **Interleaved 2 of 5** barcode on a white ticket (white in both themes, so it scans).
+
 ### Web wallet UI
 
 Open **http://localhost:3000**. The UI is plain HTML/CSS/JS in `public/` (no build step) and
@@ -673,7 +691,7 @@ amounts between ₱50,000 and ₱500,000 are rejected by the limit (`400`), abov
 `npm run eod:reconcile` (`scripts/reconcile-eod.js`, add `--date YYYY-MM-DD` for a past day,
 `--json` for machine output) reads **one consistent snapshot** and reconciles the trial balance as of
 the end of the Manila business day: debits = credits, **total customer liability (GL 2010) = sum of
-customer wallets**, Assets = Liabilities + Equity + Revenue, GL 1010 = successful top-ups,
+customer wallets**, Assets = Liabilities + Equity + Revenue, GL 1010 = successful top-ups + paid over-the-counter cash-ins,
 GL 1020 = settled bank transfers, GL 2020 = PESONet transfers still queued, GL 4010 = fees,
 GL 2030 / 5010 = savings and savings interest, **GL 1030 = unpaid Instant Loan principal** and
 **GL 4020 = interest collected on loan repayments** (checks `LOAN-1`, `LOAN-2`), GL 2040 = bill

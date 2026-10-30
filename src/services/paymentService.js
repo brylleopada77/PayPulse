@@ -124,4 +124,4 @@ async function handlePaymentCallback(rawBody, signature, payload, { beforeCredit
   });
 }
 
-module.exports = { handlePaymentCallback, sign };
+module.exports = { handlePaymentCallback, sign, verifySignature };

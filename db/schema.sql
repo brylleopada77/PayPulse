@@ -716,3 +716,26 @@ CREATE TABLE IF NOT EXISTS load_purchases (
   created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_load_purchases_user ON load_purchases (user_id, created_at);
+
+-- =====================================================================================
+-- Over-the-counter (OTC) cash-in: a 12-digit payment code the customer pays at a partner
+-- (pawnshop, convenience store, mall, pharmacy). The partner confirms the payment and the wallet
+-- is credited once (a DEPOSIT from SYS-EXTERNAL-FUNDING: the partner remits the cash to PayPulse's
+-- bank). The counter fee is paid to the partner on top of the amount, so it never enters this ledger.
+-- =====================================================================================
+
+CREATE TABLE IF NOT EXISTS otc_cash_in_codes (
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER     NOT NULL REFERENCES users (id),
+  partner_code   TEXT        NOT NULL,
+  reference      CHAR(12)    NOT NULL UNIQUE CHECK (reference ~ '^[0-9]{12}$'),
+  amount_cents   BIGINT      NOT NULL CHECK (amount_cents > 0),
+  fee_cents      BIGINT      NOT NULL DEFAULT 0 CHECK (fee_cents >= 0),
+  status         TEXT        NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PAID', 'EXPIRED')),
+  expires_at     TIMESTAMPTZ NOT NULL,
+  paid_at        TIMESTAMPTZ,
+  partner_txn_id TEXT,
+  transaction_id INTEGER     UNIQUE REFERENCES transactions (id),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_otc_cash_in_codes_user ON otc_cash_in_codes (user_id, created_at);

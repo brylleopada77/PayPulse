@@ -1,6 +1,7 @@
 const { pool } = require('../db/pool');
 const { findBank } = require('./banks');
 const { findBiller } = require('./billers');
+const { findPartner } = require('./otcPartners');
 const telcos = require('./telcos');
 const { nextCutoff } = require('./pesonetService');
 const { notFound } = require('../utils/errors');
@@ -91,6 +92,22 @@ async function getReceipt(userId, transactionId) {
   }
 
   if (type === 'DEPOSIT') {
+    // Over-the-counter cash-in: paid in cash at a partner, with its 12-digit code
+    const otc = await pool.query('SELECT partner_code, reference, fee_cents FROM otc_cash_in_codes WHERE transaction_id = $1', [id]);
+    if (otc.rows[0]) {
+      const { partner_code: code, reference, fee_cents: counterFee } = otc.rows[0];
+      return {
+        ...receipt,
+        title: 'Cash-in Successful',
+        amount: fromCents(mine.amount_cents),
+        fee: fromCents(0),
+        total: fromCents(mine.amount_cents),
+        sender: { name: `${findPartner(code)?.name ?? code} (over the counter)`, account: reference.replace(/(\d{4})(?=\d)/g, '$1 ') },
+        recipient: party(mine),
+        bankName: 'PayPulse',
+        otc: { partnerCode: code, reference, counterFee: fromCents(Number(counterFee)) },
+      };
+    }
     const { rows } = await pool.query('SELECT payment_id FROM payments WHERE transaction_id = $1', [id]);
     return {
       ...receipt,
