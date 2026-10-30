@@ -42,6 +42,10 @@ test.describe('OTC cash-in: partners and fees', () => {
     expect(byCode.BAYAD.feeLabel).toBe('Free');
     expect(byCode.ROBINSONS.feeLabel).toBe('Free');
     expect(byCode.RDPAWNSHOP).toMatchObject({ logo: null, badge: { initials: 'RD' } });
+    // current logos from Wikipedia (Alfamart's red and yellow wordmark, not the old blue icon)
+    expect(byCode.UNCLEJOHNS.logo).toBe('/img/otc/unclejohns.png');
+    expect(byCode.TAMBUNTING.logo).toBe('/img/otc/tambunting.png');
+    expect(byCode.ALFAMART.logo).toBe('/img/otc/alfamart.png');
     for (const p of body.partners) {
       if (!p.logo) continue;
       const img = await request.get(p.logo);

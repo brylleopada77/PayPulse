@@ -2,8 +2,10 @@
  * Over-the-counter cash-in partners: where a customer can pay a PayPulse cash-in code in cash.
  * Each partner has a counter fee, paid by the customer on top of the amount and kept by the partner:
  *   FREE, FLAT (fixed pesos) or PERCENT (basis points of the amount, rounded to the centavo).
- * `logo` is self-hosted under public/img/otc (null: the initials badge is shown); badge colours
- * keep white initials at 4.5:1 or better.
+ * `logo` is self-hosted under public/img/otc (null: the initials badge is shown): the logo in the
+ * company's Wikipedia infobox (Robinsons: its "R" mark), or, where Wikipedia has none (Bayad Center,
+ * Generika), the website icon. RD Pawnshop, Villarica and Pay&Go have neither, so they show the badge.
+ * Badge colours keep white initials at 4.5:1 or better.
  */
 const CATEGORIES = {
   PAWNSHOP: 'Pawnshops & remittance',
@@ -26,15 +28,15 @@ const PARTNERS = [
   partner('BAYAD', 'Bayad Center', 'PAWNSHOP', FREE, 'bayad.png', 'BC', '#b34700'),
   partner('RDPAWNSHOP', 'RD Pawnshop', 'PAWNSHOP', ONE_PERCENT, null, 'RD', '#0b5d43'),
   partner('VILLARICA', 'Villarica Pawnshop', 'PAWNSHOP', ONE_PERCENT, null, 'VP', '#6d1f7a'),
-  partner('TAMBUNTING', 'Tambunting', 'PAWNSHOP', ONE_PERCENT, null, 'TB', '#1d5c9c'),
+  partner('TAMBUNTING', 'Tambunting', 'PAWNSHOP', ONE_PERCENT, 'tambunting.png', 'TB', '#1d5c9c'),
   partner('7ELEVEN', '7-Eleven (CLiQQ)', 'STORE', FLAT_15, '7eleven.png', '7E', '#00704a'),
-  partner('UNCLEJOHNS', "Uncle John's", 'STORE', FLAT_15, null, 'UJ', '#b3261e'),
-  partner('ALFAMART', 'Alfamart', 'STORE', FLAT_15, 'alfamart.ico', 'AM', '#1a4fa0'),
+  partner('UNCLEJOHNS', "Uncle John's", 'STORE', FLAT_15, 'unclejohns.png', 'UJ', '#b3261e'),
+  partner('ALFAMART', 'Alfamart', 'STORE', FLAT_15, 'alfamart.png', 'AM', '#1a4fa0'),
   partner('PAYANDGO', 'Pay&Go / TouchPay', 'STORE', FLAT_15, null, 'PG', '#5b2a86'),
   partner('SM', 'SM Bills Payment', 'MALL', FLAT_15, 'sm.png', 'SM', '#0033a0'),
-  partner('ROBINSONS', 'Robinsons Dept. Store', 'MALL', FREE, 'robinsons.jpg', 'RB', '#c8102e'),
+  partner('ROBINSONS', 'Robinsons Dept. Store', 'MALL', FREE, 'robinsons.png', 'RB', '#c8102e'),
   partner('PUREGOLD', 'Puregold', 'MALL', FLAT_15, 'puregold.png', 'PU', '#7a5c00'),
-  partner('WALTERMART', 'Waltermart', 'MALL', FLAT_15, 'waltermart.webp', 'WM', '#b3003c'),
+  partner('WALTERMART', 'Waltermart', 'MALL', FLAT_15, 'waltermart.png', 'WM', '#b3003c'),
   partner('MERCURY', 'Mercury Drug', 'PHARMACY', FLAT_15, 'mercury.png', 'MD', '#c8102e'),
   partner('WATSONS', 'Watsons', 'PHARMACY', FLAT_15, 'watsons.png', 'WA', '#00707a'),
   partner('GENERIKA', 'Generika', 'PHARMACY', FLAT_15, 'generika.ico', 'GE', '#1a5c9c'),
