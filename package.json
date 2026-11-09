@@ -10,6 +10,7 @@
     "db:init": "node scripts/init-db.js",
     "db:check": "tsx tests/helpers/db-check.ts",
     "test:api": "playwright test",
+    "test:e2e": "playwright test --project=ui",
     "test:report": "playwright show-report",
     "test:concurrency": "k6 run tests/load/concurrency-test.js && node scripts/assert-ledger.js",
     "db:assert-ledger": "node scripts/assert-ledger.js",
