@@ -1,30 +1,22 @@
-# PayPulse: a QA automation showcase built around a realistic e-wallet
+# PayPulse
+
+**A production-style Philippine e-wallet and core-banking engine, built to be tested hard.**
 
 [![PayPulse QA Pipeline](https://github.com/brylleopada77/PayPulse/actions/workflows/qa-pipeline.yml/badge.svg)](https://github.com/brylleopada77/PayPulse/actions/workflows/qa-pipeline.yml)
+[![Deploy](https://github.com/brylleopada77/PayPulse/actions/workflows/deploy-render.yml/badge.svg)](https://github.com/brylleopada77/PayPulse/actions/workflows/deploy-render.yml)
+[![Live demo](https://img.shields.io/badge/demo-live-0052FF?logo=render&logoColor=white)](https://paypulse-4cqi.onrender.com)
+[![API docs](https://img.shields.io/badge/OpenAPI_3-Swagger_UI-85EA2D?logo=swagger&logoColor=black)](https://paypulse-4cqi.onrender.com/api-docs)
+
+![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
+![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+![JavaScript](https://img.shields.io/badge/Frontend-vanilla_JS-F7DF1E?logo=javascript&logoColor=black)
+![Socket.IO](https://img.shields.io/badge/Socket.IO-4-010101?logo=socketdotio&logoColor=white)
+![ISO 20022](https://img.shields.io/badge/ISO_20022-pacs.008.001.08-5A2D82)
 ![Playwright](https://img.shields.io/badge/Playwright-418_tests-2EAD33?logo=playwright&logoColor=white)
 ![k6](https://img.shields.io/badge/k6-load_%26_concurrency-7D64FF?logo=k6&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-tests-3178C6?logo=typescript&logoColor=white)
+![axe-core](https://img.shields.io/badge/a11y-WCAG_2.2_AA-663399)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
-![GitHub Actions](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)
-
-PayPulse is a **production-style fintech e-wallet and core-banking simulation** with a dual purpose:
-
-1. **A modern e-wallet experience**, inspired by Philippine digital banks such as MariBank and Maya:
-   send money, pay bills, instant loans, a virtual Visa, savings, an iOS-style glass UI with a floating
-   dock, dark mode and real-time notifications.
-2. **A core-banking backend built to be tested hard**: an immutable **double-entry general ledger**,
-   ISO 20022 payment messages, compliance rules and end-of-day reconciliation, so every test can check
-   not only *what the API said* but *whether the books still balance*.
-
-I built it to demonstrate senior QA work end to end: a product worth testing, a **test strategy
-across five layers**, a **concurrency bug the automation found, proved and now guards** (fixed with row-level locks), and a
-**CI pipeline** that runs everything on every push. (All money is play money; banks, billers and the
-card network are mocks.)
-
-> **418 Playwright tests · 2 k6 scenarios · 3 ledger/reconciliation gates · all green in CI**
-> (the race condition the tests caught is fixed and now a hard gate: see [the race condition](#the-bug-the-tests-were-built-to-catch)).
 
 | | | | |
 |:--:|:--:|:--:|:--:|
@@ -33,303 +25,351 @@ card network are mocks.)
 
 ---
 
-## What this project demonstrates
+## Contents
 
-| Area | What I did | Where |
-|------|------------|-------|
-| **Test strategy** | API, browser E2E, chaos/resilience, visual regression, load/concurrency and accounting checks, each answering a different risk | [Testing strategy](#testing-strategy) |
-| **Finding and fixing a real bug** | Concurrency tests and k6 reproduced an overdraft race (wallet driven to **-₱200**); row-level locking fixed it and the same tests now gate every build | [QA_NOTES.md](QA_NOTES.md) |
-| **Proving a fix pattern** | k6 shows `Idempotency-Key` makes 30 duplicate sends move money **exactly once** | `tests/load/idempotent-transfer.js` |
-| **Financial correctness** | Every test can assert the ledger: debits = credits, wallets = GL 2010, end-of-day reconciliation with 20 control checks | `tests/helpers/db.ts`, `scripts/reconcile-eod.js` |
-| **Test design** | Every test creates its own users, so 418 tests run **fully in parallel** without shared state or ordering | `tests/helpers/api.ts` |
-| **Tuning, not just writing tests** | Visual regression first missed a 28px→8px dock change; I tightened the threshold and proved it now fails on the regression and stays stable over repeated runs | `playwright.config.ts` |
-| **CI/CD** | GitHub Actions: PostgreSQL service container, migrations, Playwright, k6, ledger gates, HTML report + videos as artifacts | [CI pipeline](#ci-pipeline) |
-
----
-
-## Testing strategy
-
-```mermaid
-flowchart TB
-  subgraph L1["API: 347 tests (25 suites)"]
-    a1[auth, MPIN, OTP, lockouts] --- a2[transfers, limits, AML]
-    a2 --- a3[bills, loans, cards, savings]
-    a3 --- a4[receipts, notifications, realtime] --- a5[ISO 20022 pacs.008] --- a6[OpenAPI contract]
-  end
-  subgraph L2["Browser E2E + chaos: 29 tests"]
-    b1[Pay Bills ₱995 net] --- b2[Loan drawdown] --- b3[Locked card 403] --- b4[503 drops, DB locks, retries] --- b5[Chaos Engine 500s, ISO inspector]
-  end
-  subgraph L3["Visual regression: 19 snapshots"]
-    v1[glass dock: 5 viewports x 3 states + dark glass]
-  end
-  subgraph L3b["Accessibility: 19 tests"]
-    x1[axe-core WCAG 2.2 AA: 12 screens x light/dark] --- x2[keyboard: focus trap, tabs]
-  end
-  subgraph L4["Load & concurrency: k6"]
-    k1[row lock: 1 of 10] --- k2[idempotency]
-  end
-  subgraph L5["Accounting gates"]
-    g1[ledger integrity] --- g2[system ledger] --- g3[EOD reconciliation]
-  end
-  L1 --> L2 --> L3 --> L3b --> L4 --> L5
-```
-
-| Layer | Tool | Count | Risk it covers |
-|-------|------|------:|----------------|
-| API | Playwright `request` | 347 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, other users' data), money math in centavos |
-| Browser E2E | Playwright + Chrome | 28 | Real customer journeys: Cash In over the counter (19 partners, category pills, the 12-digit code with its ITF barcode and 24-hour countdown, paid by the partner webhook), Refresh shows the pulsing PayPulse logo, then the new balance, the Bank Transfer form (5 numbered steps; a 2-column grid of the 19 banks / e-wallets by category, no dropdown, no inner scrollbar; logos, badge fallback, mouse + keyboard), the InstaPay / PESONet channel picker and the ₱50,000 InstaPay cap warning, Pay Bills (net **₱995.00** after ₱5 cashback), ₱10,000 loan drawdown, locked virtual card → **403 CARD_FROZEN**, live toast on incoming money, Buy Load (tap a telco logo to jump to its promos; logos on the brand chips and every promo card), the Chaos Engine fault toast and recovery, the ISO 20022 Message Inspector (XML + Copy Payload) |
-| Chaos / resilience | Playwright + `x-chaos-*` headers | 5 | 503 drops before/after the server acts, exhausted retries, 2-second DB locks: the UI retries safely and **no money is duplicated or lost** |
-| Visual regression | `toHaveScreenshot` | 19 | The glassmorphic iOS dock and Home layout on iPhone SE, iPhone 15, Pixel 7, iPad mini and desktop, plus the dark glass theme |
-| Accessibility | `@axe-core/playwright` | 19 | WCAG 2.0 / 2.1 / 2.2 A + AA on login, Home, Send, the Bank Transfer picker (closed and open), Cash In (partners, amount, payment code), Pay Bills, Buy Load, receipt + ISO inspector, notifications, profile, logout and the QA panel, in **light and dark**; keyboard-only login, dialog focus trap / focus return, ARIA tabs |
-| API contract | OpenAPI 3 + Playwright | 4 | Every Express route is documented at `/api-docs` and every documented operation exists; `$ref`s resolve; documented GETs answer with a documented status |
-| Postman collection | Postman / newman | 72 requests | Every endpoint chained end to end (register → fund → send, OTP, idempotent replay, bank, bills, load, savings, loan, cards, QR, profile, negative cases); ~100 assertions; generated from the OpenAPI document |
-| Load / concurrency | k6 1.3 | 2 | Row locking (10 identical simultaneous transfers: exactly 1 succeeds, then the ledger assertion) and the idempotency guarantee; both are hard gates |
-| Accounting | Node + SQL | 3 | Debits = credits, total system cash = balances + fees + reserves (also run automatically after every Playwright run), GL control accounts vs. sub-ledgers at end of day |
-
-**Design choices that keep the suite trustworthy**
-
-- **Isolation:** tests never share users or rely on order; `fullyParallel: true`; locally `retries: 0`, on CI one retry only to record a video, and a test that needs it is reported as **flaky** (it gets fixed, not hidden). Screenshots on failure, videos on the first retry.
-- **Assert the money, not just the status:** most money-moving tests check balances *and* the ledger.
-- **Deterministic time:** a guarded `paypulse.allow_time_travel` session setting lets tests age transactions (anti-spam windows, "yesterday") without sleeping.
-- **Contract-level errors:** every error has a stable `code`, so tests assert on meaning, not wording.
-- **Real-time safety:** live notifications come from PostgreSQL `LISTEN/NOTIFY`, delivered only on commit. A test proves a refused payment announces nothing.
+1. [Executive summary and tech stack](#1-executive-summary-and-tech-stack)
+2. [Core features](#2-core-features)
+3. [Setup and installation](#3-setup-and-installation)
+4. [Architecture and data flow](#4-architecture-and-data-flow)
+5. [Testing strategy](#5-testing-strategy)
+6. [The bug the tests were built to catch](#6-the-bug-the-tests-were-built-to-catch)
+7. [CI/CD pipeline](#7-cicd-pipeline)
+8. [Repository map and further docs](#8-repository-map-and-further-docs)
 
 ---
 
-## The bug the tests were built to catch
+## 1. Executive summary and tech stack
 
-`POST /api/transfers` used to read the sender's balance **without a lock**, then check and write: a
-classic check-then-act race, shipped on purpose as a target for the automation. The tests found it,
-proved it, and now guard the fix.
+PayPulse is a full-stack **fintech e-wallet and core-banking simulation** inspired by Philippine
+digital banks such as Maya and MariBank. It has two goals:
 
-| Evidence | Before the fix | After (row-level locking) |
-|----------|----------------|---------------------------|
-| k6: 10 parallel ₱30 transfers from a ₱100 wallet | **10 succeeded**, wallet at **-₱200** (total money unchanged: the ledger can't create money) | 3 succeed, wallet at ₱10.00 |
-| k6: 10 identical ₱60 transfers from ₱100 | (several succeeded) | **exactly 1** succeeds, 9 × `422 INSUFFICIENT_FUNDS`, ledger assertion passes |
-| A burst past the anti-spam rule (3 per 10 s) and AML velocity | all passed: every request read "0 so far" | counted one at a time: 3 pass, 7 × `429`; velocity holds open their alert |
-| End-of-day reconciliation | `OD-1` flagged the overdrawn wallets | `OD-1` clean |
+- **A product worth testing.** Send money, bank transfers over InstaPay and PESONet, over-the-counter
+  cash-in at 19 partners, Pay Bills, Buy Load, instant loans, a virtual Visa card, a savings vault,
+  real-time notifications and an iOS-style glass UI with a dark theme.
+- **A backend that can prove it is correct.** An immutable **double-entry general ledger**,
+  **ISO 20022** payment messages, compliance rules and end-of-day reconciliation. Every test can check
+  not only *what the API answered* but *whether the books still balance*.
 
-<img src="docs/images/report-k6-race.png" width="640" alt="k6 report from before the fix: overspent and overdrawn thresholds failed">
+It is my senior QA portfolio piece: a **test strategy across six layers (418 Playwright tests)**, a
+**real concurrency bug that the automation found, proved and now guards**, and a **CI/CD pipeline**
+that runs everything on every push and deploys to production on merge.
 
-**The fix** ([`src/services/walletLock.js`](src/services/walletLock.js)): every payment out of a wallet
-(Express Send, Bank Transfer, Pay Bills, Buy Load, card payments) runs in **one transaction** that first
-locks the wallet row with `SELECT … FOR UPDATE`, then reads the balance, re-runs the AML and limit checks
-**on the same connection**, and posts the double-entry journal; any failed check rolls everything back.
-An AML hold found under the lock opens its compliance alert *after* the rollback. Root cause,
-reproduction, fix and the data remediation (`npm run db:remediate-overdrafts`) are in
-**[QA_NOTES.md](QA_NOTES.md)**. The concurrency tests, the k6 gate and the overdraft check are hard gates in CI.
+> All money is play money. Banks, billers, OTC partners and the card network are mocks.
 
-### Accessibility: what axe found and how it was fixed
+| Layer | Technology | Used for |
+|-------|------------|----------|
+| **Frontend** | HTML, CSS, vanilla JavaScript (no framework, no build step) | Mobile-first iOS glass UI, design tokens, generated dark theme, accessible dialogs |
+| **Backend** | Node.js 24, Express 5 | REST API with a middleware chain (auth, idempotency, chaos, AML, limits) |
+| **Database** | PostgreSQL 17, `pg` driver | Double-entry ledger, `SELECT … FOR UPDATE` row locks, advisory locks, immutability triggers, `LISTEN/NOTIFY` |
+| **Payments messaging** | ISO 20022 `pacs.008.001.08` | FI-to-FI credit transfer for every bank transfer, as JSON and XML |
+| **Real-time** | Socket.IO 4 | JWT-authenticated, one room per user, events only on commit |
+| **Security** | jsonwebtoken, bcryptjs, AES-256-GCM, HMAC-SHA256 | Sessions, MPIN and password hashing, card encryption, signed webhooks |
+| **Test automation** | Playwright 1.64 + TypeScript, axe-core, newman | API, browser E2E, chaos, visual regression, accessibility, Postman collection |
+| **Load / concurrency** | k6 | Row-lock and idempotency scenarios as hard CI gates |
+| **Infrastructure** | Docker Compose, GitHub Actions, Render | Local stack, CI with a PostgreSQL service container, auto-deploy on merge |
 
-The first axe-core run found **real WCAG 2.2 AA violations**, all fixed in the same change and now guarded by `tests/a11y`:
-
-| Finding | Fix |
-|---------|-----|
-| Muted captions `#64748b` on the blue tints: 4.23:1 | `--muted: #576579` (5.27:1) |
-| White on the dark-mode accent `#3d7bff`: 3.84:1 | dark `--accent: #2b66f6` (4.85:1) |
-| White on the red unread badges `#e5484d`: 3.91:1 | `#cd2b31` (5.27:1) |
-| Green "free" / success text `#0e9f6e`: 3.01:1 | `--success: #047857` (4.88:1) |
-| QA panel unreadable in dark mode (1.62:1) | the dark theme generator leaves the always-dark dev panel alone |
-| History rows: `<li role="button">` inside `<ul>` | a real `<button>` inside each `<li>` |
-| Accessible names not matching visible text (profile, bell "9+", Instant Loan) | names include the visible text |
-| Radio inputs inside `role="tablist"` (Buy Load) | `role="radiogroup"` |
+> **Why vanilla JS?** The UI is deliberately framework-free, so the test suite targets plain,
+> semantic HTML (roles, labels, native radios and `<dialog>`) and nothing is hidden behind a
+> component library. The visual style uses hand-written CSS design tokens, not Tailwind.
 
 ---
 
-## Senior QA engineering highlights
+## 2. Core features
 
-### 1. Concurrency and double-spend protection
+### 2.1 Real-time e-wallet and bank transfers (InstaPay and PESONet routing)
 
-Three independent safeguards, each proven by tests:
+| Feature | How it works |
+|---------|--------------|
+| **Express Send** | Wallet to wallet in real time, MPIN-protected, OTP for transfers above ₱1,000, live "Received ₱…" toast for the recipient |
+| **Bank Transfer** | 19 destinations (major banks, digital banks, e-wallets) in a 2-column logo grid, 5 numbered steps, ₱15.00 transaction fee |
+| **Rail routing** | A per-destination **routing table** says which rails each institution accepts: every one is on **InstaPay**; **PESONet** (batch) reaches the major banks only. A PESONet transfer to an e-wallet is refused, and the UI marks that option *Not supported* |
+| **InstaPay** | Real time, up to **₱50,000** per transfer (`INSTAPAY_LIMIT_EXCEEDED` above it, with a warning in the form). The `pacs.008` is settled at once |
+| **PESONet** | No per-transfer cap. Funds move to **GL 2020 PESONet Clearing**, the `pacs.008` is `QUEUED`, and a batch worker settles it at the next cut-off |
+| **ISO 20022 inspector** | `GET /api/v1/transactions/:id/iso20022` returns the message. The receipt's *ISO 20022 Message Inspector* tab shows highlighted XML with *Copy Payload* |
+| **Real-time notifications** | PostgreSQL `LISTEN/NOTIFY` → Socket.IO. Events are sent only after commit, so a rolled-back payment never announces itself |
 
-| Safeguard | How it works | Proven by |
-|-----------|--------------|-----------|
-| **The ledger can't create money** | Balances are never stored; they are `SUM(credits − debits)` over an append-only ledger. Every journal must balance before it is written, and triggers block `UPDATE`/`DELETE`. A race can at worst *overdraw* a wallet, never mint money. | `money_created_cents == 0` in k6, ledger checks |
-| **Row-level locks** | Money-moving services lock before they check: `SELECT … FOR UPDATE` on the wallet (Express Send, Bank Transfer, Pay Bills, Buy Load, with the limit and AML checks re-run under the lock), card + wallet (card payments), both accounts in id order (savings, so two moves can't deadlock), the user row + a partial unique index (one open loan), and `pg_advisory_xact_lock` per user (top-ups). Done with the `pg` driver inside one transaction. | parallel-request tests: 10 × ₱60 from ₱100 → exactly 1 succeeds (transfers, bank, bills, load); k6 gate |
-| **Idempotency keys** | `Idempotency-Key` stores the first answer; retries get it back (`Idempotent-Replayed: true`), a concurrent duplicate gets `409 IDEMPOTENCY_IN_PROGRESS`. | k6: 30 sends, **1** transfer |
+### 2.2 OTC cash-in and remittance partners
 
-`POST /api/transfers` was the one deliberate gap until the automation caught it ([above](#the-bug-the-tests-were-built-to-catch)).
+Cash in over the counter at **19 partners in 4 categories**:
 
-### 2. Chaos engineering and resilience
+| Category | Partners |
+|----------|----------|
+| Pawnshops and remittance | Cebuana Lhuillier, M Lhuillier, Palawan Express, Bayad Center, RD Pawnshop, Villarica, Tambunting |
+| Stores | 7-Eleven (CLiQQ), Uncle John's, Alfamart, Pay&Go / TouchPay |
+| Malls | SM Bills Payment, Robinsons Dept. Store, Puregold, Waltermart |
+| Pharmacies | Mercury Drug, Watsons, Generika, Southstar Drug |
 
-| Fault | How it is injected | What the tests assert |
-|-------|--------------------|-----------------------|
-| **3-second network latency** | QA Sandbox switch "Simulate 3s Network Latency": every authenticated API call of that user waits 3 s (`requireAuth`) | every call takes at least 3 s and still succeeds; the QA controls themselves stay fast |
-| **Forced HTTP 500** | QA Sandbox "Trigger HTTP 500 Error": the next money-moving request fails with `500 INTERNAL_ERROR` (`details.simulated: true`) | a clean `500`, nothing debited or recorded, and the switch turns itself off (transfers, top-ups, bills, loans) |
-| **Dropped responses (503)** | `x-chaos-mode` headers: drop **before** the server acts, or **after** it acted (the answer is lost) | the UI retries with the same Idempotency-Key, shows "Retrying (n/3)…", and the money moves **exactly once** |
-| **Database lock contention** | `x-chaos-fault: db-lock` holds a real row lock on the wallet for 2 s | the UI shows it is waiting and completes correctly |
-| **Random HTTP 500 fault injection** | **Chaos Engine** switch in the QA panel (`x-chaos-fault: error-500`, rate 20%): transfers, bank transfers, top-ups, bills and load fail with `500 CHAOS_FAULT_INJECTED` **before** they run; other requests are untouched | a glass "⚠️ Chaos Engine: Server Fault Injected. Retrying transaction…" toast, automatic retries with the same Idempotency-Key, "recovered", and the transfer in the ledger **exactly once** |
-| **Header latency** | `x-chaos-latency-ms: N` (max 10 s) on any request | the request is delayed by N ms and still succeeds |
+**The payment-code engine:**
+
+1. The customer picks a partner and an amount (₱100 to ₱50,000). The fee follows the partner's rule: free, ₱15 flat or 1%.
+2. PayPulse issues a **12-digit reference with a Luhn check digit** (`1234-5678-9012`), valid for **24 hours**, with at most 5 pending codes per user (advisory-locked).
+3. The ticket shows the code as an **ITF (Interleaved 2 of 5) barcode** rendered in SVG, plus a live countdown.
+4. The partner confirms payment with an **HMAC-signed webhook** (`POST /api/webhooks/otc`, `X-PayPulse-Signature`).
+5. The confirmation locks the code row (`FOR UPDATE`), then checks it:
+   - a replayed confirmation returns `duplicate: true` and no money moves;
+   - an expired code returns `410 CODE_EXPIRED`;
+   - a wrong amount returns `409 AMOUNT_MISMATCH`.
+6. If it passes, the deposit is posted to the ledger. The open ticket polls and flips to *Paid*.
+
+> PayPulse supports **inbound** cash-in at remittance and pawnshop counters. It does not send outbound remittances.
+
+### 2.3 Enterprise banking engine
+
+| Safeguard | How it works |
+|-----------|--------------|
+| **Double-entry general ledger** | Balances are never stored. They are `SUM(credits − debits)` over an append-only ledger with a chart of accounts (GL 1010 Cash … 5020 Cashback Expense). Every journal must balance before it is written, and triggers block `UPDATE` and `DELETE`. |
+| **Row-level locking** | Every payment out of a wallet runs in one transaction. It locks the wallet with `SELECT … FOR UPDATE`, re-reads the balance, re-runs limit and AML checks on the same connection, then posts the journal. Savings moves lock both accounts in id order, so they cannot deadlock. Top-ups and OTC codes use `pg_advisory_xact_lock` per user. |
+| **Idempotency** | An `Idempotency-Key` stores the first answer, and retries get it back (`Idempotent-Replayed: true`). A concurrent duplicate gets `409 IDEMPOTENCY_IN_PROGRESS`. |
+| **Compliance** | Daily limit of ₱50,000 (KYC Level 1) or ₱100,000 (Level 2). Anti-spam: at most 3 transfers in 10 s (`429`). AML holds for transfers above ₱500,000 or more than 5 in a minute. |
+| **Authentication** | 6-digit MPIN, bcrypt-hashed, locked after 5 wrong tries. 30-second single-use OTP bound to the recipient and amount. JWT sessions revoked by a password reset. |
+| **End-of-day reconciliation** | 20 control checks of GL accounts against their sub-ledgers (wallets, savings, loans, settlement, PESONet clearing, OTC cash-in, ISO 20022 status), written to an audit log |
+
+Also on the same ledger:
+
+- **Pay Bills:** 23 billers with ₱5 cashback.
+- **Buy Load:** 6 telcos and 21 promos, with the network detected from the number prefix.
+- **Instant Loans:** a ₱50,000 line.
+- **Virtual Visa:** the card number is AES-256-GCM encrypted and the CVV is never stored.
+- **PayPulse Save:** 6% p.a. with daily interest.
+
+### 2.4 QA engineering and resilience
+
+| Capability | What it proves |
+|------------|----------------|
+| **Playwright E2E** | Real customer journeys in Chrome: OTC cash-in with barcode and webhook, bank transfer with rail rules, Pay Bills net ₱995.00, loan drawdown, locked card `403 CARD_FROZEN`, Buy Load telco shortcuts |
+| **Chaos fault injection** | `x-chaos-*` headers and a QA-panel **Chaos Engine**: 503 drops before or after the server acts, 2 s DB row locks, 3 s latency, and random 20% HTTP 500s. The UI retries with the same Idempotency-Key, and **money moves exactly once**. |
+| **Automated ledger invariant checks** | [`scripts/assert-ledger.js`](scripts/assert-ledger.js) runs after **every** Playwright run (`globalTeardown`) and after k6: debits = credits, all balances sum to zero, the trial balance holds, no wallet is overdrawn, and total system cash = user balances + fees + reserves |
+| **Concurrency gates** | 10 identical ₱60 transfers from a ₱100 wallet: **exactly 1** succeeds. 30 duplicate sends with one key: **1** transfer. |
+| **Accessibility** | axe-core WCAG 2.2 AA on every screen and dialog, in light and dark, plus keyboard focus-trap checks |
+| **Contract** | Every Express route is in the OpenAPI 3 document and vice versa. The Postman collection (72 requests) is generated from it and run with newman. |
 
 Chaos and sandbox tools are **admin-only** and exist only when the server runs with `QA_SANDBOX=true`.
 
-### 3. Automated ledger assertion
+---
 
-[`scripts/assert-ledger.js`](scripts/assert-ledger.js) runs **automatically at the end of every
-Playwright run** (`globalTeardown`, [`tests/global-teardown.ts`](tests/global-teardown.ts)) and again in CI
-after k6. It proves that money is **conserved** across the whole system:
+## 3. Setup and installation
 
-$$
-\underbrace{\text{top-ups} - \text{bank payouts} + \text{QA adjustments} + \text{interest} + \text{loans (net)} - \text{bill \& card spend (net of cashback)}}_{\text{Total System Cash}}
-= \sum \text{User Balances} + \text{Collected Fees} + \text{Reserves (PESONet pending)}
-$$
+**Requirements:** Node.js 20+ (24 recommended), PostgreSQL (17 is used in CI) and Google Chrome (the browser tests use
+the installed Chrome). Docker is optional.
 
-It also asserts `SUM(debit) - SUM(credit) = 0` over every ledger entry, that **all balances (users +
-system accounts) sum to zero**, the **trial balance** holds, **every transaction balances**, and **no
-customer wallet is overdrawn**. Any failure fails the run (also run right after the k6 concurrency test:
-`npm run test:concurrency`). The end-of-day job ([`scripts/reconcile-eod.js`](scripts/reconcile-eod.js)) goes further
-with 20 checks of each GL control account against its sub-ledger (wallets, savings, loans, biller and
-card settlement, fees, PESONet clearing, ISO 20022 message status) and writes an audit log.
+### Option A: Node + local PostgreSQL
+
+```bash
+git clone https://github.com/brylleopada77/PayPulse.git
+cd PayPulse
+
+npm install                 # install dependencies
+cp .env.example .env        # then set DATABASE_URL to your PostgreSQL database
+npm run db:init             # apply db/schema.sql (re-runnable migration)
+npm run dev                 # start the API + web app with auto-reload on http://localhost:3000
+```
+
+Open **http://localhost:3000** and create an account. Your MPIN is shown once. To use *Add money* and
+the QA Sandbox, make yourself an admin:
+
+```bash
+npm run admin:set -- you@example.com ADMIN
+```
+
+### Option B: Docker
+
+```bash
+docker compose up --build   # app + PostgreSQL 17; the schema is applied automatically
+docker compose exec app node scripts/set-role.js you@example.com ADMIN
+```
+
+### Running the tests
+
+With the app running in another terminal:
+
+```bash
+npm run test:e2e            # browser E2E + chaos/resilience in Chrome (Playwright "ui" project)
+npm run test:api            # all 418 Playwright tests: api, ui, a11y, visual (+ ledger check at the end)
+npx playwright test --project=a11y    # axe-core WCAG 2.2 AA scans only
+npm run test:report         # open the HTML report
+
+npm run test:concurrency    # k6 row-lock scenario + ledger assertion (requires k6)
+npm run postman:test        # Postman collection with newman
+npm run eod:reconcile       # end-of-day reconciliation (20 control checks)
+```
+
+Visual baselines are per OS. After an intended UI change, run
+`npx playwright test --project=visual --update-snapshots`.
+
+| Script | Purpose |
+|--------|---------|
+| `npm run dev` / `npm start` | Start the server (with or without file watching) |
+| `npm run db:init` / `npm run db:seed` | Apply the schema / seed QA accounts |
+| `npm run db:assert-ledger` | Ledger invariant check on demand |
+| `npm run pesonet:worker` | Settle queued PESONet batches |
+| `npm run theme:dark` | Regenerate `public/theme-dark.css` from `styles.css` (CI fails if stale) |
+| `npm run postman:build` | Regenerate the Postman collection from the OpenAPI document |
 
 ---
 
-## CI pipeline
+## 4. Architecture and data flow
 
-[`.github/workflows/qa-pipeline.yml`](.github/workflows/qa-pipeline.yml) runs on every push and pull request.
+### System architecture
+
+```mermaid
+flowchart LR
+  subgraph Client
+    UI[Web wallet<br>HTML · CSS · vanilla JS]
+  end
+  subgraph API["Express 5 API"]
+    MW[middleware<br>JWT · idempotency · chaos · limits · AML]
+    SVC[services<br>transfers · bank · OTC cash-in · bills · load · loans · cards · savings]
+    ISO[ISO 20022<br>pacs.008 builder]
+    RT[realtime.js<br>Socket.IO]
+  end
+  subgraph DB["PostgreSQL 17"]
+    LEDGER[(immutable<br>double-entry ledger)]
+    MSG[(payment_messages<br>otc_cash_in_codes)]
+  end
+  PARTNER[OTC partner<br>Cebuana · 7-Eleven · Bayad …]
+  JOBS[jobs<br>PESONet cut-off · daily interest · EOD reconciliation]
+
+  UI -- "REST + JWT" --> MW --> SVC
+  SVC --> ISO --> MSG
+  SVC -- "BEGIN · FOR UPDATE · COMMIT" --> LEDGER
+  PARTNER -- "HMAC webhook" --> SVC
+  LEDGER -- "pg_notify on commit" --> RT -- "live toast" --> UI
+  JOBS --> LEDGER
+```
+
+### Data flow: a bank transfer
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor C as Customer
+  participant UI as Web wallet
+  participant API as Express API
+  participant DB as PostgreSQL
+  participant SW as Payment switch
+  C->>UI: Bank, account, amount, rail, MPIN
+  UI->>API: POST /api/transfers/bank (Idempotency-Key)
+  API->>DB: BEGIN · SELECT wallet FOR UPDATE
+  API->>API: rail allowed? InstaPay ≤ ₱50,000? limits · AML
+  API->>DB: post journal (debit wallet, credit settlement or PESONet clearing, fee)
+  API->>SW: build ISO 20022 pacs.008.001.08
+  SW->>DB: store message (InstaPay SETTLED · PESONet QUEUED)
+  API->>DB: COMMIT → pg_notify
+  API-->>UI: 201 receipt (+ ISO 20022 inspector)
+  Note over DB,SW: PESONet worker settles QUEUED messages at the next cut-off
+```
+
+### Data flow: OTC cash-in
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor C as Customer
+  participant UI as Web wallet
+  participant API as Express API
+  participant DB as PostgreSQL
+  participant P as Partner counter
+  C->>UI: Choose partner + amount
+  UI->>API: POST /api/v1/cash-in/otc
+  API->>DB: advisory lock · insert 12-digit Luhn code (24 h)
+  API-->>UI: code + ITF barcode + countdown
+  C->>P: Pays cash, shows barcode
+  P->>API: POST /api/webhooks/otc (X-PayPulse-Signature)
+  API->>DB: SELECT code FOR UPDATE · check expiry, amount, duplicate
+  API->>DB: DEPOSIT journal · mark PAID · COMMIT
+  UI->>API: poll GET /api/v1/cash-in/otc/:reference
+  API-->>UI: PAID → balance updated
+```
+
+---
+
+## 5. Testing strategy
+
+| Layer | Tool | Count | Risk it covers |
+|-------|------|------:|----------------|
+| API | Playwright `request` | 347 | Business rules, validation, error contracts (`{ error: { code, message, details } }`), security (MPIN/OTP lockouts, PCI masking, access to other users' data), money math in centavos |
+| Browser E2E + chaos | Playwright + Chrome | 33 | Customer journeys, plus 503 drops, DB locks and retries with no duplicated or lost money |
+| Visual regression | `toHaveScreenshot` | 19 | The glass dock and Home layout on 5 viewports, plus the dark theme |
+| Accessibility | `@axe-core/playwright` | 19 | WCAG 2.2 AA on 12 screens in light and dark; keyboard-only flows |
+| API contract (part of the 347) | OpenAPI 3 + Playwright | 4 | Every route documented, every documented operation exists |
+| Postman | newman | 72 requests | Every endpoint chained end to end, ~100 assertions |
+| Load / concurrency | k6 | 2 | Row locking and idempotency as hard gates |
+| Accounting | Node + SQL | 3 | Ledger integrity, system ledger, EOD reconciliation |
+
+**Design choices that keep the suite trustworthy**
+
+- **Isolation.** Every test creates its own users, so all 418 run `fullyParallel` with no shared state.
+  Locally there are 0 retries. CI allows one retry only to capture a video, and a test that needs it is reported **flaky** and gets fixed.
+- **Assert the money, not just the status.** Money-moving tests check balances *and* ledger entries.
+- **Deterministic time.** A guarded `paypulse.allow_time_travel` setting lets tests age transactions without sleeping.
+- **Stable error codes.** Tests assert on `code`, not on wording.
+
+---
+
+## 6. The bug the tests were built to catch
+
+`POST /api/transfers` used to read the sender's balance **without a lock**, then check and write. That
+is a check-then-act race, shipped on purpose as a target for the automation.
+
+| Evidence | Before the fix | After (row-level locking) |
+|----------|----------------|---------------------------|
+| k6: 10 parallel ₱30 transfers from ₱100 | **10 succeeded**, wallet at **−₱200** (the ledger still could not create money) | 3 succeed, wallet at ₱10.00 |
+| k6: 10 identical ₱60 transfers from ₱100 | several succeeded | **exactly 1** succeeds, 9 × `422 INSUFFICIENT_FUNDS` |
+| Burst past anti-spam (3 per 10 s) | every request read "0 so far" | 3 pass, 7 × `429` |
+| End-of-day reconciliation | `OD-1` flagged overdrawn wallets | `OD-1` clean |
+
+<img src="docs/images/report-k6-race.png" width="640" alt="k6 report from before the fix: overspent and overdrawn thresholds failed">
+
+**The fix:** [`src/services/walletLock.js`](src/services/walletLock.js). The concurrency tests, the k6 gate and the
+overdraft check are now hard gates in CI. Root cause, reproduction, fix and data remediation are in
+**[QA_NOTES.md](QA_NOTES.md)**.
+
+---
+
+## 7. CI/CD pipeline
 
 ```mermaid
 flowchart LR
   A[push / PR] --> B[PostgreSQL 17<br>service container]
-  B --> C[npm ci +<br>db migrations]
+  B --> C[npm ci +<br>migrations]
   C --> D[start app +<br>seed QA accounts]
-  D --> E[Playwright<br>API · E2E · chaos · visual<br>+ ledger invariant check]
-  E --> F[k6 idempotency<br>gate]
-  F --> G[k6 concurrency<br>row lock + ledger assert]
-  G --> P[Postman collection<br>newman]
+  D --> E[Playwright<br>API · E2E · chaos · a11y · visual<br>+ ledger invariant check]
+  E --> F[k6 idempotency gate]
+  F --> G[k6 concurrency<br>+ ledger assert]
+  G --> P[newman<br>Postman collection]
   P --> H[ledger + EOD<br>reconciliation]
-  H --> I[artifacts:<br>HTML report, videos,<br>k6 reports, logs]
+  H --> I[artifacts: HTML report,<br>videos, k6 reports, logs]
   A --> J[Docker image<br>smoke test]
+  H -- "merge to main" --> K[Deploy to Render<br>+ health check]
 ```
 
-**Artifacts on every run:** `playwright-report` (HTML report; a screenshot of every failure and a
-video of every retried test), `test-results` (videos, traces, JUnit XML), `k6-and-logs` (k6 HTML/JSON reports, EOD
-audit log, app log). A summary table is posted to the run page.
+Every run publishes the Playwright HTML report (screenshots of every failure, videos of retried
+tests), traces and JUnit XML, the k6 reports, the EOD audit log and the app log.
 
 <img src="docs/images/report-playwright.png" width="640" alt="Playwright HTML report: all tests passed">
 
 ---
 
-## Key features
-
-### Financial engine
-
-| Feature | Details |
-|---------|---------|
-| **Double-entry general ledger** | Immutable journals, balances computed from entries, chart of accounts (GL 1010 cash … 5020 cashback expense), trial balance view |
-| **ISO 20022 messaging** | Every bank transfer produces a `pacs.008.001.08` FI-to-FI credit transfer; InstaPay settles instantly, PESONet in batches at the cut-off. `GET /api/v1/transactions/:id/iso20022` serialises any transfer, bill payment or load purchase from its ledger entries, shown in the receipt's **ISO 20022 Message Inspector** tab (highlighted XML, Copy Payload) |
-| **Instant Loans** | ₱50,000 pre-approved line, 3 / 6 / 12 months at 1.5% a month flat, MPIN to apply, interest-first repayments, GL 1030 / 4020 |
-| **Virtual Visa cards** | AES-256-GCM encrypted PAN, CVV derived and never stored, PCI-style masking, lock / unlock, online purchases (locked card → `403 CARD_FROZEN`) |
-| **Buy Load** | Prepaid top-up for Globe, TM, Smart, TNT, DITO and GOMO: network detected from the number prefix (brand chosen within Globe/TM and Smart/TNT, override for ported numbers), regular load ₱10–₱1,000 or promo packages, **₱5.00 cashback** on loads of ₱50 or more (max 3 a day), GL 2060 Telco Settlement |
-| **Pay Bills + cashback engine** | 23 Philippine billers in 5 categories; an automated **₱5.00 cashback** on bills of ₱100 or more (max 3 a day), posted as its own journal |
-| **PayPulse Save** | 6.00% p.a. savings vault with a daily interest job and fractional-centavo carry-over; every day's interest in the history |
-
-### Security and compliance
-
-| Control | Rule |
-|---------|------|
-| **MPIN** | Random 6-digit MPIN per user (bcrypt-hashed), valid 5 minutes; 5 wrong in a row lock transfers for 5 minutes; weak PINs (111111, 123456) rejected on change |
-| **2FA OTP** | One-time code for transfers above ₱1,000 (every transfer with SMS 2FA on): 30-second validity, 3 tries, single use, bound to recipient and amount |
-| **Daily limit** | **₱50,000** a day (KYC Level 1) / ₱100,000 (Level 2, Fully Verified), across Send, Bank Transfer, Pay Bills and card payments → `400 DAILY_LIMIT_EXCEEDED` |
-| **Anti-spam rate limit** | At most 3 transfers in any 10 seconds → `429 TOO_MANY_TRANSFERS` with `Retry-After` |
-| **AML holds** | A transfer above ₱500,000, or more than 5 in a minute, puts the account under review → `403 TRANSACTION_HELD_FOR_REVIEW` |
-| **Access control** | JWT sessions (revoked by a password reset), CUSTOMER / ADMIN roles; mock top-ups and QA tools are admin-only |
-
-### iOS glassmorphism UI and QA tooling
-
-- **Floating navigation dock** with a raised Scan & Pay button, frosted-glass cards and quick actions, and an **iOS dark glass** theme.
-- **Real-time WebSocket notifications** (Socket.IO): live toasts such as "Received ₱500.00 from Account …" and "🎉 Earned ₱5.00 Cashback!", a ringing bell with an unread count.
-- **QA Sandbox Controls** (admin): Reset DB State, a **Chaos Engine** (3 s latency, 20% random HTTP 500 fault injection with a glass toast and safe retries), Trigger HTTP 500 Error, freeze account, chaos mode, PESONet cut-off, compliance clear.
-- Notifications center, My Profile (KYC, linked accounts, Change MPIN, security toggles, help center), receipts with download.
-- **Brand theme:** "Royal Electric Blue" (Chase / PayPal style): #0052FF actions and balance card, light-cyan labels, a solid blue rate badge, and blue on deep navy in dark mode. All colours are CSS tokens at the top of `public/styles.css` (light and dark side by side); Sunset Orange, Obsidian & Emerald and Indigo palettes are included as ready-to-swap alternatives.
-- **Logo, "Pulse Card":** a Royal Blue payment card (the UI tokens `--accent` → `--accent-strong`) with a glowing heartbeat line and a cyan (`--accent-secondary`) dot, so it always matches the app theme. One SVG `<symbol>` in `index.html`, used in `sm` / `md` / `lg` sizes (`.pp-logo`) on the login screen, the header, every receipt (logo + watermark, also in the downloaded PNG, drawn from the same paths), the favicon and the animated loading screen.
-- **Appearance:** Light (default) / Dark / Auto in the profile; Auto follows the device live. `public/theme-dark.css` is generated from `styles.css` by `npm run theme:dark`; CI fails if it is stale.
-
-<img src="docs/images/notifications.png" width="190" alt="Notifications"> <img src="docs/images/profile.png" width="190" alt="Profile with KYC"> <img src="docs/images/pay-bills-summary.png" width="190" alt="Pay Bills summary"> <img src="docs/images/glass-dock.png" width="190" alt="Glass dock">
-
----
-
-## Architecture
-
-```mermaid
-flowchart LR
-  UI[Web wallet<br>HTML/CSS/JS] -- REST + JWT --> API[Express 5 API]
-  UI <-- Socket.IO --> RT[realtime.js]
-  API --> SVC[services<br>transfers · bills · loans · cards · KYC]
-  SVC --> LEDGER[(PostgreSQL 17<br>immutable double-entry ledger)]
-  LEDGER -- "pg_notify on commit" --> RT
-  JOBS[jobs: daily interest,<br>PESONet cut-off, EOD] --> LEDGER
-```
-
-Balances are never stored: they are computed from an append-only ledger (`UPDATE`/`DELETE` are blocked by triggers),
-mapped to a chart of accounts (GL 1010 cash … 5020 cashback expense).
-
-### Tech stack
-
-| Layer | Technology | Used for |
-|-------|------------|----------|
-| **Backend** | Node.js 24, Express 5 | REST API, middleware chain (auth, idempotency, chaos, AML, limits) |
-| **Database** | PostgreSQL 17 with the `pg` driver | Double-entry ledger, explicit transactions and `SELECT … FOR UPDATE` row locks, advisory locks, triggers, `LISTEN/NOTIFY` |
-| **Real-time** | Socket.IO 4 | JWT-authenticated, one room per user |
-| **Security** | jsonwebtoken, bcryptjs, AES-256-GCM, HMAC | Sessions, MPIN / password hashing, card encryption, signed payment webhooks |
-| **Frontend** | HTML, CSS, vanilla JavaScript | iOS glass UI, dark theme, mobile-first layout |
-| **Test automation** | TypeScript, Playwright 1.64 | API tests, browser E2E, chaos / resilience, visual regression (`toHaveScreenshot`) |
-| **Load / concurrency** | k6 1.3 | Row-lock concurrency and idempotency scenarios with HTML reports |
-| **Infrastructure** | Docker Compose, GitHub Actions | Local stack; CI with a PostgreSQL service container and published reports |
-
----
-
-## Quick start
-
-**1. Start PayPulse with Docker** (app + PostgreSQL; the schema is applied automatically):
-
-```bash
-docker compose up --build              # or the older CLI: docker-compose up --build
-# detached, waiting until healthy:  docker compose up -d --build --wait
-```
-
-Open **http://localhost:3000**, create an account (your MPIN is shown once) and try Send, Pay Bills
-or Instant Loan. To use Add money and the QA Sandbox, make your account an admin:
-`docker compose exec app node scripts/set-role.js you@example.com ADMIN`.
-
-**2. Run the tests** (against the running app):
-
-```bash
-npm ci
-npx playwright install ffmpeg            # for test videos (tests use your installed Chrome)
-npx playwright test                       # all 418: projects api, ui, visual, a11y (+ ledger check at the end)
-npx playwright test --project=ui          # E2E + chaos in a real browser
-npx playwright test --project=a11y        # axe-core WCAG 2.2 AA scans + keyboard checks
-npx playwright show-report                # open the HTML report (each axe scan is attached as JSON)
-
-docker compose run --rm k6                                         # k6 concurrency (row lock: 1 of 10)
-docker compose run --rm k6 run /scripts/idempotent-transfer.js     # k6 idempotency
-npm run db:check && node scripts/assert-ledger.js && npm run eod:reconcile
-```
-
-Without Docker, use a local PostgreSQL, `npm run db:init` and `npm start` (see the reference docs).
-Visual baselines are per OS; after an intended UI change run `npx playwright test --project=visual --update-snapshots`.
-
----
-
-## Repository map
+## 8. Repository map and further docs
 
 ```
-src/            Express API: routes, services (ledger, transfers, bills, loans, cards, KYC…), realtime.js
-public/         web wallet (vanilla JS, iOS glass design)
+src/            Express API: routes, services (ledger, transfers, OTC, ISO 20022, bills, loans, cards…), realtime.js
+public/         web wallet (vanilla JS, iOS glass design, generated dark theme)
 db/schema.sql   schema, chart of accounts, immutability + notify triggers (re-runnable migration)
-tests/api/      347 API tests (25 suites)            tests/e2e/      customer journeys in Chrome
-tests/visual/   visual regression + baselines         tests/load/     k6: concurrency + idempotency (+ HTML reports)
-tests/a11y/     axe-core accessibility + keyboard     src/docs/       OpenAPI 3 document (served at /api-docs)
-tests/resilience.spec.ts  chaos tests                 scripts/        ledger assertion, EOD reconciliation, workers
+tests/api/      347 API tests (25 suites)              tests/e2e/      customer journeys in Chrome
+tests/a11y/     axe-core accessibility + keyboard       tests/visual/   visual regression + baselines
+tests/load/     k6 concurrency + idempotency            tests/resilience.spec.ts  chaos tests
+scripts/        ledger assertion, EOD reconciliation, PESONet worker, generators
+postman/        generated collection + local/live environments
 ```
 
-## More documentation
-
-- **[QA_NOTES.md](QA_NOTES.md):** the race condition: root cause, reproduction, the row-locking fix and the data remediation.
-- **Interactive API docs:** **`/api-docs`** on the running app (Swagger UI: Authorize with your JWT and *Try it out*), raw OpenAPI 3 at `/api-docs/openapi.json`. Live: https://paypulse-4cqi.onrender.com/api-docs
-- **Postman:** import [`postman/PayPulse.postman_collection.json`](postman/PayPulse.postman_collection.json) and an environment ([live](postman/PayPulse-live.postman_environment.json) or [local](postman/PayPulse-local.postman_environment.json)), then run **0. Setup** or the whole collection. With an empty `email` Setup registers a new customer; on the live server fill in your ADMIN account's `email` / `password` so Setup can add play money. Tokens, a fresh MPIN, transaction ids and pacing for the anti-spam / AML rules are handled by the collection's scripts. Regenerate after an API change with `npm run postman:build`; `npm run postman:test` runs it with newman.
-- **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md):** full API reference, business rules, error codes, chart of accounts, every feature in detail.
+- **[QA_NOTES.md](QA_NOTES.md):** the race condition, from root cause to remediation.
+- **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md):** full API reference, business rules, error codes and chart of accounts.
+- **Interactive API docs:** [`/api-docs`](https://paypulse-4cqi.onrender.com/api-docs). Swagger UI lets you authorize with your JWT and *Try it out*.
+- **Postman:** import [`postman/PayPulse.postman_collection.json`](postman/PayPulse.postman_collection.json)
+  with the [local](postman/PayPulse-local.postman_environment.json) or [live](postman/PayPulse-live.postman_environment.json) environment, then run **0. Setup**.
 
 ---
 
-*Built by **Brylle Opada** as a QA automation portfolio project. All balances are play money; billers, banks and card network are mocks.*
+*Built by **Brylle Opada** as a QA automation and fintech engineering portfolio project. All balances are
+play money; banks, billers, OTC partners and the card network are mocks.*
